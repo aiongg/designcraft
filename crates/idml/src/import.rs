@@ -158,6 +158,9 @@ fn parse_point(s: Option<&str>) -> Option<Point> {
     (v.len() >= 2).then(|| Point::new(v[0], v[1]))
 }
 
+/// InDesign's corner size where a file gives a corner shape without one.
+const INDESIGN_CORNER_SIZE: f64 = 12.0;
+
 /// IDML tint (percent, `-1` = default) → 0..1.
 fn tint(v: Option<f64>) -> Option<f32> {
     v.map(|t| if t < 0.0 { 1.0 } else { (t / 100.0) as f32 })
@@ -1850,7 +1853,7 @@ impl<'r> Importer<'r> {
         let mut corners = CornerOptions::default();
         for (i, n) in cn.iter().enumerate() {
             let shape = e.get(&format!("{n}CornerOption")).or(legacy.0).map(names::corner_in).unwrap_or_default();
-            let size = e.num(&format!("{n}CornerRadius")).or(legacy.1).unwrap_or(0.0);
+            let size = e.num(&format!("{n}CornerRadius")).or(legacy.1).unwrap_or(INDESIGN_CORNER_SIZE);
             corners.corners[i] = Corner { shape, size };
         }
         if !corners.is_none() {

@@ -236,6 +236,215 @@ fn keep_lines_mode_defaults_to_start_and_end() {
     }
 }
 
+type Resolved = (designcraft_doc::ParaProps, designcraft_doc::CharProps);
+
+/// (IDML attribute, InDesign's default as IDML writes it, another value, the resolved field,
+/// its value for InDesign's default, its value for the other value).
+type AttrRow = (&'static str, &'static str, &'static str, fn(&Resolved) -> String, String, String);
+
+macro_rules! attr_rows {
+    ($($attr:literal: $default:literal => $dv:expr, $other:literal => $ov:expr, |$r:ident| $field:expr;)*) => {
+        vec![$(($attr, $default, $other, (|$r: &Resolved| format!("{:?}", $field)) as fn(&Resolved) -> String, format!("{:?}", $dv), format!("{:?}", $ov)),)*]
+    };
+}
+
+/// InDesign's defaults for a new document's [No Paragraph Style], for every paragraph and
+/// character attribute the importer reads (except the font family: see below).
+fn indesign_text_defaults() -> Vec<AttrRow> {
+    use designcraft_doc::{Align, Capitalization, Composer, Digits, GridAlign, Leading, ListType, Position, StartParagraph, TextDirection};
+    attr_rows! {
+        "Justification": "LeftAlign" => Align::Left, "CenterAlign" => Align::Center, |r| r.0.align;
+        "ParagraphDirection": "LeftToRightDirection" => TextDirection::LeftToRight, "RightToLeftDirection" => TextDirection::RightToLeft, |r| r.0.direction;
+        "LeftIndent": "0" => 0.0, "6" => 6.0, |r| r.0.left_indent;
+        "RightIndent": "0" => 0.0, "6" => 6.0, |r| r.0.right_indent;
+        "FirstLineIndent": "0" => 0.0, "6" => 6.0, |r| r.0.first_line_indent;
+        "LastLineIndent": "0" => 0.0, "6" => 6.0, |r| r.0.last_line_indent;
+        "SpaceBefore": "0" => 0.0, "6" => 6.0, |r| r.0.space_before;
+        "SpaceAfter": "0" => 0.0, "6" => 6.0, |r| r.0.space_after;
+        "DropCapLines": "0" => 0, "3" => 3, |r| r.0.drop_cap_lines;
+        "DropCapCharacters": "0" => 0, "1" => 1, |r| r.0.drop_cap_chars;
+        "GridAlignment": "None" => GridAlign::None, "AlignToBaseline" => GridAlign::AllLines, |r| r.0.grid_align;
+        "Composer": "HL Composer" => Composer::Paragraph, "HL Single" => Composer::SingleLine, |r| r.0.composer;
+        "Hyphenation": "true" => true, "false" => false, |r| r.0.hyphenate;
+        "HyphenateWordsLongerThan": "5" => 5, "7" => 7, |r| r.0.hyph_min_word;
+        "HyphenateAfterFirst": "2" => 2, "3" => 3, |r| r.0.hyph_after_first;
+        "HyphenateBeforeLast": "2" => 2, "3" => 3, |r| r.0.hyph_before_last;
+        "HyphenateLadderLimit": "3" => 3, "0" => 0, |r| r.0.hyph_limit;
+        "HyphenationZone": "36" => 36.0, "18" => 18.0, |r| r.0.hyph_zone;
+        "HyphenateCapitalizedWords": "true" => true, "false" => false, |r| r.0.hyph_capitalized;
+        "HyphenateLastWord": "true" => true, "false" => false, |r| r.0.hyph_last_word;
+        "HyphenateAcrossColumns": "true" => true, "false" => false, |r| r.0.hyph_across_column;
+        "HyphenWeight": "5" => 0.5, "9" => 0.9, |r| r.0.hyph_weight;
+        "MinimumWordSpacing": "80" => 0.8, "70" => 0.7, |r| r.0.word_space_min;
+        "DesiredWordSpacing": "100" => 1.0, "90" => 0.9, |r| r.0.word_space_desired;
+        "MaximumWordSpacing": "133" => 1.33, "150" => 1.5, |r| r.0.word_space_max;
+        "MinimumLetterSpacing": "0" => 0.0, "-5" => -0.05, |r| r.0.letter_space_min;
+        "DesiredLetterSpacing": "0" => 0.0, "1" => 0.01, |r| r.0.letter_space_desired;
+        "MaximumLetterSpacing": "0" => 0.0, "5" => 0.05, |r| r.0.letter_space_max;
+        "MinimumGlyphScaling": "100" => 1.0, "97" => 0.97, |r| r.0.glyph_scale_min;
+        "DesiredGlyphScaling": "100" => 1.0, "101" => 1.01, |r| r.0.glyph_scale_desired;
+        "MaximumGlyphScaling": "100" => 1.0, "103" => 1.03, |r| r.0.glyph_scale_max;
+        "AutoLeading": "120" => 1.2, "100" => 1.0, |r| r.0.auto_leading;
+        "SingleWordJustification": "FullyJustified" => Align::FullyJustified, "LeftAlign" => Align::Left, |r| r.0.single_word_justify;
+        "KeepWithNext": "0" => 0, "1" => 1, |r| r.0.keep_with_next;
+        "KeepLinesTogether": "false" => false, "true" => true, |r| r.0.keep_lines_together;
+        "KeepAllLinesTogether": "false" => false, "true" => true, |r| r.0.keep_all_lines;
+        "KeepFirstLines": "2" => 2, "3" => 3, |r| r.0.keep_first;
+        "KeepLastLines": "2" => 2, "3" => 3, |r| r.0.keep_last;
+        "StartParagraph": "Anywhere" => StartParagraph::Anywhere, "NextColumn" => StartParagraph::NextColumn, |r| r.0.start_paragraph;
+        "BulletsAndNumberingListType": "NoList" => ListType::None, "BulletList" => ListType::Bullets, |r| r.0.list_type;
+        "BalanceRaggedLines": "NoBalancing" => false, "FullyBalanced" => true, |r| r.0.balance_ragged;
+        "RuleAbove": "false" => false, "true" => true, |r| r.0.rule_above.on;
+        "RuleBelow": "false" => false, "true" => true, |r| r.0.rule_below.on;
+        "ParagraphShadingOn": "false" => false, "true" => true, |r| r.0.shading_on;
+        "ParagraphBorderOn": "false" => false, "true" => true, |r| r.0.border_on;
+        "FontStyle": "Regular" => "Regular", "Bold" => "Bold", |r| r.1.font_style;
+        "PointSize": "12" => 12.0, "9" => 9.0, |r| r.1.size;
+        "Leading": "Auto" => Leading::Auto, "14" => Leading::Points(14.0), |r| r.1.leading;
+        "KerningMethod": "$ID/Metrics" => designcraft_doc::Kerning::Metrics, "$ID/Optical" => designcraft_doc::Kerning::Optical, |r| r.1.kerning;
+        "Tracking": "0" => 0.0, "20" => 20.0, |r| r.1.tracking;
+        "HorizontalScale": "100" => 1.0, "90" => 0.9, |r| r.1.h_scale;
+        "VerticalScale": "100" => 1.0, "90" => 0.9, |r| r.1.v_scale;
+        "BaselineShift": "0" => 0.0, "2" => 2.0, |r| r.1.baseline_shift;
+        "Skew": "0" => 0.0, "10" => 10.0, |r| r.1.skew;
+        "FillColor": "Color/Black" => "[Black]", "Swatch/None" => "[None]", |r| r.1.fill;
+        "FillTint": "-1" => 1.0, "50" => 0.5, |r| r.1.fill_tint;
+        "StrokeColor": "Swatch/None" => "[None]", "Color/Black" => "[Black]", |r| r.1.stroke;
+        "StrokeTint": "-1" => 1.0, "50" => 0.5, |r| r.1.stroke_tint;
+        "StrokeWeight": "1" => 1.0, "2" => 2.0, |r| r.1.stroke_weight;
+        "Capitalization": "Normal" => Capitalization::Normal, "AllCaps" => Capitalization::AllCaps, |r| r.1.capitalization;
+        "Position": "Normal" => Position::Normal, "Superscript" => Position::Superscript, |r| r.1.position;
+        "Underline": "false" => false, "true" => true, |r| r.1.underline;
+        "StrikeThru": "false" => false, "true" => true, |r| r.1.strikethrough;
+        "Ligatures": "true" => true, "false" => false, |r| r.1.ligatures;
+        "NoBreak": "false" => false, "true" => true, |r| r.1.no_break;
+        "OTFContextualAlternate": "true" => true, "false" => false, |r| designcraft_doc::otf::is_on(&r.1.otf_features, "calt");
+        "DigitsType": "DefaultDigits" => Digits::Default, "ArabicDigits" => Digits::Arabic, |r| r.1.digits;
+        "AppliedLanguage": "$ID/English: USA" => "English: USA", "$ID/German: 2006 Reform" => "German: 2006 Reform", |r| r.1.language;
+    }
+}
+
+/// [No paragraph style] with `root` attributes and `Body`, based on it, with `body` attributes.
+fn text_styles(root: &str, body: &str) -> String {
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<idPkg:Styles xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="16.0">
+  <RootParagraphStyleGroup Self="rp">
+    <ParagraphStyle Self="ParagraphStyle/$ID/[No paragraph style]" Name="$ID/[No paragraph style]" {root}/>
+    <ParagraphStyle Self="ParagraphStyle/Body" Name="Body" {body}>
+      <Properties><BasedOn type="object">ParagraphStyle/$ID/[No paragraph style]</BasedOn></Properties>
+    </ParagraphStyle>
+  </RootParagraphStyleGroup>
+</idPkg:Styles>"#
+    )
+}
+
+fn resolve_body(root: &str, body: &str) -> Resolved {
+    let d = import_idml_with(&fixture_with_styles(&text_styles(root, body)), &|_| None).unwrap();
+    d.styles.resolve_para_style("Body")
+}
+
+/// Text attributes an IDML file leaves unset are InDesign's defaults; written ones win, and a
+/// file that writes every default (as InDesign's own exports do) imports the same.
+#[test]
+fn absent_text_attributes_take_indesign_defaults() {
+    let rows = indesign_text_defaults();
+    let all = |pick: fn(&AttrRow) -> &str| rows.iter().map(|r| format!(r#"{}="{}""#, r.0, pick(r))).collect::<Vec<_>>().join(" ");
+    let (defaults, others) = (all(|r| r.1), all(|r| r.2));
+    let omitted = resolve_body("", "");
+    let written = resolve_body(&defaults, "");
+    for (attr, _, _, field, want, _) in &rows {
+        assert_eq!(field(&omitted), *want, "{attr} omitted");
+        assert_eq!(field(&written), *want, "{attr} written as InDesign's default");
+    }
+    assert_eq!(omitted, written);
+    for (root, body) in [(others.as_str(), ""), ("", others.as_str())] {
+        let r = resolve_body(root, body);
+        for (attr, _, _, field, _, want) in &rows {
+            assert_eq!(field(&r), *want, "{attr} written on the {}", if root.is_empty() { "style" } else { "root" });
+        }
+    }
+    // Product difference: InDesign's default face isn't available, so unset fonts are DesignCraft's.
+    assert_eq!(omitted.1.font_family, designcraft_doc::CharProps::default().font_family);
+}
+
+/// Page items, frames, tables and preferences an IDML file leaves unset are InDesign's defaults
+/// for a new document.
+#[test]
+fn absent_item_and_document_attributes_take_indesign_defaults() {
+    use designcraft_doc::{Cap, FirstBaseline, Join, StrokeAlign, VerticalJustification};
+    use designcraft_geom::corners::CornerShape;
+    let path = |x: f64| {
+        let pts: String = [(x, 0.0), (x, 50.0), (x + 50.0, 50.0), (x + 50.0, 0.0)]
+            .iter()
+            .map(|(x, y)| format!(r#"<PathPointType Anchor="{x} {y}" LeftDirection="{x} {y}" RightDirection="{x} {y}"/>"#))
+            .collect();
+        format!(
+            r#"<Properties><PathGeometry><GeometryPathType PathOpen="false"><PathPointArray>{pts}</PathPointArray></GeometryPathType></PathGeometry></Properties>"#
+        )
+    };
+    let designmap = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Document xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="16.0" Self="d">
+<Story Self="s1"><ParagraphStyleRange><CharacterStyleRange><Table Self="tb"><Row Self="r0" Name="0"/><Column Self="c0" Name="0"/><Cell Self="ce" Name="0:0"/></Table></CharacterStyleRange></ParagraphStyleRange></Story>
+<Spread Self="sp1"><Page Self="p1"/>
+<Rectangle Self="plain">{}</Rectangle>
+<Rectangle Self="round" TopLeftCornerOption="RoundedCorner" TopRightCornerOption="RoundedCorner" BottomLeftCornerOption="RoundedCorner" BottomRightCornerOption="RoundedCorner">{}</Rectangle>
+<Rectangle Self="legacy" CornerOption="RoundedCorner">{}</Rectangle>
+<Rectangle Self="sized" TopLeftCornerOption="RoundedCorner" TopLeftCornerRadius="5">{}</Rectangle>
+<TextFrame Self="tf" ParentStory="s1">{}</TextFrame>
+</Spread>
+</Document>"#,
+        path(0.0),
+        path(100.0),
+        path(200.0),
+        path(300.0),
+        path(400.0)
+    );
+    let d = import_idml_with(&zip_files(&[("designmap.xml", &designmap)]), &|_| None).unwrap();
+    // Document Setup, margins and columns, grids, Advanced Type, transparency, black.
+    let s = &d.settings;
+    assert_eq!((s.page_width, s.page_height, s.facing_pages, s.intent), (612.0, 792.0, true, designcraft_doc::Intent::Print));
+    assert_eq!((s.bleed, s.slug), ([0.0; 4], [0.0; 4]));
+    let page = &d.spreads[0].pages[0];
+    assert_eq!((page.margins.top, page.margins.bottom, page.margins.inside, page.margins.outside), (36.0, 36.0, 36.0, 36.0));
+    assert_eq!((page.columns.count, page.columns.gutter), (1, 12.0));
+    assert_eq!((s.baseline_grid.start, s.baseline_grid.increment, s.baseline_grid.view_threshold), (36.0, 12.0, 0.75));
+    assert_eq!((s.grid.horizontal, s.grid.vertical, s.grid.subdivisions, s.grid.in_back), (72.0, 72.0, 8, true));
+    let a = &s.advanced_type;
+    assert_eq!((a.superscript_size, a.superscript_position, a.subscript_size, a.subscript_position), (58.3, 33.3, 58.3, 33.3));
+    assert_eq!((s.blend_space, s.overprint_black, s.keyboard_increment), (designcraft_doc::BlendSpace::Cmyk, true, 1.0));
+    // Fill, stroke, transparency, wrap and corners of a frame with no attributes.
+    let item = |n: usize| d.spreads[0].items[n].clone();
+    let plain = item(0);
+    assert!(plain.fill.is_none() && plain.stroke.is_none());
+    let st = &plain.stroke;
+    assert_eq!((st.weight, st.miter_limit, st.cap, st.join, st.align), (1.0, 4.0, Cap::Butt, Join::Miter, StrokeAlign::Center));
+    assert_eq!((plain.opacity, plain.blend, plain.wrap.mode), (1.0, designcraft_color::BlendMode::Normal, designcraft_doc::WrapMode::None));
+    assert!(plain.corners.is_none());
+    // A corner shape without a size: 12 pt.
+    for n in [1, 2] {
+        assert_eq!(item(n).corners.corners.map(|c| (c.shape, c.size)), [(CornerShape::Rounded, 12.0); 4], "item {n}");
+    }
+    assert_eq!(item(3).corners.corners[0].size, 5.0);
+    // Text Frame Options.
+    let tf = item(4);
+    let o = &tf.text_frame().unwrap().options;
+    assert_eq!((o.columns, o.gutter, o.inset, o.balance_columns, o.ignore_wrap), (1, 12.0, [0.0; 4], false, false));
+    assert_eq!((o.vertical_justification, o.first_baseline, o.first_baseline_min), (VerticalJustification::Top, FirstBaseline::Ascent, 0.0));
+    assert_eq!(o.auto_size, designcraft_doc::AutoSize::Off);
+    // Table and cell options.
+    let t = d.stories.values().flat_map(|s| s.tables.values()).next().unwrap();
+    assert_eq!((t.options.space_before, t.options.space_after, t.options.repeat_header), (4.0, -4.0, true));
+    assert_eq!((t.options.border.weight, t.options.border.color.as_str()), (1.0, "[Black]"));
+    assert_eq!((t.rows[0].mode, t.rows[0].height), (designcraft_doc::RowHeightMode::AtLeast, 3.0));
+    let c = t.cell(0, 0).unwrap();
+    assert_eq!((c.insets, c.vj, c.fill.as_str()), ([4.0; 4], VerticalJustification::Top, "[None]"));
+    for e in &c.strokes {
+        assert_eq!((e.weight, e.color.as_str(), e.tint, &e.kind), (1.0, "[Black]", 1.0, &designcraft_doc::StrokeType::Solid));
+    }
+}
+
 #[test]
 fn imports_hand_written_fixture() {
     let d = import_idml_with(&fixture(), &|_| None).unwrap();
