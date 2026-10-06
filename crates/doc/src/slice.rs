@@ -125,6 +125,59 @@ impl Story {
         self.rev += 1;
         end
     }
+
+    /// Append the whole of `other` as new paragraphs after this story's text (threading two
+    /// stories merges them this way). Its formatting, notes, endnotes, editorial notes, markers,
+    /// anchored objects and tables come along; footnotes, endnotes, editorial notes and tables get
+    /// ids that are free in this story. An empty story simply takes `other`'s content. Frames stay.
+    pub fn append_story(&mut self, mut other: Story) {
+        if other.text.is_empty() {
+            return;
+        }
+        if self.text.is_empty() {
+            let (id, frames, rev, link) = (self.id, std::mem::take(&mut self.frames), self.rev, self.link.take());
+            *self = Story { id, frames, rev: rev + 1, link, ..other };
+            return;
+        }
+        if !other.tables.is_empty() {
+            let first = self.tables.keys().max().copied().unwrap_or(0) + 1;
+            let mut ids = std::collections::HashMap::new();
+            for (new, (old, t)) in (first..).zip(std::mem::take(&mut other.tables)) {
+                let mut t = Arc::unwrap_or_clone(t);
+                t.id = new;
+                ids.insert(old, new);
+                self.tables.insert(new, Arc::new(t));
+            }
+            for p in &mut other.paras {
+                p.table = p.table.and_then(|id| ids.get(&id).copied());
+            }
+        }
+        self.text.push('\n');
+        self.text.push_str(&other.text);
+        // The paragraph end takes the last run's format.
+        if let Some(last) = self.chars.last_mut() {
+            last.len += 1;
+        }
+        self.chars.extend(other.chars.into_iter().filter(|r| r.len > 0));
+        self.paras.extend(other.paras);
+        for n in other.notes {
+            let id = self.next_note_id();
+            self.notes.push(Arc::new(crate::notes::Footnote { id, text: n.text.clone() }));
+        }
+        for n in other.endnotes {
+            let id = self.endnotes.iter().map(|x| x.id).max().unwrap_or(0) + 1;
+            self.endnotes.push(Arc::new(crate::notes::Footnote { id, text: n.text.clone() }));
+        }
+        for n in other.editorial {
+            let id = self.editorial.iter().map(|x| x.id).max().unwrap_or(0) + 1;
+            self.editorial.push(Arc::new(crate::endnotes::EditorialNote { id, ..(*n).clone() }));
+        }
+        self.anchors.extend(other.anchors);
+        self.xrefs.extend(other.xrefs);
+        self.index_refs.extend(other.index_refs);
+        self.objects.extend(other.objects);
+        self.rev += 1;
+    }
 }
 
 #[cfg(test)]
