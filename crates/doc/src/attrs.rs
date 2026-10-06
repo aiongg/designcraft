@@ -289,6 +289,8 @@ pub enum NestedUntil {
     ForcedLineBreak,
     EmSpace,
     EnSpace,
+    /// The paragraph's drop cap characters.
+    Dropcap,
     /// Any of these characters.
     Chars(String),
 }
@@ -562,8 +564,12 @@ attr_set! {
         last_line_indent: f64 = 0.0,
         space_before: f64 = 0.0,
         space_after: f64 = 0.0,
+        /// Drop cap: the paragraph's first `drop_cap_chars` characters (grapheme clusters) set
+        /// `drop_cap_lines` lines tall, in the character style `drop_cap_style` ("" or `[None]`: the
+        /// text's own formatting).
         drop_cap_lines: u32 = 0,
         drop_cap_chars: u32 = 0,
+        drop_cap_style: String = String::new(),
         /// Nested styles, in order from the paragraph start.
         nested_styles: Vec<NestedStyle> = Vec::new(),
         /// GREP styles: a character style for every match of a pattern (applied after nested).

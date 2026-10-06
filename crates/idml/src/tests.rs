@@ -560,3 +560,46 @@ fn vertical_story_orientation_round_trips() {
     let frame = back.spreads[0].items.iter().find_map(|i| i.text_frame()).unwrap();
     assert!(frame.options.vertical);
 }
+
+#[test]
+fn drop_caps_import_and_round_trip() {
+    // A style with a drop cap, its character style and a nested style through it; a paragraph
+    // overriding it locally.
+    let opener = r#"<ParagraphStyle Self="ParagraphStyle/Opener" Name="Opener" DropCapCharacters="1" DropCapLines="3">
+        <Properties><DropCapStyle type="object">CharacterStyle/Strong</DropCapStyle><AllNestedStyles type="list"><ListItem type="record">
+          <AppliedCharacterStyle type="object">CharacterStyle/Strong</AppliedCharacterStyle><Delimiter type="enumeration">Dropcap</Delimiter>
+          <Repetition type="long">1</Repetition><Inclusive type="boolean">true</Inclusive></ListItem></AllNestedStyles></Properties>
+      </ParagraphStyle>
+    </RootParagraphStyleGroup>"#;
+    let styles = STYLES.replace("</RootParagraphStyleGroup>", opener);
+    let story = r#"<?xml version="1.0" encoding="UTF-8"?>
+<idPkg:Story xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="16.0">
+  <Story Self="s1">
+    <ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/Opener" DropCapCharacters="2" DropCapLines="2" DropCapStyle="CharacterStyle/$ID/[No character style]">
+      <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]"><Content>Once upon a time</Content></CharacterStyleRange>
+    </ParagraphStyleRange>
+  </Story>
+</idPkg:Story>"#;
+    let bytes = zip_files(&[
+        ("designmap.xml", DESIGNMAP),
+        ("Resources/Graphic.xml", GRAPHIC),
+        ("Resources/Styles.xml", &styles),
+        ("Resources/Preferences.xml", PREFS),
+        ("MasterSpreads/MasterSpread_m1.xml", MASTER),
+        ("Spreads/Spread_sp1.xml", SPREAD),
+        ("Stories/Story_s1.xml", story),
+    ]);
+    let check = |d: &Document| {
+        let st = d.styles.para("Opener").unwrap();
+        assert_eq!((st.para.drop_cap_chars, st.para.drop_cap_lines), (Some(1), Some(3)));
+        assert_eq!(st.para.drop_cap_style.as_deref(), Some("Strong"));
+        let ns = st.para.nested_styles.clone().unwrap();
+        assert_eq!((ns[0].style.as_str(), &ns[0].until), ("Strong", &designcraft_doc::NestedUntil::Dropcap));
+        let p = &d.stories.values().find(|s| s.text.starts_with("Once")).unwrap().paras[0];
+        assert_eq!((p.para.drop_cap_chars, p.para.drop_cap_lines), (Some(2), Some(2)));
+        assert_eq!(p.para.drop_cap_style.as_deref(), Some(st::NO_CHAR_STYLE));
+    };
+    let d = import_idml_with(&bytes, &|_| None).unwrap();
+    check(&d);
+    check(&import_idml(&export_idml(&d)).unwrap());
+}

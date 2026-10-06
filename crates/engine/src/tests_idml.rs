@@ -251,3 +251,27 @@ fn named_lists_round_trip_through_idml() {
     assert_eq!(st.paras[0].para.list_name.as_deref(), Some("Steps"));
     assert_eq!(st.paras[0].para.start_at, Some(Some(5)));
 }
+
+#[test]
+fn type_para_sets_a_drop_cap_that_survives_idml() {
+    let mut s = Session::new();
+    s.execute("file.new", &json!({})).unwrap();
+    s.execute("style.character.create", &json!({"name": "Initial", "chars": {"fontStyle": "Bold"}})).unwrap();
+    let text = "Once upon a time there was a paragraph long enough to run beside its drop cap for a few lines and then some more.";
+    let r = s.execute("frame.create", &json!({"rect": [72, 72, 300, 400], "content": "text", "text": text})).unwrap();
+    let sid = r["story"].as_u64().unwrap();
+    s.execute("text.select", &json!({"story": sid, "anchor": 3, "focus": 3})).unwrap();
+    s.execute("type.para", &json!({"attrs": {"dropCapLines": 3, "dropCapChars": 1, "dropCapStyle": "Initial"}})).unwrap();
+    let d = s.doc().unwrap().doc.clone();
+    let cs = designcraft_compose::compose_story(&d, designcraft_doc::StoryId(sid), &Default::default());
+    let lines = &cs.frames[0].lines;
+    let dc = &lines[0].glyphs[0];
+    assert_eq!(dc.byte, 0);
+    assert!((lines[0].baseline + dc.y - lines[2].baseline).abs() < 1e-6, "on line 3's baseline");
+    assert!(lines[0].drop_cap.is_some_and(|b| b.end == 1));
+    let p = &d.story(designcraft_doc::StoryId(sid)).unwrap().paras[0].para;
+    assert_eq!((p.drop_cap_lines, p.drop_cap_chars, p.drop_cap_style.as_deref()), (Some(3), Some(1), Some("Initial")));
+    let back = designcraft_idml::import_idml(&designcraft_idml::export_idml(&d)).unwrap();
+    let p = &back.stories.values().find(|st| st.text.starts_with("Once")).unwrap().paras[0].para;
+    assert_eq!((p.drop_cap_lines, p.drop_cap_chars, p.drop_cap_style.as_deref()), (Some(3), Some(1), Some("Initial")));
+}

@@ -1150,6 +1150,10 @@ impl<'a> Ex<'a> {
         n!(space_after, "SpaceAfter");
         n!(drop_cap_lines, "DropCapLines");
         n!(drop_cap_chars, "DropCapCharacters");
+        if let Some(s) = &a.drop_cap_style {
+            let s = if s.is_empty() { designcraft_doc::NO_CHAR_STYLE } else { s.as_str() };
+            el.set("DropCapStyle", names::style_self("CharacterStyle", CHAR_BUILTINS, s));
+        }
         if let Some(g) = a.grid_align {
             match g {
                 designcraft_doc::GridAlign::None => el.set("GridAlignment", "None"),

@@ -156,7 +156,8 @@ impl StyleTable<'_> {
     }
 }
 
-/// Resolve and shape one paragraph.
+/// Resolve and shape one paragraph. Its drop cap ends at byte `drop.0` (`range.start` without
+/// one) and takes the character style `drop.1` ("" = none).
 pub(crate) fn shape_para(
     db: &FontDb,
     styles: &Styles,
@@ -170,13 +171,18 @@ pub(crate) fn shape_para(
     nested: &[designcraft_doc::NestedStyle],
     grep: &[designcraft_doc::GrepStyle],
     lines: &[(std::ops::Range<usize>, String)],
+    drop: (usize, &str),
 ) -> ShapedPara {
     let _ = pi;
     let mut glyphs = Vec::with_capacity(range.len());
-    // Nested line styles lie under nested and GREP styles (later overlays win).
+    // Nested line styles lie under nested and GREP styles, and the drop cap's style over them all
+    // (later overlays win).
     let mut overlays: Vec<(std::ops::Range<usize>, String)> = lines.to_vec();
     if !nested.is_empty() || !grep.is_empty() {
-        overlays.extend(crate::overlay::overlays(&story.text, range.clone(), nested, grep));
+        overlays.extend(crate::overlay::overlays(&story.text, range.clone(), nested, grep, drop.0));
+    }
+    if drop.0 > range.start && !drop.1.is_empty() && drop.1 != designcraft_doc::NO_CHAR_STYLE {
+        overlays.push((range.start..drop.0, drop.1.to_string()));
     }
     // Each run, cut where nested / GREP styles start and end.
     let mut segments: Vec<(usize, usize, Option<&str>, &designcraft_doc::CharFormat)> = Vec::new();

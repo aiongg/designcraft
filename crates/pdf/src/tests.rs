@@ -201,3 +201,15 @@ fn tables_export_cell_text() {
         assert!(text.contains(w), "{w} missing from {text:?}");
     }
 }
+
+#[test]
+fn drop_cap_text_extracts_in_order() {
+    let mut d = Document::new(&NewDocument::default());
+    let lid = d.default_layer();
+    let para = designcraft_doc::ParaAttrs { drop_cap_lines: Some(3), drop_cap_chars: Some(2), ..Default::default() };
+    let text = "Drop caps read in order with the rest of the paragraph, which runs on for a few lines beside the enlarged letters.";
+    d.add_text_frame(SpreadRef::Doc(0), Rect::new(36.0, 36.0, 236.0, 300.0), lid, text, ParaFormat { para, ..Default::default() }).unwrap();
+    let bytes = export_pdf(&d, &Cache::new(), &PdfOptions::default()).unwrap();
+    let flat: String = extract_text(&bytes)[0].split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(flat.starts_with("Drop caps read in order"), "{flat}");
+}

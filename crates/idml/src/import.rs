@@ -1156,6 +1156,7 @@ impl<'r> Importer<'r> {
         a.space_after = e.num("SpaceAfter");
         a.drop_cap_lines = u("DropCapLines");
         a.drop_cap_chars = u("DropCapCharacters");
+        a.drop_cap_style = e.prop("DropCapStyle").map(|r| self.char_style_ref(r.trim()));
         if let Some(g) = e.prop("GridAlignment") {
             a.grid_align = Some(if g == "None" {
                 GridAlign::None

@@ -597,6 +597,7 @@ pub fn nested_until_out(u: &designcraft_doc::NestedUntil) -> (&'static str, Stri
         N::ForcedLineBreak => e("ForcedLineBreak"),
         N::EmSpace => e("EmSpaces"),
         N::EnSpace => e("EnSpaces"),
+        N::Dropcap => e("Dropcap"),
         N::Chars(c) => ("string", c.clone()),
     }
 }
@@ -615,6 +616,7 @@ pub fn nested_until_in(ty: &str, v: &str) -> designcraft_doc::NestedUntil {
         "ForcedLineBreak" => N::ForcedLineBreak,
         "EmSpaces" => N::EmSpace,
         "EnSpaces" => N::EnSpace,
+        "Dropcap" => N::Dropcap,
         _ => N::Words,
     }
 }

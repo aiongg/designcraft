@@ -63,8 +63,9 @@ pub struct FontFace {
     pub typo_ascent: f64,
     /// Descender in font units (positive = down).
     pub descent: f64,
-    /// Cap height and x height in font units (estimated from the ascent when the font has no
-    /// plausible OS/2 values): the Cap Height and x Height first baseline offsets.
+    /// Cap height and x height in font units (without plausible OS/2 values, the cap height is the
+    /// top of the H, and either is estimated from the ascent): the Cap Height and x Height first
+    /// baseline offsets.
     pub cap_height: f64,
     pub x_height: f64,
     pub shaper: harfrust::ShaperData,
@@ -455,7 +456,13 @@ fn make_face(bytes: FontBytes, index: u32, family: String, style: String, coords
         ascent: m.ascent as f64,
         typo_ascent: typo_ascent(&f, &location, upem).unwrap_or(m.ascent as f64),
         descent: -(m.descent as f64),
-        cap_height: plausible(m.cap_height.map(f64::from), upem).unwrap_or(m.ascent as f64 * 0.72),
+        cap_height: plausible(m.cap_height.map(f64::from), upem)
+            .or_else(|| {
+                // No OS/2 cap height: the top of the H.
+                let gid = f.charmap().map('H')?;
+                plausible(f.glyph_metrics(Size::unscaled(), &location).bounds(gid).map(|b| b.y_max as f64), upem)
+            })
+            .unwrap_or(m.ascent as f64 * 0.72),
         x_height: plausible(m.x_height.map(f64::from), upem).unwrap_or(m.ascent as f64 * 0.5),
         shaper,
         coords,
