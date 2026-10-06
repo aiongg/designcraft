@@ -608,7 +608,8 @@ attr_set! {
         // Keeps
         keep_with_next: u32 = 0,
         keep_lines_together: bool = false,
-        keep_all_lines: bool = true,
+        /// All lines in paragraph (true) or at start/end of paragraph (false).
+        keep_all_lines: bool = false,
         keep_first: u32 = 2,
         keep_last: u32 = 2,
         start_paragraph: StartParagraph = StartParagraph::Anywhere,

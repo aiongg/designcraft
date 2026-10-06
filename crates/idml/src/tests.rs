@@ -194,6 +194,48 @@ fn fixture_with_story(story: &str) -> Vec<u8> {
     ])
 }
 
+fn fixture_with_styles(styles: &str) -> Vec<u8> {
+    zip_files(&[
+        ("designmap.xml", DESIGNMAP),
+        ("Resources/Graphic.xml", GRAPHIC),
+        ("Resources/Styles.xml", styles),
+        ("Resources/Preferences.xml", PREFS),
+        ("MasterSpreads/MasterSpread_m1.xml", MASTER),
+        ("Spreads/Spread_sp1.xml", SPREAD),
+        ("Stories/Story_s1.xml", STORY),
+    ])
+}
+
+/// Paragraph styles `Body` (based on the root) and `Loose` (no BasedOn), both with `attrs`.
+fn keep_styles(attrs: &str) -> String {
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<idPkg:Styles xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="16.0">
+  <RootParagraphStyleGroup Self="rp">
+    <ParagraphStyle Self="ParagraphStyle/$ID/[No paragraph style]" Name="$ID/[No paragraph style]" PointSize="12"/>
+    <ParagraphStyle Self="ParagraphStyle/Body" Name="Body" {attrs}>
+      <Properties><BasedOn type="object">ParagraphStyle/$ID/[No paragraph style]</BasedOn></Properties>
+    </ParagraphStyle>
+    <ParagraphStyle Self="ParagraphStyle/Loose" Name="Loose" {attrs}/>
+  </RootParagraphStyleGroup>
+</idPkg:Styles>"#
+    )
+}
+
+/// Keep Lines Together whose mode no style sets is InDesign's default: at start/end of paragraph.
+/// An explicit mode still wins.
+#[test]
+fn keep_lines_mode_defaults_to_start_and_end() {
+    let keep = r#"KeepLinesTogether="true" KeepFirstLines="2" KeepLastLines="2""#;
+    for (attrs, all) in [(keep.to_string(), false), (format!(r#"{keep} KeepAllLinesTogether="true""#), true)] {
+        let d = import_idml_with(&fixture_with_styles(&keep_styles(&attrs)), &|_| None).unwrap();
+        for name in ["Body", "Loose"] {
+            let (pp, _) = d.styles.resolve_para_style(name);
+            assert_eq!((pp.keep_lines_together, pp.keep_all_lines, pp.keep_first, pp.keep_last), (true, all, 2, 2), "{name}: {attrs}");
+        }
+    }
+}
+
 #[test]
 fn imports_hand_written_fixture() {
     let d = import_idml_with(&fixture(), &|_| None).unwrap();

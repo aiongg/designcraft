@@ -592,7 +592,11 @@ fn keep_lines_together_moves_the_paragraph() {
     let (mut d, sid, _) = keep_doc(n - 3, &[&long], h);
     let cs = compose_story(&d, sid, &ComposeOptions::default());
     assert!(column_of_para(&cs, n - 3).contains(&0));
-    d.story_mut(sid).unwrap().paras[n - 3].para.keep_lines_together = Some(true);
+    {
+        let p = &mut d.story_mut(sid).unwrap().paras[n - 3].para;
+        p.keep_lines_together = Some(true);
+        p.keep_all_lines = Some(true);
+    }
     let cs = compose_story(&d, sid, &ComposeOptions::default());
     assert!(column_of_para(&cs, n - 3).iter().all(|&c| c == 1));
 }
