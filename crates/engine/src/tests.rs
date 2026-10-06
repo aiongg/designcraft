@@ -537,3 +537,64 @@ fn commands_take_non_object_params_without_panicking() {
         assert!(r.is_ok(), "{p}: {r:?}");
     }
 }
+
+/// Drag a selection handle of item 0 on spread 0 from the edge point `at` by `by` (canvas units).
+fn drag_handle(s: &mut Session, at: designcraft_geom::Point, by: designcraft_geom::Vec2, v: ViewInfo) {
+    use designcraft_tools::{PointerEvent, PointerKind};
+    let p = s.layout().to_canvas(designcraft_doc::SpreadRef::Doc(0), at);
+    s.pointer(&PointerEvent::new(PointerKind::Down, p.x, p.y), v).unwrap();
+    s.pointer(&PointerEvent::new(PointerKind::Drag, p.x + by.x / 2.0, p.y + by.y / 2.0), v).unwrap();
+    s.pointer(&PointerEvent::new(PointerKind::Drag, p.x + by.x, p.y + by.y), v).unwrap();
+    s.pointer(&PointerEvent::new(PointerKind::Up, p.x + by.x, p.y + by.y), v).unwrap();
+}
+
+#[test]
+fn text_frame_resize_snaps_to_the_margins() {
+    use designcraft_geom::{Point, Vec2};
+    for zoom in [1.0, 0.5] {
+        let mut s = Session::new();
+        s.execute("file.newSample", &json!({})).unwrap();
+        let margin = s.doc().unwrap().doc.spreads[0].pages[0].margin_rect();
+        let (x0, y0) = (margin.x0 + 40.0, margin.y0 + 40.0);
+        s.execute("frame.create", &json!({"rect": [x0, y0, x0 + 200.0, y0 + 200.0], "content": "text"})).unwrap();
+        s.set_tool("selection");
+        let v = ViewInfo::at_zoom(zoom);
+        let b0 = s.doc().unwrap().doc.spreads[0].items.last().unwrap().bounds();
+        // Right handle to 1.5 pt short of the right margin.
+        drag_handle(&mut s, Point::new(b0.x1, b0.center().y), Vec2::new(margin.x1 - 1.5 - b0.x1, 0.0), v);
+        let b = s.doc().unwrap().doc.spreads[0].items.last().unwrap().bounds();
+        assert!((b.x1 - margin.x1).abs() < 1e-6, "zoom {zoom}: right edge {} not on the margin {}", b.x1, margin.x1);
+        // Bottom handle to 1.5 pt past the bottom margin.
+        drag_handle(&mut s, Point::new(b.center().x, b.y1), Vec2::new(0.0, margin.y1 + 1.5 - b.y1), v);
+        let b = s.doc().unwrap().doc.spreads[0].items.last().unwrap().bounds();
+        assert!((b.y1 - margin.y1).abs() < 1e-6, "zoom {zoom}: bottom edge {} not on the margin {}", b.y1, margin.y1);
+        // Top-left corner handle onto the top and left margins.
+        drag_handle(&mut s, Point::new(b.x0, b.y0), Vec2::new(margin.x0 + 1.0 - b.x0, margin.y0 - 1.0 - b.y0), v);
+        let b = s.doc().unwrap().doc.spreads[0].items.last().unwrap().bounds();
+        assert!((b.x0 - margin.x0).abs() < 1e-6 && (b.y0 - margin.y0).abs() < 1e-6, "zoom {zoom}: corner {b:?} not on the margins {margin:?}");
+    }
+}
+
+#[test]
+fn type_tool_frames_snap_to_the_margins() {
+    use designcraft_geom::Point;
+    use designcraft_tools::{PointerEvent, PointerKind};
+    let mut s = session();
+    let margin = s.doc().unwrap().doc.spreads[0].pages[0].margin_rect();
+    s.set_tool("type");
+    let v = ViewInfo::at_zoom(1.0);
+    let c = |s: &Session, x: f64, y: f64| s.layout().to_canvas(designcraft_doc::SpreadRef::Doc(0), Point::new(x, y));
+    // From 1.5 pt off the top-left margin corner to 1.5 pt off the right margin.
+    let a = c(&s, margin.x0 + 1.5, margin.y0 + 1.5);
+    let b = c(&s, margin.x1 - 1.5, margin.y0 + 101.5);
+    let before = s.doc().unwrap().doc.spreads[0].items.len();
+    s.pointer(&PointerEvent::new(PointerKind::Down, a.x, a.y), v).unwrap();
+    s.pointer(&PointerEvent::new(PointerKind::Drag, (a.x + b.x) / 2.0, b.y), v).unwrap();
+    s.pointer(&PointerEvent::new(PointerKind::Drag, b.x, b.y), v).unwrap();
+    s.pointer(&PointerEvent::new(PointerKind::Up, b.x, b.y), v).unwrap();
+    let items = &s.doc().unwrap().doc.spreads[0].items;
+    assert_eq!(items.len(), before + 1, "a frame was drawn");
+    let r = items.last().unwrap().bounds();
+    assert!((r.x0 - margin.x0).abs() < 1e-6 && (r.y0 - margin.y0).abs() < 1e-6, "press point {r:?} vs {margin:?}");
+    assert!((r.x1 - margin.x1).abs() < 1e-6, "right edge {} vs {}", r.x1, margin.x1);
+}

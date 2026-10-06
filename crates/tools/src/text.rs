@@ -5,7 +5,7 @@
 use designcraft_geom::Point;
 use serde_json::json;
 
-use crate::{Action, Cursor, Mods, PointerEvent, PointerKind, Tool, ToolContext, ToolKey, frame::drag_rect, rect_json, spread_json};
+use crate::{Action, Cursor, Mods, Overlay, PointerEvent, PointerKind, Tool, ToolContext, ToolKey, frame::snapped_drag_rect, rect_json, spread_json};
 
 #[derive(Default)]
 pub struct TypeTool {
@@ -17,6 +17,8 @@ pub struct TypeTool {
     /// A press on a table whose whole rows or columns are selected: (frame, press point in
     /// spread space) — a drag moves them, a click places the caret.
     cell_drag: Option<(u64, Point)>,
+    /// Snap guides while drawing a frame.
+    guides: Vec<Overlay>,
     /// The press selected a word, line, paragraph or story (several clicks): drags keep it.
     unit_selected: bool,
 }
@@ -90,7 +92,10 @@ impl Tool for TypeTool {
                     return vec![];
                 }
                 let Some((sr, sa)) = cx.layout.spread_at(a) else { return vec![] };
-                let r = drag_rect(sa, cx.layout.to_spread(sr, ev.pos), ev.mods);
+                // Drawn like the frame tools: the press point and the moving edges snap.
+                let sa = if cx.snap.any() { crate::snap::snap_point(cx, sr, sa).0 } else { sa };
+                let (r, guides) = snapped_drag_rect(cx, sr, sa, cx.layout.to_spread(sr, ev.pos), ev.mods);
+                self.guides = guides;
                 let mut out = vec![];
                 if !self.drawing {
                     self.drawing = true;
@@ -103,6 +108,7 @@ impl Tool for TypeTool {
                 out
             }
             PointerKind::Up => {
+                self.guides.clear();
                 let start = self.start.take();
                 if let Some((fid, from)) = self.cell_drag.take() {
                     let sp = cx.layout.spread_at(ev.pos).map(|(_, p)| p).unwrap_or(ev.pos);
@@ -153,6 +159,10 @@ impl Tool for TypeTool {
             ToolKey::Escape => vec![Action::SwitchTool("selection".into()), Action::Exec("text.exitToFrame".into(), json!({}))],
             _ => vec![],
         }
+    }
+
+    fn overlays(&self, _cx: &ToolContext) -> Vec<Overlay> {
+        if self.drawing { self.guides.clone() } else { vec![] }
     }
 
     fn cursor(&self, cx: &ToolContext, p: Point, _m: Mods) -> Cursor {
