@@ -126,6 +126,7 @@ pub fn handle(app: &mut DesignApp, ctx: &egui::Context, req: &ControlRequest) ->
             let base_mods: Mods = p.get("mods").and_then(|m| serde_json::from_value(m.clone()).ok()).unwrap_or_default();
             let view = app.view_info();
             let xf = app.canvas_rect.zip(app.view().copied()).map(|(rect, v)| Xf::new(rect, &v));
+            let mut last = None;
             for e in events {
                 let kind = match e.get("kind").and_then(Value::as_str).unwrap_or("") {
                     "down" => PointerKind::Down,
@@ -151,9 +152,14 @@ pub fn handle(app: &mut DesignApp, ctx: &egui::Context, req: &ControlRequest) ->
                     return err(e);
                 }
                 app.after_engine();
+                last = Some((pos, mods));
             }
             ctx.request_repaint();
-            wrap(app.run("document.inspect", json!({})).map(|d| json!({"selection": d["selection"], "tool": app.session.tool_id()})))
+            // The tool's cursor where the last event was.
+            let cursor = last.map(|(pos, mods)| app.session.cursor(pos, mods, view));
+            wrap(
+                app.run("document.inspect", json!({})).map(|d| json!({"selection": d["selection"], "tool": app.session.tool_id(), "cursor": cursor})),
+            )
         }
         "ui.key" => {
             let Some(k) = s("key").and_then(key_from) else { return err("unknown or missing `key`") };

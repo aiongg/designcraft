@@ -330,6 +330,36 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
         let space = ui.input(|i| i.key_down(egui::Key::Space)) && !app.session.wants_text();
         let c = if space { Cursor::Hand } else { app.session.cursor(xf.to_canvas(p), ui.input(|i| mods(i, false)), app.view_info()) };
         ui.ctx().set_cursor_icon(cursor_icon(c));
+        draw_cursor_badge(&painter, p, c, &t);
+    }
+}
+
+/// The loaded text cursor's badge beside the system cursor: lines of text, a closed chain
+/// (a click threads) or a broken one (a click unthreads). Drawn in code.
+fn draw_cursor_badge(painter: &egui::Painter, p: Pos2, c: Cursor, t: &Tokens) {
+    if !matches!(c, Cursor::LoadedText | Cursor::ThreadLink | Cursor::Unthread) {
+        return;
+    }
+    let r = Rect::from_min_size(p + vec2(12.0, 12.0), vec2(20.0, 16.0));
+    painter.rect_filled(r, 3.0, t.measure_bg);
+    let ink = Stroke::new(1.5, t.measure_text);
+    let c0 = r.center();
+    match c {
+        Cursor::LoadedText => {
+            for (dy, w) in [(-4.0, 12.0), (0.0, 12.0), (4.0, 8.0)] {
+                painter.line_segment([pos2(c0.x - 6.0, c0.y + dy), pos2(c0.x - 6.0 + w, c0.y + dy)], ink);
+            }
+        }
+        _ => {
+            let gap = if c == Cursor::Unthread { 2.5 } else { -2.0 };
+            for side in [-1.0, 1.0] {
+                let link = Rect::from_center_size(pos2(c0.x + side * (3.5 + gap / 2.0), c0.y), vec2(9.0, 6.0));
+                painter.rect_stroke(link, 3.0, ink, StrokeKind::Middle);
+            }
+            if c == Cursor::Unthread {
+                painter.line_segment([pos2(c0.x + 2.0, c0.y - 6.0), pos2(c0.x - 2.0, c0.y + 6.0)], ink);
+            }
+        }
     }
 }
 
@@ -352,6 +382,8 @@ fn cursor_icon(c: Cursor) -> egui::CursorIcon {
         Cursor::ZoomOut => C::ZoomOut,
         Cursor::Eyedropper => C::Crosshair,
         Cursor::LoadedText | Cursor::LoadedGraphic => C::Copy,
+        Cursor::ThreadLink => C::Alias,
+        Cursor::Unthread => C::NoDrop,
         Cursor::NotAllowed => C::NotAllowed,
     }
 }
@@ -801,7 +833,7 @@ fn draw_selection(app: &DesignApp, painter: &egui::Painter, xf: &Xf, doc: &Docum
         union = Some(union.map_or(b, |u| u.union(b)));
         // Text frame ports.
         if let Content::Text(tf) = &it.content {
-            draw_ports(app, painter, xf, doc, layout, it, tf.story, a, color);
+            draw_ports(app, painter, xf, doc, layout, it, tf.story, color);
         }
         if let Content::Graphic(g) = &it.content
             && sel.content
@@ -894,7 +926,6 @@ fn draw_ports(
     layout: &CanvasLayout,
     it: &Item,
     sid: designcraft_doc::StoryId,
-    a: Affine,
     color: Color32,
 ) {
     let Some(story) = doc.story(sid) else { return };
@@ -902,14 +933,11 @@ fn draw_ports(
     let is_last = pos + 1 == story.frames.len();
     let cs = app.session.cache.get(doc, sid, None);
     let overset = is_last && cs.is_overset();
-    let s = 8.5;
-    let _ = layout;
-    let r = it.inner_bounds();
-    let m = a * it.xf;
+    let s = designcraft_tools::thread::PORT_SIZE_PX as f32;
     // In port on the left edge below the top-left corner; out port on the right edge above the
-    // bottom-right corner (screen-space offsets).
-    let inp = xf.to_screen(m * Point::new(r.x0, r.y0)) + vec2(0.0, 14.5);
-    let outp = xf.to_screen(m * Point::new(r.x1, r.y1)) - vec2(0.0, 12.0);
+    // bottom-right corner. The Selection tool hit-tests the same places.
+    let port = |out: bool| designcraft_tools::thread::port_center(doc, layout, it.id, out, xf.zoom).map(|c| xf.to_screen(c));
+    let (Some(inp), Some(outp)) = (port(false), port(true)) else { return };
     for (c, has_link, is_out) in [(inp, pos > 0, false), (outp, !is_last, true)] {
         let pr = Rect::from_center_size(c, vec2(s, s));
         painter.rect_filled(pr, 0.0, Color32::WHITE);

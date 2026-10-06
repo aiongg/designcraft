@@ -538,6 +538,45 @@ fn commands_take_non_object_params_without_panicking() {
     }
 }
 
+/// Load the text from a frame's out port with the Selection tool and click on the pasteboard:
+/// a new frame is threaded there and the overset text flows into it.
+#[test]
+fn threading_with_the_loaded_text_cursor_on_the_sample() {
+    use designcraft_tools::{PointerEvent, PointerKind};
+    let mut s = Session::new();
+    s.execute("file.newSample", &json!({})).unwrap();
+    let d = s.doc().unwrap().doc.clone();
+    let (sid, first) = d.stories.values().find(|st| st.frames.len() >= 2).map(|st| (st.id, st.frames[0])).expect("a threaded story");
+    // Break the thread so the first frame is overset, and select it.
+    s.execute("text.unthread", &json!({"frame": first.0})).unwrap();
+    assert!(s.cache.get(&s.doc().unwrap().doc, sid, None).is_overset());
+    s.execute("selection.set", &json!({"ids": [first.0]})).unwrap();
+    s.set_tool("selection");
+    let v = ViewInfo::at_zoom(1.0);
+    let layout = s.layout();
+    let port = designcraft_tools::thread::port_center(&s.doc().unwrap().doc, &layout, first, true, v.zoom).unwrap();
+    let ev = |k, p: designcraft_geom::Point| PointerEvent::new(k, p.x, p.y);
+    s.pointer(&ev(PointerKind::Down, port), v).unwrap();
+    s.pointer(&ev(PointerKind::Up, port), v).unwrap();
+    assert_eq!(s.cursor(port + designcraft_geom::Vec2::new(-2000.0, 0.0), Default::default(), v), designcraft_tools::Cursor::LoadedText);
+    // On the pasteboard left of the first spread.
+    let b = layout.slots[0].bounds;
+    let at = designcraft_geom::Point::new(b.x0 - 300.0, b.y0 + 100.0);
+    let undo = s.doc().unwrap().history.undo.len();
+    s.pointer(&ev(PointerKind::Down, at), v).unwrap();
+    s.pointer(&ev(PointerKind::Up, at), v).unwrap();
+    let st = s.doc().unwrap();
+    assert_eq!(st.history.undo.len(), undo + 1, "one undo step");
+    let frames = st.doc.story(sid).unwrap().frames.clone();
+    assert_eq!(frames.len(), 2);
+    let new = frames[1];
+    assert_eq!(st.selection.items, [new]);
+    let cs = s.cache.get(&s.doc().unwrap().doc, sid, None);
+    assert!(cs.frames.iter().any(|f| f.frame == new && !f.range.is_empty()), "the text flows into the new frame");
+    let nb = s.doc().unwrap().doc.item(new).unwrap().bounds();
+    assert!((nb.y0 - layout.to_spread(designcraft_doc::SpreadRef::Doc(0), at).y).abs() < 1e-6, "{nb:?}");
+}
+
 /// Drag a selection handle of item 0 on spread 0 from the edge point `at` by `by` (canvas units).
 fn drag_handle(s: &mut Session, at: designcraft_geom::Point, by: designcraft_geom::Vec2, v: ViewInfo) {
     use designcraft_tools::{PointerEvent, PointerKind};

@@ -20,6 +20,7 @@ mod pencil;
 pub mod select;
 pub mod snap;
 mod text;
+pub mod thread;
 mod xform;
 
 use designcraft_compose::Cache;
@@ -354,6 +355,10 @@ pub enum Cursor {
     ZoomOut,
     Eyedropper,
     LoadedText,
+    /// Loaded text over a frame a click threads to.
+    ThreadLink,
+    /// Loaded text over the frame a click unthreads from.
+    Unthread,
     LoadedGraphic,
     NotAllowed,
 }
