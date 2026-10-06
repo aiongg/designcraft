@@ -1364,20 +1364,21 @@ fn handle_input(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, r
     let mut events: Vec<PointerEvent> = Vec::new();
     let down_id = egui::Id::new(("canvas_pointer_down", app.pane));
     let mut down: bool = ui.data(|d| d.get_temp(down_id)).unwrap_or(false);
-    let (pressed, released, origin, latest, dbl) = ui.input(|i| {
-        (
-            i.pointer.primary_pressed(),
-            i.pointer.primary_released(),
-            i.pointer.press_origin(),
-            i.pointer.latest_pos(),
-            i.pointer.button_double_clicked(egui::PointerButton::Primary),
-        )
-    });
+    let clicks_id = egui::Id::new(("canvas_clicks", app.pane));
+    let (pressed, released, origin, latest, now) =
+        ui.input(|i| (i.pointer.primary_pressed(), i.pointer.primary_released(), i.pointer.press_origin(), i.pointer.latest_pos(), i.time));
     if pressed
         && !space
         && let Some(o) = origin.filter(|o| (if xf.rot == 0 { rect.contains(*o) } else { resp.rect.contains(*o) }) && resp.hovered())
     {
-        events.push(PointerEvent { kind: if dbl { PointerKind::DoubleClick } else { PointerKind::Down }, pos: pos(o), mods: m });
+        // Count presses in a row here: egui reports double and triple clicks only on release and
+        // stops at three, but a press must know (word, line, paragraph, story).
+        // Like egui, the next press must come within the double-click delay of the last release.
+        let (delay, dist) = ui.ctx().options(|o| (o.input_options.max_double_click_delay, o.input_options.max_click_dist));
+        let (released_at, last_pos, last_n): (f64, Pos2, u8) = ui.data(|d| d.get_temp(clicks_id)).unwrap_or((f64::NEG_INFINITY, o, 0));
+        let n = if now - released_at <= delay && (o - last_pos).length() <= dist { last_n.saturating_add(1) } else { 1 };
+        ui.data_mut(|d| d.insert_temp(clicks_id, (f64::NEG_INFINITY, o, n)));
+        events.push(PointerEvent { kind: PointerKind::Down, pos: pos(o), mods: m, clicks: n });
         down = true;
     }
     if down
@@ -1385,7 +1386,7 @@ fn handle_input(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, r
         && resp.drag_delta() != egui::Vec2::ZERO
         && let Some(p) = latest
     {
-        events.push(PointerEvent { kind: PointerKind::Drag, pos: pos(p), mods: m });
+        events.push(PointerEvent { kind: PointerKind::Drag, pos: pos(p), mods: m, clicks: 1 });
     }
     // Power Zoom: holding the Hand tool still for half a second turns the press into one.
     let hold_id = egui::Id::new(("canvas_hold", app.pane));
@@ -1395,8 +1396,8 @@ fn handle_input(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, r
         let still = origin_pos.zip(latest).is_some_and(|(o, l)| (o - l).length() < 3.0);
         if !fired && still && now - start >= 0.5 {
             let p = pos(latest.unwrap_or(rect.center()));
-            events.push(PointerEvent { kind: PointerKind::Up, pos: p, mods: m });
-            events.push(PointerEvent { kind: PointerKind::Down, pos: p, mods: Mods { alt: true, ..m } });
+            events.push(PointerEvent { kind: PointerKind::Up, pos: p, mods: m, clicks: 1 });
+            events.push(PointerEvent { kind: PointerKind::Down, pos: p, mods: Mods { alt: true, ..m }, clicks: 1 });
             ui.data_mut(|d| d.insert_temp(hold_id, (start, true)));
         } else {
             ui.data_mut(|d| d.insert_temp(hold_id, (start, fired)));
@@ -1408,11 +1409,14 @@ fn handle_input(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, r
         ui.data_mut(|d| d.remove::<(f64, bool)>(hold_id));
     }
     if down && released {
+        if let Some((_, at, n)) = ui.data(|d| d.get_temp::<(f64, Pos2, u8)>(clicks_id)) {
+            ui.data_mut(|d| d.insert_temp(clicks_id, (now, at, n)));
+        }
         let p = latest.unwrap_or(rect.center());
-        events.push(PointerEvent { kind: PointerKind::Up, pos: pos(p), mods: m });
+        events.push(PointerEvent { kind: PointerKind::Up, pos: pos(p), mods: m, clicks: 1 });
         down = false;
     } else if !down && let Some(p) = resp.hover_pos() {
-        events.push(PointerEvent { kind: PointerKind::Move, pos: pos(p), mods: m });
+        events.push(PointerEvent { kind: PointerKind::Move, pos: pos(p), mods: m, clicks: 1 });
     }
     ui.data_mut(|d| d.insert_temp(down_id, down));
     for e in events {
@@ -1442,11 +1446,19 @@ fn handle_input(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, r
                 let _ = app.run(id, json!({"text": t}));
             }
             egui::Event::Copy | egui::Event::Cut if wants_text => {
+                // `run` puts the copied text on the system clipboard.
                 let id = if matches!(e, egui::Event::Cut) { "edit.cut" } else { "edit.copy" };
-                if let Ok(r) = app.run(id, json!({}))
-                    && let Some(t) = r.get("text").and_then(serde_json::Value::as_str)
-                {
-                    ui.ctx().copy_text(t.to_string());
+                let _ = app.run(id, json!({}));
+            }
+            // Without a native menu bar the copy and paste keys arrive only as these events.
+            egui::Event::Copy | egui::Event::Cut | egui::Event::Paste(_) if !app.native_menu => {
+                let id = match e {
+                    egui::Event::Copy => "edit.copy",
+                    egui::Event::Cut => "edit.cut",
+                    _ => "edit.paste",
+                };
+                if crate::menus::enabled(app, id) {
+                    crate::menus::activate(app, id, &serde_json::Value::Null);
                 }
             }
             egui::Event::Key { key, pressed: true, modifiers, .. } => {

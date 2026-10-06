@@ -17,6 +17,8 @@ pub struct TypeTool {
     /// A press on a table whose whole rows or columns are selected: (frame, press point in
     /// spread space) — a drag moves them, a click places the caret.
     cell_drag: Option<(u64, Point)>,
+    /// The press selected a word, line, paragraph or story (several clicks): drags keep it.
+    unit_selected: bool,
 }
 
 /// Are whole rows or whole columns of a table selected?
@@ -45,31 +47,39 @@ impl Tool for TypeTool {
                 self.drawing = false;
                 self.selecting = None;
                 self.cell_drag = None;
+                self.unit_selected = false;
                 if let Some((_, id)) = cx.hit(ev.pos)
                     && let Some(it) = cx.doc.item(id)
                     && !matches!(it.content, designcraft_doc::Content::Graphic(_) | designcraft_doc::Content::Group { .. })
                 {
                     let sp = cx.layout.spread_at(ev.pos).map(|(_, p)| p).unwrap_or(ev.pos);
+                    let clicks = ev.click_count();
                     // Whole rows/columns selected: wait to see whether this is a drag.
-                    if ev.kind == PointerKind::Down && !ev.mods.shift && whole_rows_or_cols(cx) {
+                    if clicks == 1 && !ev.mods.shift && whole_rows_or_cols(cx) {
                         self.cell_drag = Some((id.0, sp));
                         return vec![];
                     }
                     self.selecting = Some(id.0);
-                    let cmd = if ev.kind == PointerKind::DoubleClick {
-                        "text.selectWord"
-                    } else if ev.mods.shift {
-                        "text.extendTo"
-                    } else {
-                        "text.placeCaret"
-                    };
+                    // Two presses select a word (or a run of spaces), three a line, four a
+                    // paragraph, five the story.
+                    if clicks >= 2 {
+                        self.unit_selected = true;
+                        let unit = match clicks {
+                            2 => "word",
+                            3 => "line",
+                            4 => "paragraph",
+                            _ => "story",
+                        };
+                        return vec![Action::Exec("text.selectAt".into(), json!({"frame": id.0, "point": [sp.x, sp.y], "unit": unit}))];
+                    }
+                    let cmd = if ev.mods.shift { "text.extendTo" } else { "text.placeCaret" };
                     return vec![Action::Exec(cmd.into(), json!({"frame": id.0, "point": [sp.x, sp.y]}))];
                 }
                 vec![]
             }
             PointerKind::Drag => {
                 let Some(a) = self.start else { return vec![] };
-                if self.cell_drag.is_some() {
+                if self.cell_drag.is_some() || self.unit_selected {
                     return vec![];
                 }
                 if let Some(fid) = self.selecting {

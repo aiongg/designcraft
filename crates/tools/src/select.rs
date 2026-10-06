@@ -371,6 +371,14 @@ impl Tool for SelectionTool {
 
     fn pointer(&mut self, cx: &ToolContext, ev: &PointerEvent) -> Vec<Action> {
         let p = ev.pos;
+        // The second press of a double click on a text frame: edit its text.
+        if matches!(ev.kind, PointerKind::Down | PointerKind::DoubleClick)
+            && ev.click_count() == 2
+            && let Some(actions) = edit_text_at(cx, p)
+        {
+            self.drag = Drag::None;
+            return actions;
+        }
         match ev.kind {
             PointerKind::Move => {
                 self.hover_handle = handle_at(cx, p);
@@ -706,19 +714,7 @@ impl Tool for SelectionTool {
                     Drag::None => vec![],
                 }
             }
-            PointerKind::DoubleClick => {
-                if let Some((_, id)) = cx.hit(p)
-                    && cx.doc.item(id).is_some_and(|i| i.is_text_frame())
-                {
-                    let (sr, sp) = cx.layout.spread_at(p).unwrap_or((SpreadRef::Doc(0), p));
-                    let _ = sr;
-                    return vec![
-                        Action::SwitchTool("type".into()),
-                        Action::Exec("text.placeCaret".into(), json!({"frame": id.0, "point": [sp.x, sp.y]})),
-                    ];
-                }
-                vec![]
-            }
+            PointerKind::DoubleClick => vec![],
         }
     }
 
@@ -776,4 +772,14 @@ fn handle_cursor(h: usize) -> Cursor {
         1 | 5 => Cursor::ResizeV,
         _ => Cursor::ResizeH,
     }
+}
+
+/// Switch to the Type tool with the caret at `p` when it is over a text frame.
+fn edit_text_at(cx: &ToolContext, p: Point) -> Option<Vec<Action>> {
+    let (_, id) = cx.hit(p)?;
+    if !cx.doc.item(id).is_some_and(|i| i.is_text_frame()) {
+        return None;
+    }
+    let (_, sp) = cx.layout.spread_at(p).unwrap_or((SpreadRef::Doc(0), p));
+    Some(vec![Action::SwitchTool("type".into()), Action::Exec("text.placeCaret".into(), json!({"frame": id.0, "point": [sp.x, sp.y]}))])
 }

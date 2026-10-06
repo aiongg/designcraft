@@ -705,3 +705,38 @@ fn pen_click_snaps_to_a_guide() {
     let x = p["anchors"][0]["p"][0].as_f64().unwrap();
     assert!((x - 100.0).abs() < 1e-6, "anchor x {x}");
 }
+
+#[test]
+fn clicks_in_a_row_edit_and_select_text() {
+    let mut d = Document::new(&NewDocument::default());
+    let lid = d.default_layer();
+    let (fid, _) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(100.0, 100.0, 300.0, 200.0), lid, "Two words", ParaFormat::default()).unwrap();
+    let (s, c, l) = (Selection::default(), Cache::new(), CanvasLayout::new(&d, false));
+    let cx = ctx(&d, &s, &c, &l);
+    let off = l.xf(SpreadRef::Doc(0)).translation();
+    let (x, y) = (150.0 + off.x, 110.0 + off.y);
+    let press = |n: u8| PointerEvent::new(PointerKind::Down, x, y).with_clicks(n);
+    // Selection tool: the second press of a double click edits the text there.
+    let mut t = create("selection");
+    let a = t.pointer(&cx, &press(1));
+    assert!(matches!(&a[0], Action::Exec(id, _) if id == "selection.set"), "{a:?}");
+    t.pointer(&cx, &PointerEvent::new(PointerKind::Up, x, y));
+    let a = t.pointer(&cx, &press(2));
+    assert_eq!(a.first(), Some(&Action::SwitchTool("type".into())));
+    assert!(matches!(&a[1], Action::Exec(id, p) if id == "text.placeCaret" && p["frame"] == fid.0), "{a:?}");
+    // Type tool: word, line, paragraph, then the story.
+    let mut t = create("type");
+    let unit = |a: Vec<Action>| match a.as_slice() {
+        [Action::Exec(id, p)] if id == "text.selectAt" => p["unit"].as_str().map(str::to_string),
+        [Action::Exec(id, _)] if id == "text.placeCaret" => None,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(unit(t.pointer(&cx, &press(1))), None);
+    for (n, want) in [(2, "word"), (3, "line"), (4, "paragraph"), (5, "story"), (9, "story")] {
+        assert_eq!(unit(t.pointer(&cx, &press(n))).as_deref(), Some(want), "{n} clicks");
+    }
+    // A double click sent as such (control channel) selects a word too.
+    assert_eq!(unit(t.pointer(&cx, &PointerEvent::new(PointerKind::DoubleClick, x, y))).as_deref(), Some("word"));
+    // Moving a little while pressed keeps the unit selected.
+    assert!(t.pointer(&cx, &PointerEvent::new(PointerKind::Drag, x + 2.0, y)).is_empty());
+}

@@ -1478,7 +1478,7 @@ pub fn confirm(app: &mut DesignApp) -> Result<Value, String> {
         }
         "colorPicker" => {
             let hex = d.s("hex");
-            app.run("object.color", json!({"color": hex, "target": d.s("target")}))
+            app.run("object.color", json!({"color": hex, "target": d.s("target"), "text": d.b("text")}))
         }
         "layerOptions" => {
             let hidden: Vec<Value> = d.fields.get("layers").and_then(Value::as_array).map(|a| a.iter().filter(|l| l["visible"] == false).map(|l| l["name"].clone()).collect()).unwrap_or_default();

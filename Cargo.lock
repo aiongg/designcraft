@@ -857,6 +857,7 @@ dependencies = [
 name = "designcraft"
 version = "0.2.1"
 dependencies = [
+ "arboard",
  "designcraft-engine",
  "designcraft-ui-egui",
  "eframe",

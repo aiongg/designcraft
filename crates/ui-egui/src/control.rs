@@ -146,7 +146,8 @@ pub fn handle(app: &mut DesignApp, ctx: &egui::Context, req: &ControlRequest) ->
                     designcraft_geom::Point::new(x, y)
                 };
                 let mods = e.get("mods").and_then(|m| serde_json::from_value(m.clone()).ok()).unwrap_or(base_mods);
-                if let Err(e) = app.session.pointer(&PointerEvent { kind, pos, mods }, view) {
+                let clicks = e.get("clicks").and_then(Value::as_u64).map_or(1, |n| n.clamp(1, 255) as u8);
+                if let Err(e) = app.session.pointer(&PointerEvent { kind, pos, mods, clicks }, view) {
                     return err(e);
                 }
                 app.after_engine();

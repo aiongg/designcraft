@@ -16,7 +16,7 @@ Start the app with `--control <port>` (or `DESIGNCRAFT_CONTROL_PORT`). The serve
 | `ui.inspect` | — | Tool, UI state, view (zoom/origin), canvas rect, perf |
 | `ui.menu.list` / `ui.tool.list` | — | Menu tree / Tools panel groups |
 | `ui.tool.select` | `{tool}` | Select a tool (`selection`, `type`, `rectangleFrame`, …) |
-| `ui.pointer` | `{events:[{kind: down\|drag\|up\|move\|doubleclick, x, y, space?: "screen"\|"canvas"}], mods?}` | Drive the active tool through the same code path as the mouse |
+| `ui.pointer` | `{events:[{kind: down\|drag\|up\|move\|doubleclick, x, y, space?: "screen"\|"canvas", clicks?}], mods?}` | Drive the active tool through the same code path as the mouse; `clicks` on a `down` is the press count (3 = triple click) |
 | `ui.key` / `ui.text` | `{key, shift?, alt?, cmd?}` / `{text}` | Synthetic keyboard input (typing into a text frame) |
 | `ui.move` / `ui.click` / `ui.drag` | screen points | Real egui pointer input — reaches every widget, menu and panel |
 | `ui.set` | `{brightness?, panel?, rulers?, guides?, frameEdges?, baselineGrid?, textThreads?, screenMode?, zoom?, page?, fit?}` | UI state |

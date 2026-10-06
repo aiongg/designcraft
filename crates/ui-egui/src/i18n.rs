@@ -1680,13 +1680,13 @@ const TABLE: &[(&str, [&str; 5])] = &[
         ],
     ),
     (
-        "Select an object to color its fill or stroke.",
+        "Select an object or text to color its fill or stroke.",
         [
-            "Select an object to color its fill or stroke.",
-            "Select an object to color its fill or stroke.",
-            "Select an object to color its fill or stroke.",
-            "Select an object to color its fill or stroke.",
-            "选择一个对象以设置其填色或描边颜色。",
+            "Select an object or text to color its fill or stroke.",
+            "Select an object or text to color its fill or stroke.",
+            "Select an object or text to color its fill or stroke.",
+            "Select an object or text to color its fill or stroke.",
+            "选择一个对象或文本以设置其填色或描边颜色。",
         ],
     ),
     (

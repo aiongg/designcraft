@@ -1027,3 +1027,29 @@ fn only_english_text_gets_english_hyphenation() {
     st.format_chars(0..n, |f| f.over.language = Some("French".into()));
     assert_eq!(hyphenated(&d2, sid), 0, "French isn't hyphenated with English rules");
 }
+
+#[test]
+fn caret_follows_spaces_typed_at_the_end() {
+    let x_at_end = |text: &str| {
+        let (d, sid, _) = doc_with(text, Rect::new(0.0, 0.0, 300.0, 100.0), ParaAttrs::default());
+        let cs = compose_story(&d, sid, &ComposeOptions::default());
+        let end_x = cs.frames[0].lines[0].end_x;
+        (caret(&cs, text.len()).unwrap().1, end_x)
+    };
+    let (word, word_end) = x_at_end("Word");
+    let (one, one_end) = x_at_end("Word ");
+    let (two, _) = x_at_end("Word  ");
+    assert!(one > word + 1.0 && two > one + 1.0, "{word} {one} {two}");
+    // The spaces don't count for the line's own length (alignment, justification).
+    assert!((one_end - word_end).abs() < 1e-9);
+    // Wrapped lines keep their spaces too: a caret between two spaces at a line end sits after
+    // the first one.
+    let text = "Lorem ipsum dolor sit amet  consectetur";
+    let (d, sid, _) = doc_with(text, Rect::new(0.0, 0.0, 140.0, 100.0), ParaAttrs::default());
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let l0 = &cs.frames[0].lines[0];
+    if l0.range.end == text.find("consectetur").unwrap() {
+        let mid = text.find("  ").unwrap() + 1;
+        assert!(caret(&cs, mid).unwrap().1 > l0.end_x, "between the trailing spaces");
+    }
+}
