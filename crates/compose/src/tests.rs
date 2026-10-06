@@ -1027,3 +1027,35 @@ fn only_english_text_gets_english_hyphenation() {
     st.format_chars(0..n, |f| f.over.language = Some("French".into()));
     assert_eq!(hyphenated(&d2, sid), 0, "French isn't hyphenated with English rules");
 }
+
+#[test]
+fn colour_change_keeps_kerning_and_ligatures_keep_colour() {
+    let mut d = Document::new(&NewDocument::default());
+    let lid = d.default_layer();
+    let (_, sid) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(100.0, 100.0, 400.0, 200.0), lid, "ayay", ParaFormat::default()).unwrap();
+    d.story_mut(sid).unwrap().format_chars(0..4, |f| f.over.font_style = Some("Bold".into()));
+    let line = |d: &Document| compose_story(d, sid, &ComposeOptions::default()).frames[0].lines[0].clone();
+    let xs = |l: &Line| l.glyphs.iter().map(|g| (g.x, g.adv)).collect::<Vec<_>>();
+    let kerned = line(&d);
+    // The font kerns "ay" (otherwise this test proves nothing).
+    d.story_mut(sid).unwrap().format_chars(0..4, |f| f.over.kerning = Some(designcraft_doc::Kerning::None));
+    assert_ne!(xs(&line(&d)), xs(&kerned), "Source Serif 4 Bold kerns a–y");
+    d.story_mut(sid).unwrap().format_chars(0..4, |f| f.over.kerning = Some(designcraft_doc::Kerning::Metrics));
+    // Colour the first "a": positions are unchanged, only its style differs.
+    d.story_mut(sid).unwrap().format_chars(0..1, |f| f.over.fill = Some("Cyan".into()));
+    let coloured = line(&d);
+    assert_eq!(xs(&coloured), xs(&kerned), "a colour change must not change spacing");
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let fill = |l: &Line, i: usize| cs.styles[l.glyphs[i].style as usize].fill.clone();
+    assert_eq!(fill(&coloured, 0), "Cyan");
+    assert_ne!(fill(&coloured, 1), "Cyan");
+
+    // A ligature never swallows a differently coloured letter: the "i" of "fi" keeps its colour.
+    let (_, sid) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(100.0, 300.0, 400.0, 400.0), lid, "fifi", ParaFormat::default()).unwrap();
+    d.story_mut(sid).unwrap().format_chars(1..2, |f| f.over.fill = Some("Cyan".into()));
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let l = &cs.frames[0].lines[0];
+    let at = |b: usize| l.glyphs.iter().find(|g| g.len > 0 && g.byte <= b && b < g.byte + g.len).map(|g| cs.styles[g.style as usize].fill.clone());
+    assert_eq!(at(1).as_deref(), Some("Cyan"));
+    assert_ne!(at(2).as_deref(), Some("Cyan"));
+}
