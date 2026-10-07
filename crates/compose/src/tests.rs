@@ -146,6 +146,241 @@ fn wrap_pushes_text_aside() {
     assert!(below.x0 < 1.0);
 }
 
+/// Insert rectangles with wrap, given as (bounds, [top, left, bottom, right] offsets, mode).
+fn add_wrap_objects(d: &mut Document, objects: &[(Rect, [f64; 4], WrapMode)]) {
+    let lid = d.default_layer();
+    for &(r, offsets, mode) in objects {
+        let id = ItemId(d.alloc());
+        let mut it = designcraft_doc::Item::new(id, lid, designcraft_doc::Shape::Rectangle, designcraft_geom::shapes::rectangle(r));
+        it.wrap.mode = mode;
+        it.wrap.offsets = offsets;
+        d.insert_item(SpreadRef::Doc(0), it, None).unwrap();
+    }
+}
+
+/// 10 pt on 12 pt text in a 288 × 528 frame at (36, 36), with wrap objects.
+fn wrap_doc(para: ParaAttrs, objects: &[(Rect, [f64; 4], WrapMode)]) -> (Document, StoryId) {
+    let text = [LOREM; 6].join(" ");
+    let (mut d, sid, _) = doc_with(&text, Rect::new(36.0, 36.0, 324.0, 564.0), para);
+    d.story_mut(sid).unwrap().format_chars(0..text.len(), |f| {
+        f.over.size = Some(10.0);
+        f.over.leading = Some(designcraft_doc::Leading::Points(12.0));
+    });
+    add_wrap_objects(&mut d, objects);
+    (d, sid)
+}
+
+/// The first line whose baseline is below the top of `ex`.
+fn first_line_below<'a>(cs: &'a ComposedStory, ex: &Exclusion) -> &'a Line {
+    cs.frames[0].lines.iter().find(|l| l.baseline > ex.rect.y0).unwrap()
+}
+
+/// 14 pt on 18 pt `text` in a frame from y 62.36 to 532.91 with first baseline offset Leading, so lines
+/// sit at 80.36 + n × 18 (the setup measured in InDesign), with Jump Object wraps given as
+/// (bounds, [top, left, bottom, right] offsets).
+fn jump_doc(text: &str, objects: &[(Rect, [f64; 4])]) -> (Document, StoryId, ItemId) {
+    let (mut d, sid, fid) = doc_with(text, Rect::new(36.0, 62.36, 324.0, 532.91), ParaAttrs::default());
+    d.story_mut(sid).unwrap().format_chars(0..text.len(), |f| {
+        f.over.size = Some(14.0);
+        f.over.leading = Some(designcraft_doc::Leading::Points(18.0));
+    });
+    d.item_mut(fid).unwrap().text_frame_mut().unwrap().options.first_baseline = FirstBaseline::Leading;
+    let objects: Vec<_> = objects.iter().map(|&(r, o)| (r, o, WrapMode::JumpObject)).collect();
+    add_wrap_objects(&mut d, &objects);
+    (d, sid, fid)
+}
+
+/// Baselines of the last line above the top of the first wrap and of the first line below it.
+fn around_wrap(d: &Document, sid: StoryId) -> (Option<f64>, f64) {
+    let specs = frame_specs(d, sid);
+    let ex = &specs[0].exclusions[0];
+    let cs = compose_story(d, sid, &ComposeOptions::default());
+    let lines = &cs.frames[0].lines;
+    let above = lines.iter().rev().find(|l| l.baseline <= ex.rect.y0 + 1e-6).map(|l| l.baseline);
+    (above, first_line_below(&cs, ex).baseline)
+}
+
+fn near(a: f64, b: f64) -> bool {
+    (a - b).abs() < 0.01
+}
+
+#[test]
+fn jump_object_moves_the_next_line_down_by_whole_leadings() {
+    // As measured: last baseline above 386.41, wrap bottom 472.77 → 494.40 (6 leadings). Here the last
+    // line above is at 386.36 and the wrap ends 86.36 below it.
+    let text = [LOREM; 8].join(" ");
+    let (d, sid, _) = jump_doc(&text, &[(Rect::new(36.0, 395.0, 200.0, 472.72), [0.0; 4])]);
+    let (above, below) = around_wrap(&d, sid);
+    assert!(near(above.unwrap(), 386.36), "{above:?}");
+    assert!(near(below, 386.36 + 6.0 * 18.0), "{below}");
+    // The lines after it keep the leading.
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let next = cs.frames[0].lines.iter().find(|l| l.baseline > below + 1.0).unwrap();
+    assert!(near(next.baseline, below + 18.0));
+}
+
+#[test]
+fn jump_object_clears_the_wrap_with_the_leading_not_the_ascent() {
+    // As measured: last 152.38, wrap bottom 246.90 → 278.38. Clearing the wrap with the line's ascent
+    // instead of its leading would put the line one leading higher (here the wrap ends a little higher,
+    // as the test font's ascent is larger).
+    let text = [LOREM; 8].join(" ");
+    let (d, sid, _) = jump_doc(&text, &[(Rect::new(36.0, 160.0, 324.0, 244.0), [0.0; 4])]);
+    let (above, below) = around_wrap(&d, sid);
+    assert!(near(above.unwrap(), 152.36), "{above:?}");
+    assert!(near(below, 152.36 + 7.0 * 18.0), "{below}");
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let asc = cs.frames[0].lines[0].ascent;
+    let by_ascent = (1..).map(|k| 152.36 + k as f64 * 18.0).find(|b| b - asc >= 244.0).unwrap();
+    assert!(!near(by_ascent, below), "the case must tell the two rules apart ({asc})");
+}
+
+#[test]
+fn jump_object_adds_space_before_once() {
+    // As measured: a heading at 78.36, then a paragraph with 60 pt space before, wrap bottom 439.71 →
+    // 462.36 = 78.36 + 60 + 18 × 18.
+    let text = format!("Heading\n{}", [LOREM; 6].join(" "));
+    let (mut d, sid, _) = jump_doc(&text, &[(Rect::new(36.0, 90.0, 324.0, 439.71), [0.0; 4])]);
+    d.story_mut(sid).unwrap().format_paras(10..10, |p| p.para.space_before = Some(60.0));
+    let (above, below) = around_wrap(&d, sid);
+    assert!(near(above.unwrap(), 80.36), "{above:?}");
+    assert!(near(below, 80.36 + 60.0 + 18.0 * 18.0), "{below}");
+}
+
+#[test]
+fn jump_object_at_the_frame_top_starts_text_like_a_frame_top() {
+    // As measured: wrap bottom 266.83 → first baseline 284.835 (Leading offset: one leading below).
+    let text = [LOREM; 8].join(" ");
+    let (mut d, sid, fid) = jump_doc(&text, &[(Rect::new(36.0, 50.0, 324.0, 266.83), [0.0; 4])]);
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let lines = &cs.frames[0].lines;
+    assert!(near(lines[0].baseline, 266.83 + 18.0), "{}", lines[0].baseline);
+    assert!(near(lines[1].baseline, 266.83 + 36.0), "{}", lines[1].baseline);
+    // Ascent offset: the line's ascent below the wrap.
+    d.item_mut(fid).unwrap().text_frame_mut().unwrap().options.first_baseline = FirstBaseline::Ascent;
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let l = &cs.frames[0].lines[0];
+    assert!(near(l.baseline, 266.83 + l.ascent), "{} vs {}", l.baseline, l.ascent);
+}
+
+#[test]
+fn line_above_jump_object_stays_while_its_baseline_is_above_the_wrap() {
+    let text = [LOREM; 8].join(" ");
+    // The line at 386.36 hangs its descenders into the object and stays.
+    let (d, sid, _) = jump_doc(&text, &[(Rect::new(36.0, 386.36, 324.0, 420.0), [0.0; 4])]);
+    let (above, below) = around_wrap(&d, sid);
+    assert!(near(above.unwrap(), 386.36), "{above:?}");
+    assert!(near(below, 440.36), "{below}");
+    // A wrap starting just above its baseline makes it jump.
+    let (d, sid, _) = jump_doc(&text, &[(Rect::new(36.0, 386.3, 324.0, 420.0), [0.0; 4])]);
+    let (above, below) = around_wrap(&d, sid);
+    assert!(near(above.unwrap(), 368.36), "{above:?}");
+    assert!(near(below, 440.36), "{below}");
+}
+
+#[test]
+fn negative_jump_offsets_shrink_the_wrap() {
+    let text = [LOREM; 8].join(" ");
+    let (d, sid, _) = jump_doc(&text, &[(Rect::new(36.0, 300.0, 324.0, 500.0), [-20.0, 0.0, -30.0, 0.0])]);
+    let specs = frame_specs(&d, sid);
+    let r = specs[0].exclusions[0].rect;
+    assert!(near(r.y0, 320.0) && near(r.y1, 470.0), "{r:?}");
+    let (above, below) = around_wrap(&d, sid);
+    assert!(near(above.unwrap(), 314.36), "{above:?}");
+    assert!(near(below, 494.36), "{below}");
+}
+
+#[test]
+fn jump_object_down_to_the_frame_bottom_sends_text_to_the_next_frame() {
+    let text = [LOREM; 8].join(" ");
+    let (mut d, sid, a) = jump_doc(&text, &[(Rect::new(36.0, 300.0, 324.0, 540.0), [0.0; 4])]);
+    let lid = d.default_layer();
+    let (b, _) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(350.0, 62.36, 550.0, 532.91), lid, "", ParaFormat::default()).unwrap();
+    d.item_mut(b).unwrap().text_frame_mut().unwrap().options.first_baseline = FirstBaseline::Leading;
+    d.thread(a, b).unwrap();
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let last = cs.frames[0].lines.last().unwrap();
+    assert!(near(last.baseline, 296.36), "{}", last.baseline);
+    assert!(near(cs.frames[1].lines[0].baseline, 62.36 + 18.0), "{}", cs.frames[1].lines[0].baseline);
+    assert_eq!(cs.frames[0].range.end, cs.frames[1].range.start);
+}
+
+#[test]
+fn full_width_bounding_box_wrap_resumes_exactly_below() {
+    // A bounding-box wrap across the whole column leaves no slot: the line jumps it like Jump Object.
+    let (d, sid) = wrap_doc(ParaAttrs::default(), &[(Rect::new(20.0, 100.0, 340.0, 150.25), [0.0; 4], WrapMode::BoundingBox)]);
+    let specs = frame_specs(&d, sid);
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let ex = &specs[0].exclusions[0];
+    let l = first_line_below(&cs, ex);
+    assert!((l.baseline - l.ascent - ex.rect.y1).abs() < 0.01, "{} vs {}", l.baseline - l.ascent, ex.rect.y1);
+    // A slot narrower than 1.5 × the size is no slot either.
+    let (d, sid) = wrap_doc(ParaAttrs::default(), &[(Rect::new(50.0, 100.0, 340.0, 150.25), [0.0; 4], WrapMode::BoundingBox)]);
+    let specs = frame_specs(&d, sid);
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let ex = &specs[0].exclusions[0];
+    let l = first_line_below(&cs, ex);
+    assert!((l.baseline - l.ascent - ex.rect.y1).abs() < 0.01, "{} vs {}", l.baseline - l.ascent, ex.rect.y1);
+}
+
+#[test]
+fn jump_object_keeps_grid_aligned_lines_on_the_grid() {
+    // The wrap ends at 166.5, off the 12 pt grid; a second object blocks the grid line the line jumps
+    // to, so the line moves on to the grid line after that object.
+    let objects = [
+        (Rect::new(36.0, 100.0, 200.0, 160.5), [0.0, 0.0, 6.0, 0.0], WrapMode::JumpObject),
+        (Rect::new(250.0, 178.0, 324.0, 190.0), [0.0; 4], WrapMode::JumpObject),
+    ];
+    let (d, sid) = wrap_doc(ParaAttrs { grid_align: Some(GridAlign::AllLines), ..Default::default() }, &objects);
+    let specs = frame_specs(&d, sid);
+    let (g0, inc) = specs[0].grid.unwrap();
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let on_grid = |b: f64| (((b - g0) / inc).round() * inc + g0 - b).abs() < 1e-6;
+    let lines = &cs.frames[0].lines;
+    assert!(lines.iter().all(|l| on_grid(l.baseline)), "{:?}", lines.iter().map(|l| l.baseline).collect::<Vec<_>>());
+    let exs = &specs[0].exclusions;
+    let l = first_line_below(&cs, &exs[0]);
+    // Naive oracle: the first grid line whose leading band clears the objects.
+    let clear = |b: f64, exs: &[Exclusion]| exs.iter().all(|e| b <= e.rect.y0 || b - l.leading >= e.rect.y1);
+    let want = |exs: &[Exclusion]| (0..).map(|n| g0 + n as f64 * inc).find(|&b| b > exs[0].rect.y0 && clear(b, exs)).unwrap();
+    assert!((l.baseline - want(exs)).abs() < 1e-6, "baseline {} should be on grid line {}", l.baseline, want(exs));
+    assert!(want(&exs[..1]) < want(exs), "the second object pushed the line again");
+
+    // First line only: a later line of the paragraph jumps by whole leadings from the line above.
+    let (d, sid) = wrap_doc(ParaAttrs { grid_align: Some(GridAlign::FirstLineOnly), ..Default::default() }, &objects[..1]);
+    let specs = frame_specs(&d, sid);
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let ex = &specs[0].exclusions[0];
+    let l = first_line_below(&cs, ex);
+    assert!(!l.first_in_para);
+    let above = cs.frames[0].lines.iter().rev().find(|a| a.baseline <= ex.rect.y0).unwrap().baseline;
+    let want = (1..).map(|k| above + k as f64 * 12.0).find(|b| b - 12.0 >= ex.rect.y1).unwrap();
+    assert!((l.baseline - want).abs() < 1e-6, "{} vs {want}", l.baseline);
+}
+
+#[test]
+fn hostile_wrap_geometry_terminates() {
+    let (d, sid) = wrap_doc(ParaAttrs { grid_align: Some(GridAlign::AllLines), ..Default::default() }, &[]);
+    let mut specs = frame_specs(&d, sid);
+    let ex = |x0: f64, y0: f64, x1: f64, y1: f64, mode| Exclusion { rect: Rect::new(x0, y0, x1, y1), mode };
+    let f = &mut specs[0];
+    f.exclusions.push(ex(f64::NAN, f64::NAN, f64::NAN, f64::NAN, WrapMode::JumpObject));
+    f.exclusions.push(ex(-1e308, 300.0, 1e308, f64::INFINITY, WrapMode::JumpObject));
+    f.exclusions.push(ex(0.0, f64::NEG_INFINITY, 400.0, 40.0, WrapMode::BoundingBox));
+    // A wall of overlapping strips, each ending 0.25 pt below the previous.
+    for i in 0..3000 {
+        let y = 60.0 + i as f64 * 0.25;
+        f.exclusions.push(ex(0.0, y, 400.0, y + 1.0, if i % 2 == 0 { WrapMode::JumpObject } else { WrapMode::BoundingBox }));
+    }
+    f.grid = Some((0.0, 1e-300));
+    let story = d.story(sid).unwrap();
+    let cs = compose(&d, story, &specs, &ComposeOptions::default());
+    assert!(cs.is_overset());
+    for l in &cs.frames[0].lines {
+        assert!(l.baseline.is_finite() && l.baseline - l.ascent >= 40.0 && l.baseline + l.descent <= 300.0, "{}", l.baseline);
+    }
+}
+
 #[test]
 fn paragraph_composer_is_no_worse_than_greedy() {
     // Sum of squared slack over lines (excluding last) should not exceed the greedy result.

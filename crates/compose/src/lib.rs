@@ -691,7 +691,8 @@ pub fn compose(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &Compo
             let est_asc = base_chars.size * 0.75;
             let est_tops = Tops { typo_ascent: est_asc, cap: est_asc * 0.72, xh: est_asc * 0.5 };
             let est_first = cur.next_baseline(f, col, base_leading, est_asc, est_tops, &pp);
-            let slots = estimate_slots(f, col, est_first, base_leading, base_chars.size, &glyphs[g0..], &pp, line_no);
+            let est_jump = cur.jump(f, base_leading, est_asc, est_tops);
+            let slots = estimate_slots(f, col, est_first, est_jump, base_leading, base_chars.size, &glyphs[g0..], &pp, line_no);
             let width = |j: usize| -> f64 {
                 let (x0, x1) = slots.get(j).copied().unwrap_or((col.x0, col.x1));
                 let ind = pp.left_indent + pp.right_indent + if line_no + j == 0 { pp.first_line_indent } else { 0.0 };
@@ -711,34 +712,30 @@ pub fn compose(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &Compo
                 let (s, e) = (g0 + b.start, g0 + b.end);
                 let line_glyphs = &glyphs[s..e.max(s)];
                 let (asc, tops, desc, lead) = line_metrics(line_glyphs, &glyphs, s, base_leading, base_chars.size, db, &base_chars);
-                let mut baseline = cur.next_baseline(f, col, lead, asc, tops, &pp);
-                // Baseline grid.
-                if let Some((g_start, inc)) = f.grid
-                    && (pp.grid_align == GridAlign::AllLines || (pp.grid_align == GridAlign::FirstLineOnly && line_no == 0))
-                    && inc > 0.0
-                {
-                    let n = ((baseline - g_start) / inc - 1e-6).ceil();
-                    baseline = g_start + n * inc;
-                }
-                // Wrap: push the line down until a slot exists.
+                // Baseline grid: the next grid line at or below.
+                let grid = f.grid.filter(|&(_, inc)| {
+                    inc > 0.0 && (pp.grid_align == GridAlign::AllLines || (pp.grid_align == GridAlign::FirstLineOnly && line_no == 0))
+                });
+                let snap = |y: f64| grid.map_or(y, |(g_start, inc)| g_start + ((y - g_start) / inc - 1e-6).ceil() * inc);
+                let mut baseline = snap(cur.next_baseline(f, col, lead, asc, tops, &pp));
+                // Wrap: push the line down to the first position with a slot (back on the grid).
                 let (mut x0, mut x1) = (col.x0, col.x1);
                 if !f.exclusions.is_empty() {
+                    let jump = cur.jump(f, lead, asc, tops);
                     let mut tries = 0;
                     loop {
-                        match free_slot(f, col, baseline - asc, baseline + desc, base_size) {
-                            Some((a, b)) => {
-                                x0 = a;
-                                x1 = b;
-                                break;
-                            }
-                            None => {
-                                baseline += 1.0;
-                                tries += 1;
-                                if baseline > col.y1 || tries > 4000 {
-                                    break;
-                                }
-                            }
+                        let Some((nb, (a, z))) = wrap_slot(f, col, baseline, asc, desc, jump, base_size) else {
+                            // No room in this column.
+                            baseline = baseline.max(col.y1) + 1.0;
+                            break;
+                        };
+                        let pushed = nb > baseline;
+                        (baseline, x0, x1) = (nb, a, z);
+                        tries += 1;
+                        if !pushed || grid.is_none() || tries > 4000 {
+                            break;
                         }
+                        baseline = snap(baseline);
                     }
                 }
                 let capped = line_cap[pi] == Some(line_no) && line_no > col_first_line;
@@ -1294,22 +1291,34 @@ impl Cursor {
     fn next_baseline(&self, f: &FrameSpec, col: Rect, lead: f64, asc: f64, tops: Tops, _pp: &ParaProps) -> f64 {
         match self.last_baseline {
             Some(b) => b + lead + self.pending,
-            None => {
-                let off = match f.opts.first_baseline {
-                    // Vertical frames measure from the ascent.
-                    FirstBaseline::Ascent if f.opts.vertical => asc,
-                    FirstBaseline::CapHeight if f.opts.vertical => asc * 0.72,
-                    FirstBaseline::XHeight if f.opts.vertical => asc * 0.5,
-                    FirstBaseline::Ascent => tops.typo_ascent,
-                    FirstBaseline::CapHeight => tops.cap,
-                    FirstBaseline::XHeight => tops.xh,
-                    FirstBaseline::Leading => lead,
-                    FirstBaseline::Fixed => 0.0,
-                };
-                col.y0 + off.max(f.opts.first_baseline_min)
-            }
+            None => col.y0 + first_baseline_offset(f, lead, asc, tops),
         }
     }
+    /// How the next line clears a Jump Object wrap: by whole leadings below the line above, or, first
+    /// in its column, as at the top of a frame whose top is the wrap bottom.
+    fn jump(&self, f: &FrameSpec, lead: f64, asc: f64, tops: Tops) -> Jump {
+        match self.last_baseline {
+            Some(_) => Jump { top: lead, step: lead },
+            None => Jump { top: first_baseline_offset(f, lead, asc, tops), step: 0.0 },
+        }
+    }
+}
+
+/// The frame's first baseline offset below the top of a column, for a line with leading `lead`,
+/// ascent `asc` and first baseline heights `tops`.
+fn first_baseline_offset(f: &FrameSpec, lead: f64, asc: f64, tops: Tops) -> f64 {
+    let off = match f.opts.first_baseline {
+        // Vertical frames measure from the ascent.
+        FirstBaseline::Ascent if f.opts.vertical => asc,
+        FirstBaseline::CapHeight if f.opts.vertical => asc * 0.72,
+        FirstBaseline::XHeight if f.opts.vertical => asc * 0.5,
+        FirstBaseline::Ascent => tops.typo_ascent,
+        FirstBaseline::CapHeight => tops.cap,
+        FirstBaseline::XHeight => tops.xh,
+        FirstBaseline::Leading => lead,
+        FirstBaseline::Fixed => 0.0,
+    };
+    off.max(f.opts.first_baseline_min)
 }
 
 /// A line's tallest typographic ascender, cap height and x height above its baseline: the
@@ -1354,6 +1363,64 @@ fn line_metrics(
     (asc, tops, desc, lead)
 }
 
+/// How a line clears Jump Object wraps. The line occupies `[baseline − top, baseline]` (its leading,
+/// or its first baseline offset at the top of a column) and must not overlap the wrap; it may hang its
+/// descenders into the wrap. Below a wrap it moves down from its place in whole `step`s until it clears
+/// the wrap bottom (`step` 0: its top lands on the wrap bottom).
+#[derive(Clone, Copy, Debug)]
+struct Jump {
+    top: f64,
+    step: f64,
+}
+
+/// Slack for float error when a line is tested against a Jump Object wrap's edges.
+const JUMP_EPS: f64 = 1e-6;
+
+/// The first baseline at or below `baseline` where a line with ascent `asc` and descent `desc` has a
+/// free slot in `col`, and that slot; None if there is none above the column bottom.
+///
+/// A line under a Jump Object wrap moves below it as `jump` says. Other wraps are rectangles, so the
+/// free space only grows where one in the line's band ends: the search jumps from one such bottom
+/// edge to the next, and a line that clears a wrap has its top exactly on the wrap's bottom.
+fn wrap_slot(f: &FrameSpec, col: Rect, baseline: f64, asc: f64, desc: f64, jump: Jump, size: f64) -> Option<(f64, (f64, f64))> {
+    let top = jump.top.max(0.0);
+    let mut b = baseline;
+    // Each step passes at least one wrap; the cap bounds hostile geometry.
+    for _ in 0..4000 {
+        let jumped = f
+            .exclusions
+            .iter()
+            .filter(|e| e.mode == WrapMode::JumpObject)
+            .map(|e| e.rect)
+            .filter(|r| r.x0 < col.x1 && r.x1 > col.x0 && b > r.y0 + JUMP_EPS && b - top < r.y1 - JUMP_EPS)
+            .fold(f64::NEG_INFINITY, |m, r| m.max(r.y1));
+        b = if jumped > f64::NEG_INFINITY {
+            if jump.step > 0.0 {
+                // Whole steps from the line's own place (at least one step past the line above).
+                baseline + ((jumped + top - baseline - JUMP_EPS / 2.0) / jump.step).ceil().max(0.0) * jump.step
+            } else {
+                jumped + top
+            }
+        } else if let Some(slot) = free_slot(f, col, b - asc, b + desc, size) {
+            return Some((b, slot));
+        } else {
+            let (y0, y1) = (b - asc, b + desc);
+            let edge = f
+                .exclusions
+                .iter()
+                .filter(|e| e.mode != WrapMode::JumpObject)
+                .map(|e| e.rect)
+                .filter(|r| r.y0 < y1 && r.y1 > y0)
+                .fold(f64::INFINITY, |m, r| m.min(r.y1));
+            edge + asc
+        };
+        if b.is_nan() || b > col.y1 {
+            return None;
+        }
+    }
+    None
+}
+
 /// Widest free horizontal interval of `col` in the band, or None if blocked.
 fn free_slot(f: &FrameSpec, col: Rect, y0: f64, y1: f64, size: f64) -> Option<(f64, f64)> {
     let mut free = vec![(col.x0, col.x1)];
@@ -1362,7 +1429,6 @@ fn free_slot(f: &FrameSpec, col: Rect, y0: f64, y1: f64, size: f64) -> Option<(f
         let overlaps_band = r.y0 < y1 && r.y1 > y0;
         match ex.mode {
             WrapMode::JumpToNextColumn if y1 > r.y0 && r.x0 < col.x1 && r.x1 > col.x0 => return None,
-            WrapMode::JumpObject if overlaps_band && r.x0 < col.x1 && r.x1 > col.x0 => return None,
             WrapMode::BoundingBox | WrapMode::Contour if overlaps_band => {
                 let mut next = Vec::new();
                 for (a, b) in free {
@@ -1386,7 +1452,17 @@ fn free_slot(f: &FrameSpec, col: Rect, y0: f64, y1: f64, size: f64) -> Option<(f
 }
 
 #[allow(clippy::too_many_arguments)]
-fn estimate_slots(f: &FrameSpec, col: Rect, first: f64, lead: f64, size: f64, glyphs: &[Glyph], pp: &ParaProps, line_no: usize) -> Vec<(f64, f64)> {
+fn estimate_slots(
+    f: &FrameSpec,
+    col: Rect,
+    first: f64,
+    jump: Jump,
+    lead: f64,
+    size: f64,
+    glyphs: &[Glyph],
+    pp: &ParaProps,
+    line_no: usize,
+) -> Vec<(f64, f64)> {
     let _ = (pp, line_no);
     if f.exclusions.is_empty() {
         return vec![];
@@ -1396,20 +1472,21 @@ fn estimate_slots(f: &FrameSpec, col: Rect, first: f64, lead: f64, size: f64, gl
     let n = ((total / (col.width().max(10.0) * 0.5)).ceil() as usize + 2).min(2000);
     let mut v = Vec::with_capacity(n);
     let mut b = first;
+    let mut jump = jump;
     for _ in 0..n {
-        let mut tries = 0;
-        let slot = loop {
-            if let Some(s) = free_slot(f, col, b - size * 0.8, b + size * 0.25, size) {
-                break s;
+        let slot = match wrap_slot(f, col, b, size * 0.8, size * 0.25, jump, size) {
+            Some((nb, s)) => {
+                b = nb;
+                s
             }
-            b += 1.0;
-            tries += 1;
-            if b > col.y1 || tries > 4000 {
-                break (col.x0, col.x1);
+            None => {
+                b = b.max(col.y1);
+                (col.x0, col.x1)
             }
         };
         v.push(slot);
         b += lead;
+        jump = Jump { top: lead, step: lead };
     }
     v
 }
