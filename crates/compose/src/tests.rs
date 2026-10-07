@@ -1028,10 +1028,15 @@ fn only_english_text_gets_english_hyphenation() {
     assert_eq!(hyphenated(&d2, sid), 0, "French isn't hyphenated with English rules");
 }
 
-/// Source Sans 3 Regular (OS/2 typo ascender = hhea ascender = 1000/1000 em) renamed to `family`
-/// (13 characters, the length of "Source Sans 3"), with OS/2 `sTypoAscender` set to
-/// `typo_ascender`, or without an OS/2 table for `None`.
-fn typo_test_font(family: &str, typo_ascender: Option<i16>) -> Vec<u8> {
+/// OS/2 field offsets: sTypoAscender, sxHeight, sCapHeight.
+const TYPO_ASCENDER: usize = 68;
+const X_HEIGHT: usize = 86;
+const CAP_HEIGHT: usize = 88;
+
+/// Source Sans 3 Regular (1000 units per em; OS/2 typo ascender = hhea ascender = 1000, cap height
+/// 660, x height 486) renamed to `family` (13 characters, the length of "Source Sans 3"), with the
+/// OS/2 fields at the given offsets set, or without an OS/2 table for `None`.
+fn test_font(family: &str, os2_fields: Option<&[(usize, i16)]>) -> Vec<u8> {
     let mut b = designcraft_fonts::bundled()[0].to_vec();
     assert_eq!(family.len(), "Source Sans 3".len());
     let utf16 = |s: &str| s.encode_utf16().flat_map(u16::to_be_bytes).collect::<Vec<u8>>();
@@ -1044,15 +1049,22 @@ fn typo_test_font(family: &str, typo_ascender: Option<i16>) -> Vec<u8> {
     }
     let tables = u16::from_be_bytes([b[4], b[5]]) as usize;
     let rec = (0..tables).map(|t| 12 + 16 * t).find(|&r| &b[r..r + 4] == b"OS/2").unwrap();
-    match typo_ascender {
-        Some(v) => {
+    match os2_fields {
+        Some(fields) => {
             let os2 = u32::from_be_bytes(b[rec + 8..rec + 12].try_into().unwrap()) as usize;
-            b[os2 + 68..os2 + 70].copy_from_slice(&v.to_be_bytes());
+            for &(at, v) in fields {
+                b[os2 + at..os2 + at + 2].copy_from_slice(&v.to_be_bytes());
+            }
         }
         // Still sorted between its neighbours, so the table directory stays valid.
         None => b[rec..rec + 4].copy_from_slice(b"OS/1"),
     }
     b
+}
+
+/// [`test_font`] with OS/2 `sTypoAscender` set to `typo_ascender`, or without OS/2 for `None`.
+fn typo_test_font(family: &str, typo_ascender: Option<i16>) -> Vec<u8> {
+    test_font(family, typo_ascender.map(|v| [(TYPO_ASCENDER, v)]).as_ref().map(|f| f.as_slice()))
 }
 
 /// First baseline (frame space) of a 20 pt line in `family` in a frame at y = 36 with a 4 pt top
@@ -1092,9 +1104,9 @@ fn ascent_first_baseline_uses_the_typographic_ascender() {
     // The minimum offset still wins when it is larger.
     assert!(close(at(FirstBaseline::Ascent, 18.0), top + 18.0));
     assert!(close(at(FirstBaseline::Ascent, 10.0), top + 14.0));
-    // The other kinds are unchanged.
-    assert!(close(at(FirstBaseline::CapHeight, 0.0), top + 20.0 * 0.72));
-    assert!(close(at(FirstBaseline::XHeight, 0.0), top + 10.0));
+    // The other kinds don't use it.
+    assert!(close(at(FirstBaseline::CapHeight, 0.0), top + 0.660 * 20.0));
+    assert!(close(at(FirstBaseline::XHeight, 0.0), top + 0.486 * 20.0));
     assert!(close(at(FirstBaseline::Leading, 0.0), top + 24.0));
     assert!(close(at(FirstBaseline::Fixed, 0.0), top));
     // Vertical scale scales it like the ascent.
@@ -1152,4 +1164,79 @@ fn vertical_frames_keep_the_ascent_first_baseline() {
     });
     // Composed in the turned box (no inset): the hhea ascent, 1 em of 20 pt.
     assert!((b - 20.0).abs() < 0.01, "{b}");
+}
+
+#[test]
+fn cap_height_and_x_height_first_baselines_use_the_fonts_cap_and_x_heights() {
+    use designcraft_doc::FirstBaseline;
+    let db = designcraft_fonts::FontDb::global();
+    db.add_font(test_font("CapXHeight 01", Some(&[(CAP_HEIGHT, 500), (X_HEIGHT, 300)])));
+    let face = db.face("CapXHeight 01", "Regular");
+    assert_eq!(face.family, "CapXHeight 01");
+    assert_eq!((face.ascent, face.cap_height, face.x_height), (1000.0, 500.0, 300.0));
+    let top = 36.0 + 4.0;
+    let at = |kind: FirstBaseline, min: f64| {
+        first_baseline_in("CapXHeight 01", |o| {
+            o.first_baseline = kind;
+            o.first_baseline_min = min;
+        })
+    };
+    let close = |a: f64, b: f64| (a - b).abs() < 0.01;
+    // Cap height 0.5 em and x height 0.3 em of 20 pt, not 0.72 / 0.5 of the 1 em ascent.
+    assert!(close(at(FirstBaseline::CapHeight, 0.0), top + 10.0), "{}", at(FirstBaseline::CapHeight, 0.0));
+    assert!(close(at(FirstBaseline::XHeight, 0.0), top + 6.0), "{}", at(FirstBaseline::XHeight, 0.0));
+    // The minimum offset still wins when it is larger.
+    assert!(close(at(FirstBaseline::CapHeight, 12.0), top + 12.0));
+    assert!(close(at(FirstBaseline::XHeight, 5.0), top + 6.0));
+    // Vertical scale and a raised baseline count, as for the ascent.
+    let (mut d, sid, fid) = doc_with("Hxg Hxg", Rect::new(36.0, 36.0, 300.0, 300.0), ParaAttrs::default());
+    let st = d.story_mut(sid).unwrap();
+    st.format_chars(0..7, |f| {
+        f.over.font_family = Some("CapXHeight 01".into());
+        f.over.size = Some(20.0);
+        f.over.v_scale = Some(1.5);
+    });
+    st.format_chars(4..5, |f| f.over.baseline_shift = Some(1.0));
+    let tf = d.item_mut(fid).unwrap().text_frame_mut().unwrap();
+    tf.options.inset = [4.0, 0.0, 0.0, 0.0];
+    tf.options.first_baseline = FirstBaseline::CapHeight;
+    let first = |d: &Document| compose_story(d, sid, &ComposeOptions::default()).frames[0].lines[0].baseline;
+    assert!(close(first(&d), top + 15.0 + 1.0), "{}", first(&d));
+    d.item_mut(fid).unwrap().text_frame_mut().unwrap().options.first_baseline = FirstBaseline::XHeight;
+    assert!(close(first(&d), top + 9.0 + 1.0), "{}", first(&d));
+}
+
+#[test]
+fn cap_height_and_x_height_fall_back_without_usable_os2_values() {
+    use designcraft_doc::FirstBaseline;
+    let db = designcraft_fonts::FontDb::global();
+    // No OS/2 table, zero / negative and absurd values: 0.72 and 0.5 of the (1 em) ascent.
+    let zero: &[(usize, i16)] = &[(CAP_HEIGHT, 0), (X_HEIGHT, -40)];
+    let big: &[(usize, i16)] = &[(CAP_HEIGHT, i16::MAX), (X_HEIGHT, i16::MAX)];
+    for (family, fields) in [("CapXHeightNoO", None), ("CapXHeightNeg", Some(zero)), ("CapXHeightBig", Some(big))] {
+        db.add_font(test_font(family, fields));
+        let face = db.face(family, "Regular");
+        assert_eq!(face.family, family);
+        assert_eq!((face.cap_height, face.x_height), (face.ascent * 0.72, face.ascent * 0.5), "{family}");
+        let cap = first_baseline_in(family, |o| o.first_baseline = FirstBaseline::CapHeight);
+        let x = first_baseline_in(family, |o| o.first_baseline = FirstBaseline::XHeight);
+        assert!((cap - (40.0 + 14.4)).abs() < 0.01 && (x - (40.0 + 10.0)).abs() < 0.01, "{family}: {cap} {x}");
+    }
+}
+
+#[test]
+fn vertical_frames_keep_the_cap_height_and_x_height_first_baselines() {
+    use designcraft_doc::FirstBaseline;
+    let db = designcraft_fonts::FontDb::global();
+    db.add_font(test_font("CapXHeightVrt", Some(&[(CAP_HEIGHT, 500), (X_HEIGHT, 300)])));
+    let at = |kind: FirstBaseline| {
+        first_baseline_in("CapXHeightVrt", |o| {
+            o.first_baseline = kind;
+            o.vertical = true;
+            o.inset = [0.0; 4];
+        })
+    };
+    // 0.72 and 0.5 of the 1 em ascent of 20 pt.
+    assert!((at(FirstBaseline::CapHeight) - 14.4).abs() < 0.01, "{}", at(FirstBaseline::CapHeight));
+    assert!((at(FirstBaseline::XHeight) - 10.0).abs() < 0.01, "{}", at(FirstBaseline::XHeight));
 }

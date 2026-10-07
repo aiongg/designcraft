@@ -688,7 +688,9 @@ pub fn compose(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &Compo
                 _ => col,
             };
             // Estimate slots for the breaker with the paragraph's base leading.
-            let est_first = cur.next_baseline(f, col, base_leading, base_chars.size * 0.75, base_chars.size * 0.75, &pp);
+            let est_asc = base_chars.size * 0.75;
+            let est_tops = Tops { typo_ascent: est_asc, cap: est_asc * 0.72, xh: est_asc * 0.5 };
+            let est_first = cur.next_baseline(f, col, base_leading, est_asc, est_tops, &pp);
             let slots = estimate_slots(f, col, est_first, base_leading, base_chars.size, &glyphs[g0..], &pp, line_no);
             let width = |j: usize| -> f64 {
                 let (x0, x1) = slots.get(j).copied().unwrap_or((col.x0, col.x1));
@@ -708,8 +710,8 @@ pub fn compose(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &Compo
             for (k, b) in breaks.iter().enumerate() {
                 let (s, e) = (g0 + b.start, g0 + b.end);
                 let line_glyphs = &glyphs[s..e.max(s)];
-                let (asc, typo_asc, desc, lead) = line_metrics(line_glyphs, &glyphs, s, base_leading, base_chars.size, db, &base_chars);
-                let mut baseline = cur.next_baseline(f, col, lead, asc, typo_asc, &pp);
+                let (asc, tops, desc, lead) = line_metrics(line_glyphs, &glyphs, s, base_leading, base_chars.size, db, &base_chars);
+                let mut baseline = cur.next_baseline(f, col, lead, asc, tops, &pp);
                 // Baseline grid.
                 if let Some((g_start, inc)) = f.grid
                     && (pp.grid_align == GridAlign::AllLines || (pp.grid_align == GridAlign::FirstLineOnly && line_no == 0))
@@ -1287,18 +1289,20 @@ impl Cursor {
         self.last_baseline = None;
         self.pending = 0.0;
     }
-    /// Baseline for the next line with leading `lead`, ascent `asc` and typographic ascender
-    /// `typo_asc`.
-    fn next_baseline(&self, f: &FrameSpec, col: Rect, lead: f64, asc: f64, typo_asc: f64, _pp: &ParaProps) -> f64 {
+    /// Baseline for the next line with leading `lead`, ascent `asc` and first baseline heights
+    /// `tops`.
+    fn next_baseline(&self, f: &FrameSpec, col: Rect, lead: f64, asc: f64, tops: Tops, _pp: &ParaProps) -> f64 {
         match self.last_baseline {
             Some(b) => b + lead + self.pending,
             None => {
                 let off = match f.opts.first_baseline {
-                    // Vertical frames keep the ascent.
+                    // Vertical frames measure from the ascent.
                     FirstBaseline::Ascent if f.opts.vertical => asc,
-                    FirstBaseline::Ascent => typo_asc,
-                    FirstBaseline::CapHeight => asc * 0.72,
-                    FirstBaseline::XHeight => asc * 0.5,
+                    FirstBaseline::CapHeight if f.opts.vertical => asc * 0.72,
+                    FirstBaseline::XHeight if f.opts.vertical => asc * 0.5,
+                    FirstBaseline::Ascent => tops.typo_ascent,
+                    FirstBaseline::CapHeight => tops.cap,
+                    FirstBaseline::XHeight => tops.xh,
                     FirstBaseline::Leading => lead,
                     FirstBaseline::Fixed => 0.0,
                 };
@@ -1306,6 +1310,15 @@ impl Cursor {
             }
         }
     }
+}
+
+/// A line's tallest typographic ascender, cap height and x height above its baseline: the
+/// first baseline offsets.
+#[derive(Clone, Copy, Default)]
+struct Tops {
+    typo_ascent: f64,
+    cap: f64,
+    xh: f64,
 }
 
 fn line_metrics(
@@ -1316,25 +1329,29 @@ fn line_metrics(
     base_size: f64,
     db: &FontDb,
     base: &designcraft_doc::CharProps,
-) -> (f64, f64, f64, f64) {
+) -> (f64, Tops, f64, f64) {
     let _ = db;
     let src: &[Glyph] = if line.is_empty() { all.get(s..(s + 1).min(all.len())).unwrap_or(&[]) } else { line };
     if src.is_empty() {
         let face = FontDb::global().face(&base.font_family, &base.font_style);
         let k = base_size / face.upem;
-        return (face.ascent * k, face.typo_ascent * k, face.descent * k, base_leading);
+        let tops = Tops { typo_ascent: face.typo_ascent * k, cap: face.cap_height * k, xh: face.x_height * k };
+        return (face.ascent * k, tops, face.descent * k, base_leading);
     }
     let mut asc: f64 = 0.0;
-    let mut typo_asc: f64 = 0.0;
+    let mut tops = Tops::default();
     let mut desc: f64 = 0.0;
     let mut lead: f64 = 0.0;
     for g in src {
         asc = asc.max(g.ascent + g.shift.max(0.0));
-        typo_asc = typo_asc.max(g.typo_ascent + g.shift.max(0.0));
+        let up = g.shift.max(0.0);
+        tops.typo_ascent = tops.typo_ascent.max(g.typo_ascent + up);
+        tops.cap = tops.cap.max(g.cap + up);
+        tops.xh = tops.xh.max(g.xh + up);
         desc = desc.max(g.descent - g.shift.min(0.0));
         lead = lead.max(g.leading);
     }
-    (asc, typo_asc, desc, lead)
+    (asc, tops, desc, lead)
 }
 
 /// Widest free horizontal interval of `col` in the band, or None if blocked.

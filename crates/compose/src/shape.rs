@@ -33,6 +33,8 @@ pub struct Glyph {
     pub descent: f64,
     /// The leading this character asks for (absolute, or auto = size × auto %).
     pub leading: f64,
+    /// Cap height and x height, scaled like `ascent`: the Cap Height and x Height first baseline
+    /// offsets.
     pub cap: f64,
     pub xh: f64,
     pub size: f64,
@@ -418,12 +420,16 @@ fn shape_run(
                                 g.adv = o.w;
                                 g.ascent = g.ascent.max(o.h + y);
                                 g.typo_ascent = g.typo_ascent.max(o.h + y);
+                                g.cap = g.cap.max(o.h + y);
+                                g.xh = g.xh.max(o.h + y);
                                 g.descent = g.descent.max(-y);
                             }
                             // Pushes its line down by its height and spacing.
                             None => {
                                 g.ascent += o.h + o.space;
                                 g.typo_ascent += o.h + o.space;
+                                g.cap += o.h + o.space;
+                                g.xh += o.h + o.space;
                             }
                         }
                         if auto || o.y_offset.is_none() {

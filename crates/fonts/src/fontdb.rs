@@ -63,8 +63,8 @@ pub struct FontFace {
     pub typo_ascent: f64,
     /// Descender in font units (positive = down).
     pub descent: f64,
-    /// Cap height and x height in font units (estimated from the ascent when the font has no OS/2
-    /// values).
+    /// Cap height and x height in font units (estimated from the ascent when the font has no
+    /// plausible OS/2 values): the Cap Height and x Height first baseline offsets.
     pub cap_height: f64,
     pub x_height: f64,
     pub shaper: harfrust::ShaperData,
@@ -433,6 +433,7 @@ fn make_face(bytes: FontBytes, index: u32, family: String, style: String, coords
     let settings: Vec<(skrifa::Tag, f32)> = coords.iter().map(|(t, v)| (skrifa::Tag::new(t), *v)).collect();
     let location = if coords.is_empty() { Location::default() } else { f.axes().location(settings.iter().copied()) };
     let m = f.metrics(Size::unscaled(), &location);
+    let upem = m.units_per_em.max(1) as f64;
     let a = f.attributes();
     let hb = harfrust::FontRef::from_index(data, index).ok()?;
     let shaper = harfrust::ShaperData::new(&hb);
@@ -450,12 +451,12 @@ fn make_face(bytes: FontBytes, index: u32, family: String, style: String, coords
         style,
         weight,
         italic,
-        upem: m.units_per_em.max(1) as f64,
+        upem,
         ascent: m.ascent as f64,
-        typo_ascent: typo_ascent(&f, &location, m.units_per_em.max(1) as f64, m.ascent as f64),
+        typo_ascent: typo_ascent(&f, &location, upem).unwrap_or(m.ascent as f64),
         descent: -(m.descent as f64),
-        cap_height: m.cap_height.map(|v| v as f64).filter(|v| *v > 0.0).unwrap_or(m.ascent as f64 * 0.72),
-        x_height: m.x_height.map(|v| v as f64).filter(|v| *v > 0.0).unwrap_or(m.ascent as f64 * 0.5),
+        cap_height: plausible(m.cap_height.map(f64::from), upem).unwrap_or(m.ascent as f64 * 0.72),
+        x_height: plausible(m.x_height.map(f64::from), upem).unwrap_or(m.ascent as f64 * 0.5),
         shaper,
         coords,
         location,
@@ -466,18 +467,22 @@ fn make_face(bytes: FontBytes, index: u32, family: String, style: String, coords
     })
 }
 
-/// The OS/2 typographic ascender in font units at `location`, or `fallback` when the font has no
-/// OS/2 table or the value isn't a plausible ascender (not above 0, or over 4 em).
-fn typo_ascent(f: &skrifa::FontRef<'_>, location: &Location, upem: f64, fallback: f64) -> f64 {
+/// A font's height above the baseline (font units) if it is plausible: above 0 and at most 4 em.
+fn plausible(v: Option<f64>, upem: f64) -> Option<f64> {
+    v.filter(|v| *v > 0.0 && *v <= 4.0 * upem)
+}
+
+/// The OS/2 typographic ascender in font units at `location`, if the font has an OS/2 table and
+/// the value is [`plausible`].
+fn typo_ascent(f: &skrifa::FontRef<'_>, location: &Location, upem: f64) -> Option<f64> {
     use skrifa::raw::TableProvider;
-    let Ok(os2) = f.os2() else { return fallback };
-    let mut v = os2.s_typo_ascender() as f64;
+    let mut v = f.os2().ok()?.s_typo_ascender() as f64;
     if !location.coords().is_empty()
         && let Ok(mvar) = f.mvar()
     {
         v += mvar.metric_delta(skrifa::raw::tables::mvar::tags::HASC, location.coords()).map_or(0.0, |d| d.to_f64());
     }
-    if v > 0.0 && v <= 4.0 * upem { v } else { fallback }
+    plausible(Some(v), upem)
 }
 
 /// The named style part of a style with axis settings (`Bold {wght:650}` → `Bold`).
