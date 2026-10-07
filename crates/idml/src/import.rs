@@ -1152,6 +1152,12 @@ impl<'r> Importer<'r> {
         a.drop_cap_lines = u("DropCapLines");
         a.drop_cap_chars = u("DropCapCharacters");
         a.drop_cap_style = e.prop("DropCapStyle").map(|r| self.char_style_ref(r.trim()));
+        // DropcapDetail bits: 1 = Align Left Edge, 2 = Scale for Descenders.
+        if let Some(v) = e.num("DropcapDetail").filter(|v| v.is_finite() && *v >= 0.0) {
+            let bits = v as u32;
+            a.drop_cap_align_left = Some(bits & 1 != 0);
+            a.drop_cap_scale_descenders = Some(bits & 2 != 0);
+        }
         if let Some(g) = e.prop("GridAlignment") {
             a.grid_align = Some(if g == "None" {
                 GridAlign::None

@@ -1150,9 +1150,13 @@ impl<'a> Ex<'a> {
         n!(space_after, "SpaceAfter");
         n!(drop_cap_lines, "DropCapLines");
         n!(drop_cap_chars, "DropCapCharacters");
-        if let Some(s) = &a.drop_cap_style {
-            let s = if s.is_empty() { designcraft_doc::NO_CHAR_STYLE } else { s.as_str() };
-            el.set("DropCapStyle", names::style_self("CharacterStyle", CHAR_BUILTINS, s));
+        // The drop cap's character style isn't written: IDML has no attribute for it (InDesign
+        // applies one through a Dropcap nested style).
+        if a.drop_cap_align_left.is_some() || a.drop_cap_scale_descenders.is_some() {
+            let d = designcraft_doc::ParaProps::default();
+            let bits = u32::from(a.drop_cap_align_left.unwrap_or(d.drop_cap_align_left))
+                | u32::from(a.drop_cap_scale_descenders.unwrap_or(d.drop_cap_scale_descenders)) << 1;
+            el.set("DropcapDetail", bits);
         }
         if let Some(g) = a.grid_align {
             match g {

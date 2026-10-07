@@ -323,6 +323,8 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Characters:", "الأحرف:"),
     ("Drop Lines", "أسطر الاستهلال"),
     ("Drop Chars", "أحرف الاستهلال"),
+    ("Align Left Edge", "محاذاة الحافة اليسرى"),
+    ("Scale for Descenders", "تحجيم للأحرف الهابطة"),
     ("chars", "محارف محددة"),
     ("[Automatic]", "[تلقائي]"),
     ("Size:", "الحجم:"),

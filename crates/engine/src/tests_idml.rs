@@ -346,7 +346,7 @@ fn type_para_sets_a_drop_cap_that_survives_idml() {
     let r = s.execute("frame.create", &json!({"rect": [72, 72, 300, 400], "content": "text", "text": text})).unwrap();
     let sid = r["story"].as_u64().unwrap();
     s.execute("text.select", &json!({"story": sid, "anchor": 3, "focus": 3})).unwrap();
-    s.execute("type.para", &json!({"attrs": {"dropCapLines": 3, "dropCapChars": 1, "dropCapStyle": "Initial"}})).unwrap();
+    s.execute("type.para", &json!({"attrs": {"dropCapLines": 3, "dropCapChars": 1, "dropCapStyle": "Initial", "dropCapAlignLeft": false}})).unwrap();
     let d = s.doc().unwrap().doc.clone();
     let cs = designcraft_compose::compose_story(&d, designcraft_doc::StoryId(sid), &Default::default());
     let lines = &cs.frames[0].lines;
@@ -358,5 +358,7 @@ fn type_para_sets_a_drop_cap_that_survives_idml() {
     assert_eq!((p.drop_cap_lines, p.drop_cap_chars, p.drop_cap_style.as_deref()), (Some(3), Some(1), Some("Initial")));
     let back = designcraft_idml::import_idml(&designcraft_idml::export_idml(&d)).unwrap();
     let p = &back.stories.values().find(|st| st.text.starts_with("Once")).unwrap().paras[0].para;
-    assert_eq!((p.drop_cap_lines, p.drop_cap_chars, p.drop_cap_style.as_deref()), (Some(3), Some(1), Some("Initial")));
+    assert_eq!((p.drop_cap_lines, p.drop_cap_chars, p.drop_cap_align_left), (Some(3), Some(1), Some(false)));
+    // IDML has no attribute for the drop cap's character style.
+    assert_eq!(p.drop_cap_style, None);
 }

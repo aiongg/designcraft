@@ -277,6 +277,7 @@ fn indesign_text_defaults() -> Vec<AttrRow> {
         "SpaceAfter": "0" => 0.0, "6" => 6.0, |r| r.0.space_after;
         "DropCapLines": "0" => 0, "3" => 3, |r| r.0.drop_cap_lines;
         "DropCapCharacters": "0" => 0, "1" => 1, |r| r.0.drop_cap_chars;
+        "DropcapDetail": "1" => (true, false), "2" => (false, true), |r| (r.0.drop_cap_align_left, r.0.drop_cap_scale_descenders);
         "GridAlignment": "None" => GridAlign::None, "AlignToBaseline" => GridAlign::AllLines, |r| r.0.grid_align;
         "Composer": "HL Composer" => Composer::Paragraph, "HL Single" => Composer::SingleLine, |r| r.0.composer;
         "Hyphenation": "true" => true, "false" => false, |r| r.0.hyphenate;
@@ -984,7 +985,21 @@ fn drop_caps_import_and_round_trip() {
     };
     let d = import_idml_with(&bytes, &|_| None).unwrap();
     check(&d);
-    check(&import_idml(&export_idml(&d)).unwrap());
+    // The drop cap's character style isn't written to IDML (InDesign sets it through a Dropcap
+    // nested style); Align Left Edge and Scale for Descenders are, as DropcapDetail.
+    let mut d = d;
+    if let Some(s) = d.styles_mut().para_mut("Opener") {
+        s.para.drop_cap_align_left = Some(false);
+        s.para.drop_cap_scale_descenders = Some(true);
+    }
+    let bytes = export_idml(&d);
+    assert!(!zip_text(&bytes, "").contains("DropCapStyle"));
+    assert!(zip_text(&bytes, "Resources/Styles.xml").contains(r#"DropcapDetail="2""#));
+    let back = import_idml(&bytes).unwrap();
+    let st = back.styles.para("Opener").unwrap();
+    assert_eq!((st.para.drop_cap_chars, st.para.drop_cap_lines, st.para.drop_cap_style.as_deref()), (Some(1), Some(3), None));
+    assert_eq!((st.para.drop_cap_align_left, st.para.drop_cap_scale_descenders), (Some(false), Some(true)));
+    assert_eq!(st.para.nested_styles.as_ref().map(|n| n[0].until.clone()), Some(designcraft_doc::NestedUntil::Dropcap));
 }
 
 /// Frames take the corners and Text Frame Options they don't write from their object style chain,

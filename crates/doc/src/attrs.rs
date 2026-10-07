@@ -568,12 +568,17 @@ attr_set! {
         last_line_indent: f64 = 0.0,
         space_before: f64 = 0.0,
         space_after: f64 = 0.0,
-        /// Drop cap: the paragraph's first `drop_cap_chars` characters (grapheme clusters) set
-        /// `drop_cap_lines` lines tall, in the character style `drop_cap_style` ("" or `[None]`: the
-        /// text's own formatting).
+        /// Drop cap: the paragraph's first `drop_cap_chars` characters (code points, never
+        /// splitting a base from its combining marks) set `drop_cap_lines` lines tall, in the
+        /// character style `drop_cap_style` ("" or `[None]`: the text's own formatting).
         drop_cap_lines: u32 = 0,
         drop_cap_chars: u32 = 0,
         drop_cap_style: String = String::new(),
+        /// Align Left Edge: the drop cap's ink starts at the indent (its first letter's left side
+        /// bearing is taken off), and the lines beside it start where its advance ends.
+        drop_cap_align_left: bool = true,
+        /// Scale for Descenders (kept and round-tripped; doesn't change the layout).
+        drop_cap_scale_descenders: bool = false,
         /// Nested styles, in order from the paragraph start.
         nested_styles: Vec<NestedStyle> = Vec::new(),
         /// GREP styles: a character style for every match of a pattern (applied after nested).

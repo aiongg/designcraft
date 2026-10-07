@@ -1576,8 +1576,15 @@ fn short_paragraph_keeps_its_drop_cap_and_the_next_paragraph_is_not_indented() {
 }
 
 #[test]
-fn drop_cap_counts_grapheme_clusters_and_clamps_to_the_paragraph() {
-    // An accented letter written with a combining mark is one character.
+fn drop_cap_counts_code_points_without_splitting_clusters_and_clamps_to_the_paragraph() {
+    // Four characters: a letter, its combining mark, another letter and a no-break space.
+    let (d, sid, _) = drop_doc("A\u{301}B\u{a0}rest of the words", drop_cap(2, 4));
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let l = &cs.frames[0].lines[0];
+    let big: Vec<usize> = l.glyphs.iter().filter(|g| g.len > 0 && g.y > 1.0).map(|g| g.byte).collect();
+    assert!(big.contains(&0) && big.contains(&3), "{big:?}");
+    assert!(big.iter().all(|b| *b < 6), "the r isn't part of it: {big:?}");
+    // One character that has a combining mark after it takes the mark too.
     let (d, sid, _) = drop_doc("e\u{301}tude and more words", drop_cap(2, 1));
     let cs = compose_story(&d, sid, &ComposeOptions::default());
     let l = &cs.frames[0].lines[0];
@@ -1748,4 +1755,38 @@ fn text_color_rules_follow_the_text() {
     let swatch = Rule { color: "[Black]".into(), tint: 0.3, ..rule };
     d.story_mut(sid).unwrap().paras[0].para.rule_above = Some(swatch);
     assert_eq!(decos(&d)[0], ("[Black]".to_string(), 0.3));
+}
+
+/// Align Left Edge (InDesign's default): the drop cap's origin moves left by its first letter's
+/// left side bearing so its ink starts at the indent, and the lines beside it start where its
+/// advance ends. Measured case: 14/18 text, two lines, one character.
+#[test]
+fn drop_cap_aligns_its_left_edge() {
+    let text = format!("Once {LOREM}");
+    let compose = |align: Option<bool>| {
+        let para = ParaAttrs { left_indent: Some(10.0), drop_cap_align_left: align, ..drop_cap(2, 1) };
+        let (mut d, sid, _) = doc_with(&text, Rect::new(0.0, 0.0, 300.0, 1000.0), para);
+        d.story_mut(sid).unwrap().paras[0].chars =
+            designcraft_doc::CharAttrs { size: Some(14.0), leading: Some(designcraft_doc::Leading::Points(18.0)), ..Default::default() };
+        compose_story(&d, sid, &ComposeOptions::default())
+    };
+    use designcraft_geom::Shape as _;
+    let ink_left = |g: &PlacedGlyph| g.x + designcraft_fonts::FontDb::global().outline(g.face.get(), g.gid).bounding_box().x0 * g.sx;
+    for align in [None, Some(true), Some(false)] {
+        let cs = compose(align);
+        let lines = all_lines(&cs);
+        let dc = &lines[0].glyphs[0];
+        assert_eq!(dc.byte, 0);
+        let lsb = ink_left(dc) - dc.x;
+        assert!(lsb > 0.5, "the O has a visible side bearing at this size: {lsb}");
+        if align != Some(false) {
+            assert!((ink_left(dc) - 10.0).abs() < 1e-6, "{align:?}: ink at {}", ink_left(dc));
+        } else {
+            assert!((dc.x - 10.0).abs() < 1e-6, "origin at {}", dc.x);
+        }
+        for l in &lines[..2] {
+            assert!((text_x(l, 1) - (dc.x + dc.adv)).abs() < 1e-6, "{align:?}: {} vs {}", text_x(l, 1), dc.x + dc.adv);
+        }
+        assert!((text_x(lines[2], 1) - 10.0).abs() < 1e-6);
+    }
 }

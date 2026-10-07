@@ -587,6 +587,8 @@ pub fn compose(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &Compo
             face.cap_height * base_chars.size / face.upem * base_chars.v_scale
         };
         let drop_grid = cur_frame.and_then(|f| f.grid).filter(|_| pp.grid_align == GridAlign::AllLines).map(|g| g.1);
+        // Align Left Edge (left-to-right paragraphs).
+        let drop_align = pp.drop_cap_align_left && pp.direction == designcraft_doc::TextDirection::LeftToRight;
         if !pp.nested_line_styles.is_empty() && cur.fi < frames.len() {
             // Nested line styles: find where the first lines end in this column, restyle them, and
             // look again (the style changes the widths) until the lines settle.
@@ -597,10 +599,10 @@ pub fn compose(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &Compo
             for _ in 0..3 {
                 // The same drop cap, spacing, hyphenation and breaker as the layout below.
                 let mut gl = sp.glyphs.clone();
-                let dc = split_drop_cap(&mut gl, drop_end, pp.drop_cap_lines, base_leading, base_cap, drop_grid);
+                let dc = split_drop_cap(db, &mut gl, drop_end, pp.drop_cap_lines, base_leading, base_cap, drop_grid, drop_align);
                 let width = |j: usize| {
                     let ind = match &dc {
-                        Some(dc) if j < dc.lines => dc.width,
+                        Some(dc) if j < dc.lines => dc.indent(),
                         _ if j == 0 => pp.first_line_indent,
                         _ => 0.0,
                     };
@@ -661,7 +663,7 @@ pub fn compose(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &Compo
         let rule_color = |r: &designcraft_doc::Rule, text: &(String, f32)| {
             if r.color == designcraft_doc::TEXT_COLOR { text.clone() } else { (r.color.clone(), r.tint) }
         };
-        let drop_cap = split_drop_cap(&mut sp.glyphs, drop_end, pp.drop_cap_lines, base_leading, base_cap, drop_grid);
+        let drop_cap = split_drop_cap(db, &mut sp.glyphs, drop_end, pp.drop_cap_lines, base_leading, base_cap, drop_grid, drop_align);
         match pp.list_type {
             designcraft_doc::ListType::Numbers if !pp.list_name.is_empty() => {
                 // A named list: carries on past other paragraphs (and from earlier stories).
@@ -746,7 +748,7 @@ pub fn compose(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &Compo
                 let ind = pp.left_indent
                     + pp.right_indent
                     + match &drop_cap {
-                        Some(dc) if line_no + j < dc.lines && col_first_line == 0 => dc.width,
+                        Some(dc) if line_no + j < dc.lines && col_first_line == 0 => dc.indent(),
                         _ if line_no + j == 0 => pp.first_line_indent,
                         _ => 0.0,
                     };
@@ -843,7 +845,7 @@ pub fn compose(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &Compo
                     break;
                 }
                 // A drop cap sits at the start-side indent; the first-line indent doesn't move it.
-                let beside = drop_cap.as_ref().filter(|dc| line_no < dc.lines && col_first_line == 0).map(|dc| dc.width);
+                let beside = drop_cap.as_ref().filter(|dc| line_no < dc.lines && col_first_line == 0).map(DropCap::indent);
                 let (ind_l, ind_r) = match beside {
                     Some(w) if rtl => (pp.left_indent, pp.right_indent + w),
                     Some(w) => (pp.left_indent + w, pp.right_indent),
@@ -858,7 +860,7 @@ pub fn compose(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &Compo
                 if line_no == 0
                     && let Some(dc) = &drop_cap
                 {
-                    let at = if rtl { x1 - pp.right_indent - dc.width } else { x0 + pp.left_indent };
+                    let at = if rtl { x1 - pp.right_indent - dc.width } else { x0 + pp.left_indent - dc.lsb };
                     placed.splice(0..0, place_drop_cap(dc, at, rtl));
                     drop_box = Some(DropCapBox {
                         end: dc.end,
@@ -2037,8 +2039,10 @@ pub const MAX_DROP_CAP_LINES: u32 = 25;
 pub const MAX_DROP_CAP_CHARS: u32 = 150;
 
 /// Byte where paragraph `prange`'s drop cap ends: after its first `drop_cap_chars` characters
-/// (grapheme clusters, spaces included; all of them in a shorter paragraph). `prange.start` when it
-/// has none: no lines or characters, or vertical text (which sets no drop caps).
+/// (code points, as InDesign counts them, spaces included), extended to the end of the grapheme
+/// cluster they end in so a letter keeps its combining marks; all of them in a shorter paragraph.
+/// `prange.start` when it has none: no lines or characters, or vertical text (which sets no drop
+/// caps).
 fn drop_cap_end(text: &str, prange: Range<usize>, pp: &ParaProps, vertical: bool) -> usize {
     use unicode_segmentation::UnicodeSegmentation as _;
     if vertical || pp.drop_cap_lines == 0 || pp.drop_cap_chars == 0 {
@@ -2047,7 +2051,8 @@ fn drop_cap_end(text: &str, prange: Range<usize>, pp: &ParaProps, vertical: bool
     let Some(para) = text.get(prange.clone()) else { return prange.start };
     let para = para.trim_end_matches('\n');
     let n = pp.drop_cap_chars.min(MAX_DROP_CAP_CHARS) as usize;
-    prange.start + para.grapheme_indices(true).nth(n).map_or(para.len(), |(i, _)| i)
+    let end = para.char_indices().nth(n).map_or(para.len(), |(i, _)| i);
+    prange.start + para.grapheme_indices(true).map(|(i, _)| i).find(|i| *i >= end).unwrap_or(para.len())
 }
 
 /// A paragraph's drop cap: its first glyphs, enlarged to reach down `lines` lines.
@@ -2056,8 +2061,11 @@ struct DropCap {
     /// Story byte it ends at.
     end: usize,
     lines: usize,
-    /// Its advance: how far the lines beside it are indented.
+    /// Its advance.
     width: f64,
+    /// How far its origin sits left of the indent: its first letter's left side bearing with
+    /// Align Left Edge, else 0.
+    lsb: f64,
     /// Its baseline below the first line's, at the paragraph's leading.
     drop: f64,
 }
@@ -2065,8 +2073,19 @@ struct DropCap {
 /// Take the drop cap (the glyphs before byte `end`) off the front of a paragraph's glyphs and scale
 /// it so its cap height reaches from the first line's cap height down to line `lines`' baseline,
 /// measured in the leading and cap height of the text after it.
-/// On a baseline grid of increment `grid`, lines are that many grid steps apart.
-fn split_drop_cap(glyphs: &mut Vec<Glyph>, end: usize, lines: u32, base_leading: f64, base_cap: f64, grid: Option<f64>) -> Option<DropCap> {
+/// On a baseline grid of increment `grid`, lines are that many grid steps apart. With
+/// `align_left` its ink starts at the indent (see [`DropCap::lsb`]).
+#[allow(clippy::too_many_arguments)]
+fn split_drop_cap(
+    db: &FontDb,
+    glyphs: &mut Vec<Glyph>,
+    end: usize,
+    lines: u32,
+    base_leading: f64,
+    base_cap: f64,
+    grid: Option<f64>,
+    align_left: bool,
+) -> Option<DropCap> {
     let n = glyphs.iter().take_while(|g| g.byte < end).count();
     if n == 0 {
         return None;
@@ -2098,7 +2117,22 @@ fn split_drop_cap(glyphs: &mut Vec<Glyph>, end: usize, lines: u32, base_leading:
         g.space *= k;
     }
     let width = dc.iter().map(|g| g.adv).sum();
-    Some(DropCap { glyphs: dc, end, lines, width, drop })
+    let lsb = match dc.first() {
+        Some(g) if align_left => {
+            let ink = designcraft_geom::Shape::bounding_box(&*db.outline(g.face.get(), g.gid));
+            let lsb = g.dx + ink.x0 * g.sx;
+            if ink.width() > 0.0 && lsb.is_finite() { lsb } else { 0.0 }
+        }
+        _ => 0.0,
+    };
+    Some(DropCap { glyphs: dc, end, lines, width, drop, lsb })
+}
+
+impl DropCap {
+    /// How far the lines beside it are indented: to the end of its advance.
+    fn indent(&self) -> f64 {
+        self.width - self.lsb
+    }
 }
 
 /// The drop cap's glyphs set from `at` (right to left: mirrored, its first character on the right).

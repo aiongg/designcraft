@@ -1799,6 +1799,12 @@ fn paragraph_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
                         });
                     ui.end_row();
                 });
+                for (label, key) in [("Align Left Edge", "dropCapAlignLeft"), ("Scale for Descenders", "dropCapScaleDescenders")] {
+                    let mut on = cur(d, &format!("p.{key}"), &pv[key]).as_bool().unwrap_or(false);
+                    if ui.checkbox(&mut on, crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, label))).changed() {
+                        d.fields.insert(format!("p.{key}"), json!(on));
+                    }
+                }
                 ui.add_space(8.0);
                 crate::rtl::label(ui, egui::RichText::new(crate::i18n::tr(&app.ui.language, "Nested Styles")).font(semibold(12.0)));
                 let mut list: Vec<Value> = cur(d, "p.nestedStyles", &pv["nestedStyles"]).as_array().cloned().unwrap_or_default();

@@ -1897,6 +1897,17 @@ const TABLE: &[(&str, [&str; 5])] = &[
     ("Characters:", ["Zeichen:", "Caractères :", "Caracteres:", "文字数：", "字符数："]),
     ("Drop Lines", ["Initialzeilen", "Lignes lettrine", "Líneas capitular", "ドロップ行数", "下沉行数"]),
     ("Drop Chars", ["Initialzeichen", "Car. lettrine", "Car. capitular", "ドロップ文字数", "下沉字符数"]),
+    ("Align Left Edge", ["Linke Kante ausrichten", "Aligner le bord gauche", "Alinear borde izquierdo", "左端揃え", "左边缘对齐"]),
+    (
+        "Scale for Descenders",
+        [
+            "Für Unterlängen skalieren",
+            "Mise à l'échelle pour les jambages",
+            "Escalar para trazos descendentes",
+            "ディセンダーに合わせて拡大・縮小",
+            "为下伸部分缩放",
+        ],
+    ),
     ("chars", ["chars", "chars", "chars", "chars", "指定字符"]),
     ("[Automatic]", ["[Automatic]", "[Automatic]", "[Automatic]", "[Automatic]", "[自动]"]),
     ("Tracking:", ["Tracking:", "Tracking:", "Tracking:", "Tracking:", "字距："]),

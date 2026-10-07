@@ -13,7 +13,7 @@
 use std::io::{Cursor, Read, Write};
 use std::sync::Arc;
 
-use designcraft_doc::{AssetId, Document, Story};
+use designcraft_doc::{AssetId, Document, ParaAttrs, Story};
 use serde_json::{Value, json};
 
 pub const MIME: &str = "application/vnd.designcraft+zip";
@@ -113,32 +113,39 @@ fn load_zip(bytes: &[u8]) -> Result<Document, FormatError> {
 /// Bring a document saved in format `from` up to [`VERSION`].
 fn upgrade(doc: &mut Document, from: u32) {
     if from < 2 {
-        pin_keep_all_lines(doc);
+        // Format 1 laid out an unset Keep Lines Together mode as all lines in paragraph, and drop
+        // caps without Align Left Edge.
+        pin_para_default(doc, |a| &mut a.keep_all_lines, true);
+        pin_para_default(doc, |a| &mut a.drop_cap_align_left, false);
     }
 }
 
-/// Format 1 laid out an unset Keep Lines Together mode as all lines in paragraph. Pin that where
-/// nothing set it: at the start of each paragraph style chain, and on paragraphs whose style is
-/// missing.
-fn pin_keep_all_lines(doc: &mut Document) {
+/// Pin a paragraph attribute to the value an older format resolved it to where nothing set it:
+/// at the start of each paragraph style chain that leaves it unset, and on paragraphs whose style
+/// is missing.
+fn pin_para_default<T: Clone>(doc: &mut Document, field: fn(&mut ParaAttrs) -> &mut Option<T>, old: T) {
+    let unset = |a: &ParaAttrs| field(&mut a.clone()).is_none();
     let roots: std::collections::HashSet<String> = doc
         .styles
         .paragraph
         .iter()
         .filter_map(|s| {
             let chain = doc.styles.para_chain(&s.name);
-            if chain.iter().any(|c| c.para.keep_all_lines.is_some()) { None } else { chain.first().map(|c| c.name.clone()) }
+            if chain.iter().all(|c| unset(&c.para)) { chain.first().map(|c| c.name.clone()) } else { None }
         })
         .collect();
     if !roots.is_empty() {
         for s in doc.styles_mut().paragraph.iter_mut().filter(|s| roots.contains(&s.name)) {
-            s.para.keep_all_lines = Some(true);
+            *field(&mut s.para) = Some(old.clone());
         }
     }
     let styles = doc.styles.clone();
     let mut pin = |st: &mut Story| {
-        for p in st.paras.iter_mut().filter(|p| p.para.keep_all_lines.is_none() && styles.para(&p.style).is_none()) {
-            p.para.keep_all_lines = Some(true);
+        for p in st.paras.iter_mut().filter(|p| styles.para(&p.style).is_none()) {
+            let v = field(&mut p.para);
+            if v.is_none() {
+                *v = Some(old.clone());
+            }
         }
     };
     for st in doc.stories.values_mut() {
@@ -307,6 +314,35 @@ mod tests {
         assert_eq!(designcraft_doc::Rule::default().color, designcraft_doc::TEXT_COLOR);
         assert_eq!(designcraft_doc::TextFrameOptions::default().auto_size_ref, 4);
         assert!(!designcraft_doc::NumberedList::default().continue_across_stories);
+    }
+
+    /// Format 1 set drop caps without Align Left Edge: those documents still do where nothing set
+    /// it. New documents align the drop cap's left edge.
+    #[test]
+    fn format_1_drop_caps_stay_unaligned() {
+        let mut d = Document::new(&NewDocument::default());
+        let st = d.styles_mut();
+        st.paragraph.push(para_style("Opener", None, None));
+        st.paragraph.push(designcraft_doc::ParagraphStyle {
+            para: designcraft_doc::ParaAttrs { drop_cap_align_left: Some(true), ..Default::default() },
+            ..para_style("Aligned", None, None)
+        });
+        let lid = d.default_layer();
+        let (_, sid) =
+            d.add_text_frame(SpreadRef::Doc(0), Rect::new(10.0, 10.0, 200.0, 200.0), lid, "One\nTwo\nThree", ParaFormat::default()).unwrap();
+        {
+            let s = d.story_mut(sid).unwrap();
+            for (p, name) in s.paras.iter_mut().zip(["Opener", "Aligned", "Missing"]) {
+                p.style = name.into();
+                p.para.drop_cap_lines = Some(2);
+                p.para.drop_cap_chars = Some(1);
+            }
+        }
+        let back = load(&save_v1(&d)).unwrap();
+        let aligned: Vec<bool> = back.story(sid).unwrap().paras.iter().map(|p| back.styles.resolve_para(p).0.drop_cap_align_left).collect();
+        assert_eq!(aligned, [false, true, false]);
+        let now = load(&save(&d).unwrap()).unwrap();
+        assert!(now.styles.resolve_para(&now.story(sid).unwrap().paras[0]).0.drop_cap_align_left);
     }
 
     #[test]
