@@ -161,9 +161,9 @@ fn parse_point(s: Option<&str>) -> Option<Point> {
 /// InDesign's corner size where a file gives a corner shape without one.
 const INDESIGN_CORNER_SIZE: f64 = 12.0;
 
-/// IDML tint (percent, `-1` = default) → 0..1.
+/// IDML tint (percent; `-1` = the colour's own tint, 100 %) → 0..1.
 fn tint(v: Option<f64>) -> Option<f32> {
-    v.map(|t| if t < 0.0 { 1.0 } else { (t / 100.0) as f32 })
+    v.map(|t| if t < 0.0 || t.is_nan() { 1.0 } else { (t / 100.0).min(1.0) as f32 })
 }
 
 impl<'r> Importer<'r> {
@@ -694,7 +694,7 @@ impl<'r> Importer<'r> {
             let name = e.get("Name").unwrap_or("").to_string();
             if !name.is_empty() && !name.starts_with("$ID/") && !self.lists.iter().any(|l| l.name == name) {
                 self.lists
-                    .push(designcraft_doc::NumberedList { name, continue_across_stories: e.get("ContinueNumbersAcrossStories") != Some("false") });
+                    .push(designcraft_doc::NumberedList { name, continue_across_stories: e.get("ContinueNumbersAcrossStories") == Some("true") });
             }
         }
         let mut paras: Vec<(String, El)> = Vec::new();
@@ -808,18 +808,7 @@ impl<'r> Importer<'r> {
                 }
                 ts.border = Some(b);
             }
-            if let Some(first) = e.num("StartRowFillCount").filter(|n| *n > 0.0) {
-                ts.alt_rows = Some(AltFills {
-                    first: first as u32,
-                    first_color: e.get("StartRowFillColor").map(|c| self.swatch_ref(c)).unwrap_or_else(|| swatch::NONE.into()),
-                    first_tint: tint(e.num("StartRowFillTint")).unwrap_or(1.0),
-                    next: e.num("EndRowFillCount").unwrap_or(1.0) as u32,
-                    next_color: e.get("EndRowFillColor").map(|c| self.swatch_ref(c)).unwrap_or_else(|| swatch::NONE.into()),
-                    next_tint: tint(e.num("EndRowFillTint")).unwrap_or(1.0),
-                    skip_first: 0,
-                    skip_last: 0,
-                });
-            }
+            ts.alt_rows = self.alt_fills(e, "Row").map(|a| AltFills { skip_first: 0, skip_last: 0, ..a });
             ts.space_before = e.num("SpaceBefore");
             ts.space_after = e.num("SpaceAfter");
             match self.styles.table.iter_mut().find(|c| c.name == name) {
@@ -966,7 +955,7 @@ impl<'r> Importer<'r> {
         o.span_columns = e.boolean("EnableStraddling").unwrap_or(false);
         o.rule.on = e.boolean("RuleOn").unwrap_or(true);
         o.rule.weight = e.num("RuleLineWeight").unwrap_or(1.0);
-        o.rule.tint = (e.num("RuleTint").unwrap_or(100.0) / 100.0).clamp(0.0, 1.0) as f32;
+        o.rule.tint = tint(e.num("RuleTint")).unwrap_or(1.0);
         o.rule.left_indent = e.num("RuleLeftIndent").unwrap_or(0.0);
         o.rule.width = e.num("RuleWidth").unwrap_or(72.0);
         o.rule.offset = e.num("RuleOffset").unwrap_or(0.0);
@@ -1040,7 +1029,7 @@ impl<'r> Importer<'r> {
         for k in ["Underline", "StrikeThru"] {
             let num = |n: &str| e.num(&format!("{k}{n}")).filter(|v| *v > -9000.0);
             let color = e.prop(&format!("{k}Color")).map(|r| self.swatch_ref(r.trim())).filter(|r| r != "Text Color" && !r.is_empty());
-            let tint = e.num(&format!("{k}Tint")).filter(|v| *v >= 0.0).map(|v| (v / 100.0) as f32);
+            let tint = tint(e.num(&format!("{k}Tint")));
             if k == "Underline" {
                 a.underline_weight = num("Weight").map(Some);
                 a.underline_offset = num("Offset").map(Some);
@@ -1193,6 +1182,7 @@ impl<'r> Importer<'r> {
         a.glyph_scale_max = frac("MaximumGlyphScaling");
         a.auto_leading = frac("AutoLeading");
         a.single_word_justify = e.prop("SingleWordJustification").and_then(|v| names::align_in(v.trim()));
+        a.kashidas = e.prop("Kashidas").and_then(|v| names::kashidas_in(v.trim()));
         a.keep_with_next = u("KeepWithNext");
         a.keep_lines_together = e.boolean("KeepLinesTogether");
         a.keep_all_lines = e.boolean("KeepAllLinesTogether");
@@ -1258,7 +1248,9 @@ impl<'r> Importer<'r> {
         }
         if let Some(c) = e.prop(&format!("{k}Color")) {
             let c = c.trim();
-            if c.contains('/') {
+            if c == designcraft_doc::TEXT_COLOR {
+                r.color = c.to_string();
+            } else if c.contains('/') {
                 r.color = self.swatch_ref(c);
             }
         }
@@ -1386,24 +1378,8 @@ impl<'r> Importer<'r> {
         t.options.space_after = e.num("SpaceAfter").unwrap_or(t.options.space_after);
         t.options.repeat_header = e.get("HeaderBehavior") != Some("RepeatOnce");
         t.options.repeat_footer = e.get("FooterBehavior") != Some("RepeatOnce");
-        for kind in ["Row", "Column"] {
-            let Some(first) = e.num(&format!("Start{kind}FillCount")).filter(|n| *n > 0.0) else { continue };
-            let alt = AltFills {
-                first: first as u32,
-                first_color: e.get(&format!("Start{kind}FillColor")).map(|c| self.swatch_ref(c)).unwrap_or_else(|| swatch::NONE.into()),
-                first_tint: tint(e.num(&format!("Start{kind}FillTint"))).unwrap_or(1.0),
-                next: e.num(&format!("End{kind}FillCount")).unwrap_or(1.0) as u32,
-                next_color: e.get(&format!("End{kind}FillColor")).map(|c| self.swatch_ref(c)).unwrap_or_else(|| swatch::NONE.into()),
-                next_tint: tint(e.num(&format!("End{kind}FillTint"))).unwrap_or(1.0),
-                skip_first: e.num(&format!("SkipFirstAlternatingFill{kind}s")).unwrap_or(0.0) as u32,
-                skip_last: e.num(&format!("SkipLastAlternatingFill{kind}s")).unwrap_or(0.0) as u32,
-            };
-            if kind == "Row" {
-                t.options.alt_rows = Some(alt);
-            } else {
-                t.options.alt_cols = Some(alt);
-            }
-        }
+        t.options.alt_rows = self.alt_fills(e, "Row");
+        t.options.alt_cols = self.alt_fills(e, "Column");
         t.style = e
             .get("AppliedTableStyle")
             .map(|r| names::style_name_in(names::TABLE_BUILTINS, &unescape_id(r.trim_start_matches("TableStyle/"))))
@@ -1458,6 +1434,24 @@ impl<'r> Importer<'r> {
             let _ = t.merge(rg);
         }
         t
+    }
+
+    /// A table's or table style's alternating `kind` ("Row" or "Column") fills, when it has any;
+    /// unset values are InDesign's: the first Black 20 %, the next None.
+    fn alt_fills(&mut self, e: &El, kind: &str) -> Option<AltFills> {
+        let first = e.num(&format!("Start{kind}FillCount")).filter(|n| *n > 0.0)?;
+        let d = AltFills::default();
+        let count = |k: String, or: u32| e.num(&k).map_or(or, |v| v.max(0.0) as u32);
+        Some(AltFills {
+            first: first as u32,
+            first_color: e.get(&format!("Start{kind}FillColor")).map_or(d.first_color, |c| self.swatch_ref(c)),
+            first_tint: tint(e.num(&format!("Start{kind}FillTint"))).unwrap_or(d.first_tint),
+            next: count(format!("End{kind}FillCount"), d.next),
+            next_color: e.get(&format!("End{kind}FillColor")).map_or(d.next_color, |c| self.swatch_ref(c)),
+            next_tint: tint(e.num(&format!("End{kind}FillTint"))).unwrap_or(d.next_tint),
+            skip_first: count(format!("SkipFirstAlternatingFill{kind}s"), 0),
+            skip_last: count(format!("SkipLastAlternatingFill{kind}s"), 0),
+        })
     }
 
     fn walk_story(&mut self, e: &El, b: &mut StoryBuilder, pf: &ParaFormat, pchars: &CharAttrs, cf: &CharFormat, brk: Option<&str>) {

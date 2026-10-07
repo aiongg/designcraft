@@ -1723,3 +1723,29 @@ fn drop_cap_sits_on_its_line_as_set() {
     let body = lines[0].glyphs.iter().find(|g| g.byte == 1).unwrap();
     assert!((lines[2].baseline - cap_of(dc) - (lines[0].baseline - cap_of(body))).abs() < 0.01);
 }
+
+/// A rule in Text Color takes the colour of the paragraph's text: the first character's for the
+/// rule above, the last character's for the rule below. A swatch colour is used as is.
+#[test]
+fn text_color_rules_follow_the_text() {
+    use designcraft_doc::{CharAttrs, CharFormat, Rule, TEXT_COLOR};
+    let rule = Rule { on: true, weight: 2.0, ..Default::default() };
+    let para = ParaAttrs { rule_above: Some(rule.clone()), rule_below: Some(rule.clone()), ..Default::default() };
+    let (mut d, sid, fid) = doc_with("Red then blue", Rect::new(0.0, 0.0, 300.0, 200.0), para);
+    {
+        let s = d.story_mut(sid).unwrap();
+        s.format_chars(0..3, |f: &mut CharFormat| f.over.merge(&CharAttrs { fill: Some("Red".into()), fill_tint: Some(0.5), ..Default::default() }));
+        s.format_chars(9..13, |f: &mut CharFormat| f.over.fill = Some("Blue".into()));
+    }
+    let decos = |d: &Document| {
+        let cs = compose_story(d, sid, &ComposeOptions::default());
+        let mut v: Vec<(f64, String, f32)> = cs.frame(fid).unwrap().decos.iter().map(|dc| (dc.rect.y0, dc.color.clone(), dc.tint)).collect();
+        v.sort_by(|a, b| a.0.total_cmp(&b.0));
+        v.into_iter().map(|(_, c, t)| (c, t)).collect::<Vec<_>>()
+    };
+    assert_eq!(rule.color, TEXT_COLOR);
+    assert_eq!(decos(&d), vec![("Red".to_string(), 0.5), ("Blue".to_string(), 1.0)]);
+    let swatch = Rule { color: "[Black]".into(), tint: 0.3, ..rule };
+    d.story_mut(sid).unwrap().paras[0].para.rule_above = Some(swatch);
+    assert_eq!(decos(&d)[0], ("[Black]".to_string(), 0.3));
+}

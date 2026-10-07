@@ -447,6 +447,14 @@ pub fn auto_size_in(s: &str) -> AutoSize {
         .find(|m| auto_size_out(*m) == s)
         .unwrap_or(AutoSize::Off)
 }
+/// Insert Kashidas (`Kashidas`): InDesign's default, or off.
+pub fn kashidas_out(on: bool) -> &'static str {
+    if on { "DefaultKashidas" } else { "KashidasOff" }
+}
+pub fn kashidas_in(s: &str) -> Option<bool> {
+    [true, false].into_iter().find(|on| kashidas_out(*on) == s)
+}
+
 /// Auto-size reference points in our 0..9 order (row-major, top-left first).
 pub const REF_POINTS: [&str; 9] = [
     "TopLeftPoint",

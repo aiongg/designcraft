@@ -651,6 +651,16 @@ pub fn compose(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &Compo
                 );
             }
         }
+        // Rules in Text Color: the colour of the paragraph's first character (rule above) and last
+        // character (rule below).
+        let text_color = |g: Option<&Glyph>| {
+            g.and_then(|g| table.styles.get(g.style as usize))
+                .map_or((base_chars.fill.clone(), base_chars.fill_tint), |s| (s.fill.clone(), s.fill_tint))
+        };
+        let (above, below) = (text_color(sp.glyphs.iter().find(|g| g.len > 0)), text_color(sp.glyphs.iter().rev().find(|g| g.len > 0)));
+        let rule_color = |r: &designcraft_doc::Rule, text: &(String, f32)| {
+            if r.color == designcraft_doc::TEXT_COLOR { text.clone() } else { (r.color.clone(), r.tint) }
+        };
         let drop_cap = split_drop_cap(&mut sp.glyphs, drop_end, pp.drop_cap_lines, base_leading, base_cap, drop_grid);
         match pp.list_type {
             designcraft_doc::ListType::Numbers if !pp.list_name.is_empty() => {
@@ -972,11 +982,8 @@ pub fn compose(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &Compo
                 let r = &pp.rule_above;
                 let y = bl - asc - r.offset;
                 let col = ft.lines.iter().rev().find(|l| l.para == pi).map(|l| (l.x0, l.x1)).unwrap_or((0.0, 0.0));
-                ft.decos.push(Deco {
-                    rect: Rect::new(col.0 + r.left_indent, y - r.weight, col.1 - r.right_indent, y),
-                    color: r.color.clone(),
-                    tint: r.tint,
-                });
+                let (color, tint) = rule_color(r, &above);
+                ft.decos.push(Deco { rect: Rect::new(col.0 + r.left_indent, y - r.weight, col.1 - r.right_indent, y), color, tint });
             }
         }
         para_box_decos(&mut out, pi, &pp);
@@ -987,7 +994,8 @@ pub fn compose(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &Compo
             let r = &pp.rule_below;
             let y = l.baseline + r.offset;
             let (x0, x1) = if r.column_width { (l.x0, l.x1) } else { (l.x0, l.end_x) };
-            ft.decos.push(Deco { rect: Rect::new(x0 + r.left_indent, y, x1 - r.right_indent, y + r.weight), color: r.color.clone(), tint: r.tint });
+            let (color, tint) = rule_color(r, &below);
+            ft.decos.push(Deco { rect: Rect::new(x0 + r.left_indent, y, x1 - r.right_indent, y + r.weight), color, tint });
         }
         cur.pending += pp.space_after;
         pi += 1;

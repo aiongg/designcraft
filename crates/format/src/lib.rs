@@ -288,6 +288,27 @@ mod tests {
         assert!(!designcraft_doc::ParaProps::default().keep_all_lines);
     }
 
+    /// Format 1 wrote paragraph rules, text frame options and numbered lists in full, so their
+    /// old defaults (black rules, auto-size from the top centre, lists continuing across stories)
+    /// load as saved. New documents take InDesign's.
+    #[test]
+    fn format_1_rules_frames_and_lists_load_as_saved() {
+        let mut d = Document::new(&NewDocument::default());
+        let lid = d.default_layer();
+        let old_rule = designcraft_doc::Rule { on: true, color: designcraft_doc::color::swatch::BLACK.into(), ..Default::default() };
+        let (fid, sid) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(10.0, 10.0, 200.0, 200.0), lid, "Ruled", ParaFormat::default()).unwrap();
+        d.story_mut(sid).unwrap().paras[0].para.rule_above = Some(old_rule.clone());
+        d.item_mut(fid).unwrap().text_frame_mut().unwrap().options.auto_size_ref = 1;
+        d.settings.lists.push(designcraft_doc::NumberedList { name: "Steps".into(), continue_across_stories: true });
+        let back = load(&save_v1(&d)).unwrap();
+        assert_eq!(back.story(sid).unwrap().paras[0].para.rule_above, Some(old_rule));
+        assert_eq!(back.item(fid).unwrap().text_frame().unwrap().options.auto_size_ref, 1);
+        assert!(back.settings.lists[0].continue_across_stories);
+        assert_eq!(designcraft_doc::Rule::default().color, designcraft_doc::TEXT_COLOR);
+        assert_eq!(designcraft_doc::TextFrameOptions::default().auto_size_ref, 4);
+        assert!(!designcraft_doc::NumberedList::default().continue_across_stories);
+    }
+
     #[test]
     fn rejects_garbage_and_newer_versions() {
         assert!(load(b"nope").is_err());

@@ -1201,6 +1201,9 @@ impl<'a> Ex<'a> {
         if let Some(v) = a.single_word_justify {
             el.set("SingleWordJustification", names::align_out(v));
         }
+        if let Some(v) = a.kashidas {
+            el.set("Kashidas", names::kashidas_out(v));
+        }
         n!(keep_with_next, "KeepWithNext");
         b!(keep_lines_together, "KeepLinesTogether");
         b!(keep_all_lines, "KeepAllLinesTogether");
@@ -1291,7 +1294,11 @@ impl<'a> Ex<'a> {
         el.set(&format!("{k}Offset"), num(r.offset));
         el.set(&format!("{k}LeftIndent"), num(r.left_indent));
         el.set(&format!("{k}RightIndent"), num(r.right_indent));
-        props.push(p(&format!("{k}Color"), "object", self.sw(&r.color)));
+        props.push(if r.color == designcraft_doc::TEXT_COLOR {
+            p(&format!("{k}Color"), "string", designcraft_doc::TEXT_COLOR)
+        } else {
+            p(&format!("{k}Color"), "object", self.sw(&r.color))
+        });
     }
 
     fn stroke_attrs(&self, el: &mut El, s: &designcraft_doc::Stroke) {

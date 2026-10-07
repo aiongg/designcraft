@@ -28,6 +28,20 @@ fn zip_files_plain() -> Vec<u8> {
     w.finish().unwrap().into_inner()
 }
 
+/// The text of every part of the package `bytes` whose name starts with `prefix`.
+fn zip_text(bytes: &[u8], prefix: &str) -> String {
+    use std::io::Read;
+    let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let mut out = String::new();
+    for i in 0..z.len() {
+        let mut f = z.by_index(i).unwrap();
+        if f.name().starts_with(prefix) {
+            f.read_to_string(&mut out).unwrap();
+        }
+    }
+    out
+}
+
 /// A hand-written, minimal IDML document: one facing-pages spread with a right page, a
 /// threaded story across two frames, a tint and a grouped paragraph style.
 const DESIGNMAP: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -294,10 +308,19 @@ fn indesign_text_defaults() -> Vec<AttrRow> {
         "StartParagraph": "Anywhere" => StartParagraph::Anywhere, "NextColumn" => StartParagraph::NextColumn, |r| r.0.start_paragraph;
         "BulletsAndNumberingListType": "NoList" => ListType::None, "BulletList" => ListType::Bullets, |r| r.0.list_type;
         "BalanceRaggedLines": "NoBalancing" => false, "FullyBalanced" => true, |r| r.0.balance_ragged;
+        "Kashidas": "DefaultKashidas" => true, "KashidasOff" => false, |r| r.0.kashidas;
         "RuleAbove": "false" => false, "true" => true, |r| r.0.rule_above.on;
+        "RuleAboveColor": "Text Color" => designcraft_doc::TEXT_COLOR, "Color/Black" => "[Black]", |r| r.0.rule_above.color;
+        "RuleAboveTint": "-1" => 1.0f32, "50" => 0.5f32, |r| r.0.rule_above.tint;
         "RuleBelow": "false" => false, "true" => true, |r| r.0.rule_below.on;
+        "RuleBelowColor": "Text Color" => designcraft_doc::TEXT_COLOR, "Color/Black" => "[Black]", |r| r.0.rule_below.color;
+        "RuleBelowTint": "-1" => 1.0f32, "50" => 0.5f32, |r| r.0.rule_below.tint;
         "ParagraphShadingOn": "false" => false, "true" => true, |r| r.0.shading_on;
+        "ParagraphShadingColor": "Color/Black" => "[Black]", "Swatch/None" => "[None]", |r| r.0.shading_color;
+        "ParagraphShadingTint": "20" => 0.2f32, "50" => 0.5f32, |r| r.0.shading_tint;
         "ParagraphBorderOn": "false" => false, "true" => true, |r| r.0.border_on;
+        "ParagraphBorderColor": "Color/Black" => "[Black]", "Swatch/None" => "[None]", |r| r.0.border_color;
+        "ParagraphBorderTint": "-1" => 1.0f32, "50" => 0.5f32, |r| r.0.border_tint;
         "FontStyle": "Regular" => "Regular", "Bold" => "Bold", |r| r.1.font_style;
         "PointSize": "12" => 12.0, "9" => 9.0, |r| r.1.size;
         "Leading": "Auto" => Leading::Auto, "14" => Leading::Points(14.0), |r| r.1.leading;
@@ -316,6 +339,8 @@ fn indesign_text_defaults() -> Vec<AttrRow> {
         "Position": "Normal" => Position::Normal, "Superscript" => Position::Superscript, |r| r.1.position;
         "Underline": "false" => false, "true" => true, |r| r.1.underline;
         "StrikeThru": "false" => false, "true" => true, |r| r.1.strikethrough;
+        "UnderlineTint": "-1" => 1.0f32, "50" => 0.5f32, |r| r.1.underline_tint;
+        "StrikeThruTint": "-1" => 1.0f32, "50" => 0.5f32, |r| r.1.strikethrough_tint;
         "Ligatures": "true" => true, "false" => false, |r| r.1.ligatures;
         "NoBreak": "false" => false, "true" => true, |r| r.1.no_break;
         "OTFContextualAlternate": "true" => true, "false" => false, |r| designcraft_doc::otf::is_on(&r.1.otf_features, "calt");
@@ -368,6 +393,101 @@ fn absent_text_attributes_take_indesign_defaults() {
     assert_eq!(omitted.1.font_family, designcraft_doc::CharProps::default().font_family);
 }
 
+/// A tint of -1 is the colour's own tint (100 %): written on a style, it replaces its parent's.
+/// Tints are never negative or above 100 %.
+#[test]
+fn minus_one_tint_is_the_colours_own() {
+    let tints = |v: &str| {
+        ["UnderlineTint", "StrikeThruTint", "FillTint", "StrokeTint", "ParagraphShadingTint", "ParagraphBorderTint", "RuleAboveTint", "RuleBelowTint"]
+            .map(|k| format!(r#"{k}="{v}""#))
+            .join(" ")
+            + r#" RuleAbove="true" RuleBelow="true""#
+    };
+    for (body, want) in [("-1", 1.0), ("150", 1.0)] {
+        let r = resolve_body(&tints("50"), &tints(body));
+        let got = [
+            r.1.underline_tint,
+            r.1.strikethrough_tint,
+            r.1.fill_tint,
+            r.1.stroke_tint,
+            r.0.shading_tint,
+            r.0.border_tint,
+            r.0.rule_above.tint,
+            r.0.rule_below.tint,
+        ];
+        assert_eq!(got, [want; 8], "{body}");
+    }
+    // Footnote rules, table fills and strokes, cell fills.
+    let prefs = PREFS.replace("</idPkg:Preferences>", r#"<FootnoteOption RuleTint="-1"/></idPkg:Preferences>"#);
+    let story = r#"<?xml version="1.0" encoding="UTF-8"?>
+<idPkg:Story xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="16.0">
+<Story Self="s1"><ParagraphStyleRange><CharacterStyleRange><Table Self="tb" StartRowFillCount="1" StartRowFillTint="-1" EndRowFillTint="-1" TopBorderStrokeTint="-1">
+<Row Self="r0" Name="0"/><Column Self="c0" Name="0"/><Cell Self="ce" Name="0:0" FillColor="Color/Black" FillTint="-1" TopEdgeStrokeTint="-1"/></Table></CharacterStyleRange></ParagraphStyleRange></Story>
+</idPkg:Story>"#;
+    let d = import_idml_with(
+        &zip_files(&[
+            ("designmap.xml", DESIGNMAP),
+            ("Resources/Graphic.xml", GRAPHIC),
+            ("Resources/Styles.xml", STYLES),
+            ("Resources/Preferences.xml", &prefs),
+            ("MasterSpreads/MasterSpread_m1.xml", MASTER),
+            ("Spreads/Spread_sp1.xml", SPREAD),
+            ("Stories/Story_s1.xml", story),
+        ]),
+        &|_| None,
+    )
+    .unwrap();
+    assert_eq!(d.footnote_options.rule.tint, 1.0);
+    let t = d.stories.values().flat_map(|s| s.tables.values()).next().unwrap();
+    let alt = t.options.alt_rows.as_ref().unwrap();
+    assert_eq!((alt.first_tint, alt.next_tint, t.options.border.tint), (1.0, 1.0, 1.0));
+    let c = t.cell(0, 0).unwrap();
+    assert_eq!((c.fill_tint, c.strokes[0].tint), (1.0, 1.0));
+}
+
+/// Rules in Text Color take the colour of the paragraph's text; they round-trip as Text Color.
+#[test]
+fn text_color_rules_round_trip() {
+    let mut d = Document::new(&NewDocument::default());
+    let lid = d.default_layer();
+    let rule = designcraft_doc::Rule { on: true, ..Default::default() };
+    assert_eq!(rule.color, designcraft_doc::TEXT_COLOR);
+    let para = designcraft_doc::ParaAttrs {
+        rule_above: Some(rule.clone()),
+        rule_below: Some(designcraft_doc::Rule { color: "[Black]".into(), ..rule }),
+        kashidas: Some(false),
+        ..Default::default()
+    };
+    let (_, sid) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(40.0, 40.0, 400.0, 400.0), lid, "Ruled", ParaFormat::default()).unwrap();
+    d.story_mut(sid).unwrap().paras[0].para = para.clone();
+    let bytes = export_idml(&d);
+    let story = zip_text(&bytes, "Stories/");
+    assert!(story.contains(r#"<RuleAboveColor type="string">Text Color</RuleAboveColor>"#), "{story}");
+    assert!(story.contains(r#"Kashidas="KashidasOff""#), "{story}");
+    let back = import_idml(&bytes).unwrap();
+    let p = &back.stories.values().find(|s| s.text == "Ruled").unwrap().paras[0];
+    assert_eq!((p.para.rule_above.as_ref(), p.para.rule_below.as_ref()), (para.rule_above.as_ref(), para.rule_below.as_ref()));
+    assert_eq!(p.para.kashidas, Some(false));
+}
+
+/// `[Basic Paragraph]` is InDesign's `$ID/NormalParagraphStyle`, both ways.
+#[test]
+fn basic_paragraph_is_normal_paragraph_style() {
+    let d = import_idml_with(&fixture(), &|_| None).unwrap();
+    let basic = d.styles.para(st::BASIC_PARAGRAPH).unwrap();
+    assert_eq!(basic.based_on.as_deref(), Some(designcraft_doc::NO_PARA_STYLE));
+    assert_eq!(d.styles.para("Text/Body").unwrap().based_on.as_deref(), Some(st::BASIC_PARAGRAPH));
+    let s = d.stories.values().find(|s| s.text.starts_with("Hello")).unwrap();
+    assert_eq!(s.paras[1].style, st::BASIC_PARAGRAPH);
+    assert!(d.styles.paragraph.iter().all(|p| !p.name.contains("NormalParagraphStyle")));
+    let bytes = export_idml(&d);
+    let styles = zip_text(&bytes, "Resources/Styles.xml");
+    assert!(styles.contains(r#"Self="ParagraphStyle/$ID/NormalParagraphStyle" Name="$ID/NormalParagraphStyle""#), "{styles}");
+    assert!(zip_text(&bytes, "Stories/").contains(r#"AppliedParagraphStyle="ParagraphStyle/$ID/NormalParagraphStyle""#));
+    let back = import_idml(&bytes).unwrap();
+    assert_eq!(back.styles.paragraph.iter().filter(|p| p.name == st::BASIC_PARAGRAPH).count(), 1);
+}
+
 /// Page items, frames, tables and preferences an IDML file leaves unset are InDesign's defaults
 /// for a new document.
 #[test]
@@ -386,7 +506,9 @@ fn absent_item_and_document_attributes_take_indesign_defaults() {
     let designmap = format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Document xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="16.0" Self="d">
-<Story Self="s1"><ParagraphStyleRange><CharacterStyleRange><Table Self="tb"><Row Self="r0" Name="0"/><Column Self="c0" Name="0"/><Cell Self="ce" Name="0:0"/></Table></CharacterStyleRange></ParagraphStyleRange></Story>
+<NumberingList Self="NumberingList/Steps" Name="Steps"/>
+<RootTableStyleGroup Self="rts"><TableStyle Self="TableStyle/Banded" Name="Banded" StartRowFillCount="1"/></RootTableStyleGroup>
+<Story Self="s1"><ParagraphStyleRange><CharacterStyleRange><Table Self="tb" StartRowFillCount="1" StartColumnFillCount="2"><Row Self="r0" Name="0"/><Column Self="c0" Name="0"/><Cell Self="ce" Name="0:0"/></Table></CharacterStyleRange></ParagraphStyleRange></Story>
 <Spread Self="sp1"><Page Self="p1"/>
 <Rectangle Self="plain">{}</Rectangle>
 <Rectangle Self="round" TopLeftCornerOption="RoundedCorner" TopRightCornerOption="RoundedCorner" BottomLeftCornerOption="RoundedCorner" BottomRightCornerOption="RoundedCorner">{}</Rectangle>
@@ -432,12 +554,22 @@ fn absent_item_and_document_attributes_take_indesign_defaults() {
     let o = &tf.text_frame().unwrap().options;
     assert_eq!((o.columns, o.gutter, o.inset, o.balance_columns, o.ignore_wrap), (1, 12.0, [0.0; 4], false, false));
     assert_eq!((o.vertical_justification, o.first_baseline, o.first_baseline_min), (VerticalJustification::Top, FirstBaseline::Ascent, 0.0));
-    assert_eq!(o.auto_size, designcraft_doc::AutoSize::Off);
+    assert_eq!((o.auto_size, o.auto_size_ref), (designcraft_doc::AutoSize::Off, 4), "auto-size from the centre");
+    // Numbered lists don't continue across stories.
+    assert_eq!(d.settings.lists, vec![designcraft_doc::NumberedList { name: "Steps".into(), continue_across_stories: false }]);
     // Table and cell options.
     let t = d.stories.values().flat_map(|s| s.tables.values()).next().unwrap();
     assert_eq!((t.options.space_before, t.options.space_after, t.options.repeat_header), (4.0, -4.0, true));
     assert_eq!((t.options.border.weight, t.options.border.color.as_str()), (1.0, "[Black]"));
     assert_eq!((t.rows[0].mode, t.rows[0].height), (designcraft_doc::RowHeightMode::AtLeast, 3.0));
+    // Alternating fills: the first rows or columns Black 20 %, the next None.
+    let fills = |a: &designcraft_doc::AltFills| (a.first_color.clone(), a.first_tint, a.next_color.clone(), a.next_tint, a.next);
+    let want = ("[Black]".to_string(), 0.2f32, "[None]".to_string(), 1.0f32, 1);
+    assert_eq!(fills(t.options.alt_rows.as_ref().unwrap()), want);
+    let cols = t.options.alt_cols.as_ref().unwrap();
+    assert_eq!((fills(cols), cols.first), (want.clone(), 2));
+    let banded = d.styles.table.iter().find(|s| s.name == "Banded").unwrap();
+    assert_eq!(fills(banded.alt_rows.as_ref().unwrap()), want);
     let c = t.cell(0, 0).unwrap();
     assert_eq!((c.insets, c.vj, c.fill.as_str()), ([4.0; 4], VerticalJustification::Top, "[None]"));
     for e in &c.strokes {

@@ -390,12 +390,16 @@ pub struct TabStop {
     pub align_on: String,
 }
 
+/// The colour of a paragraph rule that follows the paragraph's text colour.
+pub const TEXT_COLOR: &str = "Text Color";
+
 /// A paragraph rule (Rule Above / Rule Below).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Rule {
     pub on: bool,
     pub weight: f64,
+    /// A swatch, or [`TEXT_COLOR`].
     pub color: String,
     pub tint: f32,
     /// Width: column (true) or text (false).
@@ -407,7 +411,7 @@ pub struct Rule {
 
 impl Default for Rule {
     fn default() -> Self {
-        Rule { on: false, weight: 1.0, color: "[Black]".into(), tint: 1.0, column_width: true, offset: 0.0, left_indent: 0.0, right_indent: 0.0 }
+        Rule { on: false, weight: 1.0, color: TEXT_COLOR.into(), tint: 1.0, column_width: true, offset: 0.0, left_indent: 0.0, right_indent: 0.0 }
     }
 }
 
