@@ -986,3 +986,75 @@ fn drop_caps_import_and_round_trip() {
     check(&d);
     check(&import_idml(&export_idml(&d)).unwrap());
 }
+
+/// Frames take the corners and Text Frame Options they don't write from their object style chain,
+/// then `[None]`. Per-corner attributes win over the legacy all-corners pair, at each level; a
+/// corner shape without a radius takes the chain's radius.
+#[test]
+fn frames_inherit_object_style_corners_and_text_frame_options() {
+    use designcraft_doc::{AutoSize, FirstBaseline, VerticalJustification};
+    use designcraft_geom::corners::CornerShape as C;
+    // Anchors in the order top-left, bottom-left, bottom-right, top-right.
+    let path = |x: f64| {
+        let pts: String = [(x, 0.0), (x, 50.0), (x + 50.0, 50.0), (x + 50.0, 0.0)]
+            .iter()
+            .map(|(x, y)| format!(r#"<PathPointType Anchor="{x} {y}" LeftDirection="{x} {y}" RightDirection="{x} {y}"/>"#))
+            .collect();
+        format!(
+            r#"<Properties><PathGeometry><GeometryPathType PathOpen="false"><PathPointArray>{pts}</PathPointArray></GeometryPathType></PathGeometry></Properties>"#
+        )
+    };
+    let corners = |opt: &str, r: &str| {
+        ["TopLeft", "TopRight", "BottomLeft", "BottomRight"].map(|n| format!(r#"{n}CornerOption="{opt}" {n}CornerRadius="{r}""#)).join(" ")
+    };
+    let inset = |v: f64| {
+        format!(
+            r#"<Properties><InsetSpacing type="list">{}</InsetSpacing></Properties>"#,
+            r#"<ListItem type="unit">V</ListItem>"#.replace('V', &v.to_string()).repeat(4)
+        )
+    };
+    let designmap = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Document xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="20.2" Self="d">
+<RootObjectStyleGroup Self="ro">
+  <ObjectStyle Self="ObjectStyle/$ID/[None]" Name="$ID/[None]" {none}>
+    <TextFramePreference TextColumnCount="1" TextColumnGutter="12" AutoSizingReferencePoint="CenterPoint" AutoSizingType="Off"/>
+  </ObjectStyle>
+  <ObjectStyle Self="ObjectStyle/Rounded" Name="Rounded" TopLeftCornerOption="RoundedCorner" TopRightCornerOption="RoundedCorner" BottomLeftCornerOption="RoundedCorner" BottomRightCornerOption="RoundedCorner" TopLeftCornerRadius="6">
+    <Properties><BasedOn type="object">ObjectStyle/$ID/[None]</BasedOn></Properties>
+    <TextFramePreference TextColumnCount="2" TextColumnGutter="18" VerticalJustification="CenterAlign" FirstBaselineOffset="LeadingOffset" MinimumFirstBaselineOffset="4" IgnoreWrap="true" AutoSizingType="HeightOnly">{inset}</TextFramePreference>
+  </ObjectStyle>
+  <ObjectStyle Self="ObjectStyle/Child" Name="Child" TopRightCornerOption="BevelCorner">
+    <Properties><BasedOn type="object">ObjectStyle/Rounded</BasedOn></Properties>
+  </ObjectStyle>
+</RootObjectStyleGroup>
+<Story Self="s1"/>
+<Spread Self="sp1"><Page Self="p1"/>
+<TextFrame Self="tf" ParentStory="s1" AppliedObjectStyle="ObjectStyle/Child" BottomRightCornerOption="InverseRoundedCorner" BottomRightCornerRadius="11.34">{p0}<TextFramePreference TextColumnCount="3"/></TextFrame>
+<Rectangle Self="legacy" AppliedObjectStyle="ObjectStyle/Rounded" CornerOption="BevelCorner" CornerRadius="5" TopLeftCornerOption="InsetCorner">{p1}</Rectangle>
+<Rectangle Self="one" TopRightCornerOption="RoundedCorner" TopRightCornerRadius="11.34">{p2}</Rectangle>
+<Rectangle Self="plain" AppliedObjectStyle="ObjectStyle/Rounded">{p3}</Rectangle>
+</Spread>
+</Document>"#,
+        none = corners("None", "12"),
+        inset = inset(3.0),
+        p0 = path(0.0),
+        p1 = path(100.0),
+        p2 = path(200.0),
+        p3 = path(300.0),
+    );
+    let d = import_idml_with(&zip_files(&[("designmap.xml", &designmap)]), &|_| None).unwrap();
+    let item = |n: usize| d.spreads[0].items[n].clone();
+    // Path order: top-left, bottom-left, bottom-right, top-right.
+    let shapes = |n: usize| item(n).corners.corners.map(|c| (c.shape, c.size));
+    assert_eq!(shapes(0), [(C::Rounded, 6.0), (C::Rounded, 12.0), (C::InverseRounded, 11.34), (C::Bevel, 12.0)]);
+    assert_eq!(shapes(1), [(C::Inset, 5.0), (C::Bevel, 5.0), (C::Bevel, 5.0), (C::Bevel, 5.0)]);
+    assert!(item(2).corners.corners.iter().enumerate().all(|(i, c)| (c.shape == C::Rounded) == (i == 3)));
+    assert_eq!(item(2).corners.corners[3].size, 11.34);
+    assert_eq!(shapes(3), [(C::Rounded, 6.0), (C::Rounded, 12.0), (C::Rounded, 12.0), (C::Rounded, 12.0)]);
+    let tf = item(0);
+    let o = &tf.text_frame().unwrap().options;
+    assert_eq!((o.columns, o.gutter, o.inset), (3, 18.0, [3.0; 4]));
+    assert_eq!((o.vertical_justification, o.first_baseline, o.first_baseline_min), (VerticalJustification::Center, FirstBaseline::Leading, 4.0));
+    assert_eq!((o.ignore_wrap, o.auto_size, o.auto_size_ref), (true, AutoSize::HeightOnly, 4));
+}
