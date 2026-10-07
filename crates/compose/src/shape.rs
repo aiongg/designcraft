@@ -28,6 +28,8 @@ pub struct Glyph {
     /// Baseline shift (positive = up), including super/subscript.
     pub shift: f64,
     pub ascent: f64,
+    /// The font's typographic ascender, scaled like `ascent`: the Ascent first baseline offset.
+    pub typo_ascent: f64,
     pub descent: f64,
     /// The leading this character asks for (absolute, or auto = size × auto %).
     pub leading: f64,
@@ -219,7 +221,7 @@ pub(crate) fn shape_para(
                 }
                 let mut g = control_glyph(&face, &props, auto_leading, style, a + i, c);
                 g.ch = HIDDEN;
-                (g.ascent, g.descent, g.leading, g.cap, g.xh) = (0.0, 0.0, 0.0, 0.0, 0.0);
+                (g.ascent, g.typo_ascent, g.descent, g.leading, g.cap, g.xh) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
                 glyphs.push(g);
             }
             continue;
@@ -415,10 +417,14 @@ fn shape_run(
                             Some(y) => {
                                 g.adv = o.w;
                                 g.ascent = g.ascent.max(o.h + y);
+                                g.typo_ascent = g.typo_ascent.max(o.h + y);
                                 g.descent = g.descent.max(-y);
                             }
                             // Pushes its line down by its height and spacing.
-                            None => g.ascent += o.h + o.space,
+                            None => {
+                                g.ascent += o.h + o.space;
+                                g.typo_ascent += o.h + o.space;
+                            }
                         }
                         if auto || o.y_offset.is_none() {
                             g.leading = g.leading.max(g.ascent + g.descent);
@@ -574,6 +580,7 @@ fn control_glyph(face: &Arc<FontFace>, p: &CharProps, auto_leading: TypeEnv, sty
         sy: k * p.v_scale,
         shift,
         ascent,
+        typo_ascent: face.typo_ascent * k * p.v_scale,
         descent,
         leading,
         cap,
@@ -644,6 +651,7 @@ fn shape_segment(
             sy: k * p.v_scale,
             shift,
             ascent,
+            typo_ascent: face.typo_ascent * k * p.v_scale,
             descent,
             leading,
             cap,

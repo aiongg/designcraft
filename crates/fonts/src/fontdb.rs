@@ -58,6 +58,9 @@ pub struct FontFace {
     pub upem: f64,
     /// Ascender in font units (positive = up).
     pub ascent: f64,
+    /// OS/2 typographic ascender in font units (the ascent when the font has no usable one): the
+    /// Ascent first baseline offset.
+    pub typo_ascent: f64,
     /// Descender in font units (positive = down).
     pub descent: f64,
     /// Cap height and x height in font units (estimated from the ascent when the font has no OS/2
@@ -449,6 +452,7 @@ fn make_face(bytes: FontBytes, index: u32, family: String, style: String, coords
         italic,
         upem: m.units_per_em.max(1) as f64,
         ascent: m.ascent as f64,
+        typo_ascent: typo_ascent(&f, &location, m.units_per_em.max(1) as f64, m.ascent as f64),
         descent: -(m.descent as f64),
         cap_height: m.cap_height.map(|v| v as f64).filter(|v| *v > 0.0).unwrap_or(m.ascent as f64 * 0.72),
         x_height: m.x_height.map(|v| v as f64).filter(|v| *v > 0.0).unwrap_or(m.ascent as f64 * 0.5),
@@ -460,6 +464,20 @@ fn make_face(bytes: FontBytes, index: u32, family: String, style: String, coords
         index,
         bmp: std::sync::OnceLock::new(),
     })
+}
+
+/// The OS/2 typographic ascender in font units at `location`, or `fallback` when the font has no
+/// OS/2 table or the value isn't a plausible ascender (not above 0, or over 4 em).
+fn typo_ascent(f: &skrifa::FontRef<'_>, location: &Location, upem: f64, fallback: f64) -> f64 {
+    use skrifa::raw::TableProvider;
+    let Ok(os2) = f.os2() else { return fallback };
+    let mut v = os2.s_typo_ascender() as f64;
+    if !location.coords().is_empty()
+        && let Ok(mvar) = f.mvar()
+    {
+        v += mvar.metric_delta(skrifa::raw::tables::mvar::tags::HASC, location.coords()).map_or(0.0, |d| d.to_f64());
+    }
+    if v > 0.0 && v <= 4.0 * upem { v } else { fallback }
 }
 
 /// The named style part of a style with axis settings (`Bold {wght:650}` → `Bold`).

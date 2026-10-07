@@ -1027,3 +1027,129 @@ fn only_english_text_gets_english_hyphenation() {
     st.format_chars(0..n, |f| f.over.language = Some("French".into()));
     assert_eq!(hyphenated(&d2, sid), 0, "French isn't hyphenated with English rules");
 }
+
+/// Source Sans 3 Regular (OS/2 typo ascender = hhea ascender = 1000/1000 em) renamed to `family`
+/// (13 characters, the length of "Source Sans 3"), with OS/2 `sTypoAscender` set to
+/// `typo_ascender`, or without an OS/2 table for `None`.
+fn typo_test_font(family: &str, typo_ascender: Option<i16>) -> Vec<u8> {
+    let mut b = designcraft_fonts::bundled()[0].to_vec();
+    assert_eq!(family.len(), "Source Sans 3".len());
+    let utf16 = |s: &str| s.encode_utf16().flat_map(u16::to_be_bytes).collect::<Vec<u8>>();
+    for (from, to) in [(utf16("Source Sans 3"), utf16(family)), (b"Source Sans 3".to_vec(), family.as_bytes().to_vec())] {
+        let mut i = 0;
+        while let Some(p) = b[i..].windows(from.len()).position(|w| w == from.as_slice()) {
+            b[i + p..i + p + to.len()].copy_from_slice(&to);
+            i += p + to.len();
+        }
+    }
+    let tables = u16::from_be_bytes([b[4], b[5]]) as usize;
+    let rec = (0..tables).map(|t| 12 + 16 * t).find(|&r| &b[r..r + 4] == b"OS/2").unwrap();
+    match typo_ascender {
+        Some(v) => {
+            let os2 = u32::from_be_bytes(b[rec + 8..rec + 12].try_into().unwrap()) as usize;
+            b[os2 + 68..os2 + 70].copy_from_slice(&v.to_be_bytes());
+        }
+        // Still sorted between its neighbours, so the table directory stays valid.
+        None => b[rec..rec + 4].copy_from_slice(b"OS/1"),
+    }
+    b
+}
+
+/// First baseline (frame space) of a 20 pt line in `family` in a frame at y = 36 with a 4 pt top
+/// inset, set up by `opts`.
+fn first_baseline_in(family: &str, opts: impl Fn(&mut designcraft_doc::TextFrameOptions)) -> f64 {
+    let (mut d, sid, fid) = doc_with("Hxg Hxg", Rect::new(36.0, 36.0, 300.0, 300.0), ParaAttrs::default());
+    d.story_mut(sid).unwrap().format_chars(0..7, |f| {
+        f.over.font_family = Some(family.into());
+        f.over.font_style = Some("Regular".into());
+        f.over.size = Some(20.0);
+    });
+    let tf = d.item_mut(fid).unwrap().text_frame_mut().unwrap();
+    tf.options.inset = [4.0, 0.0, 0.0, 0.0];
+    opts(&mut tf.options);
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    cs.frames[0].lines[0].baseline
+}
+
+#[test]
+fn ascent_first_baseline_uses_the_typographic_ascender() {
+    use designcraft_doc::FirstBaseline;
+    let db = designcraft_fonts::FontDb::global();
+    db.add_font(typo_test_font("TypoAscent 07", Some(700)));
+    let face = db.face("TypoAscent 07", "Regular");
+    assert_eq!(face.family, "TypoAscent 07");
+    assert_eq!((face.ascent, face.typo_ascent), (1000.0, 700.0), "hhea 1 em, typo 0.7 em");
+    let top = 36.0 + 4.0;
+    let at = |kind: FirstBaseline, min: f64| {
+        first_baseline_in("TypoAscent 07", |o| {
+            o.first_baseline = kind;
+            o.first_baseline_min = min;
+        })
+    };
+    let close = |a: f64, b: f64| (a - b).abs() < 0.01;
+    // Ascent: top + typo ascender (0.7 em of 20 pt), not the hhea ascender (1 em).
+    assert!(close(at(FirstBaseline::Ascent, 0.0), top + 14.0), "{}", at(FirstBaseline::Ascent, 0.0));
+    // The minimum offset still wins when it is larger.
+    assert!(close(at(FirstBaseline::Ascent, 18.0), top + 18.0));
+    assert!(close(at(FirstBaseline::Ascent, 10.0), top + 14.0));
+    // The other kinds are unchanged.
+    assert!(close(at(FirstBaseline::CapHeight, 0.0), top + 20.0 * 0.72));
+    assert!(close(at(FirstBaseline::XHeight, 0.0), top + 10.0));
+    assert!(close(at(FirstBaseline::Leading, 0.0), top + 24.0));
+    assert!(close(at(FirstBaseline::Fixed, 0.0), top));
+    // Vertical scale scales it like the ascent.
+    let (mut d, sid, fid) = doc_with("Hxg", Rect::new(36.0, 36.0, 300.0, 300.0), ParaAttrs::default());
+    d.story_mut(sid).unwrap().format_chars(0..3, |f| {
+        f.over.font_family = Some("TypoAscent 07".into());
+        f.over.size = Some(20.0);
+        f.over.v_scale = Some(1.5);
+    });
+    d.item_mut(fid).unwrap().text_frame_mut().unwrap().options.inset = [4.0, 0.0, 0.0, 0.0];
+    let l = &compose_story(&d, sid, &ComposeOptions::default()).frames[0].lines[0];
+    assert!(close(l.baseline, top + 21.0), "{}", l.baseline);
+    // The line box keeps the font's ascent.
+    assert!(close(l.ascent, 30.0), "{}", l.ascent);
+    // A mixed first line takes its tallest typographic ascender: 0.7 × 20 pt beats 1 em × 10 pt …
+    let (mut d, sid, fid) = doc_with("Hxg Hxg", Rect::new(36.0, 36.0, 300.0, 300.0), ParaAttrs::default());
+    let st = d.story_mut(sid).unwrap();
+    st.format_chars(0..3, |f| {
+        f.over.font_family = Some("TypoAscent 07".into());
+        f.over.size = Some(20.0);
+    });
+    st.format_chars(3..7, |f| {
+        f.over.font_family = Some("Source Sans 3".into());
+        f.over.size = Some(10.0);
+    });
+    d.item_mut(fid).unwrap().text_frame_mut().unwrap().options.inset = [4.0, 0.0, 0.0, 0.0];
+    let first = |d: &Document| compose_story(d, sid, &ComposeOptions::default()).frames[0].lines[0].baseline;
+    assert!(close(first(&d), top + 14.0), "{}", first(&d));
+    // … and 1 em × 16 pt beats it.
+    d.story_mut(sid).unwrap().format_chars(3..7, |f| f.over.size = Some(16.0));
+    assert!(close(first(&d), top + 16.0), "{}", first(&d));
+}
+
+#[test]
+fn ascent_first_baseline_falls_back_to_the_ascent_without_a_usable_typo_ascender() {
+    let db = designcraft_fonts::FontDb::global();
+    // No OS/2 table, a negative and an absurd typo ascender: the (hhea) ascent, 1 em.
+    for (family, typo) in [("TypoAscentNoO", None), ("TypoAscentNeg", Some(-300)), ("TypoAscentBig", Some(i16::MAX))] {
+        db.add_font(typo_test_font(family, typo));
+        let face = db.face(family, "Regular");
+        assert_eq!(face.family, family);
+        assert_eq!(face.typo_ascent, face.ascent, "{family}");
+        let b = first_baseline_in(family, |_| {});
+        assert!((b - (36.0 + 4.0 + 20.0)).abs() < 0.01, "{family}: {b}");
+    }
+}
+
+#[test]
+fn vertical_frames_keep_the_ascent_first_baseline() {
+    let db = designcraft_fonts::FontDb::global();
+    db.add_font(typo_test_font("TypoAscentVrt", Some(700)));
+    let b = first_baseline_in("TypoAscentVrt", |o| {
+        o.vertical = true;
+        o.inset = [0.0; 4];
+    });
+    // Composed in the turned box (no inset): the hhea ascent, 1 em of 20 pt.
+    assert!((b - 20.0).abs() < 0.01, "{b}");
+}
