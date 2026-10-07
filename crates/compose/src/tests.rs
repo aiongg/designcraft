@@ -1027,3 +1027,20 @@ fn only_english_text_gets_english_hyphenation() {
     st.format_chars(0..n, |f| f.over.language = Some("French".into()));
     assert_eq!(hyphenated(&d2, sid), 0, "French isn't hyphenated with English rules");
 }
+
+#[test]
+fn empty_paragraph_takes_its_marks_format() {
+    // Paragraph style text is 12 pt (auto leading 14.4); every character, including the empty
+    // paragraph's mark, is 6 pt with 8 pt leading: the empty line must advance 8, not 14.4.
+    let text = "One\n\nTwo";
+    let (mut d, sid, _) = doc_with(text, Rect::new(0.0, 0.0, 200.0, 200.0), ParaAttrs::default());
+    d.story_mut(sid).unwrap().format_chars(0..text.len(), |f| {
+        f.over.size = Some(6.0);
+        f.over.leading = Some(designcraft_doc::Leading::Points(8.0));
+    });
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let lines = all_lines(&cs);
+    assert_eq!(lines.len(), 3);
+    assert!((lines[1].baseline - lines[0].baseline - 8.0).abs() < 1e-6, "{} {}", lines[0].baseline, lines[1].baseline);
+    assert!((lines[2].baseline - lines[1].baseline - 8.0).abs() < 1e-6, "{} {}", lines[1].baseline, lines[2].baseline);
+}

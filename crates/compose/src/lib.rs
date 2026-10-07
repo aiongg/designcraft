@@ -648,6 +648,16 @@ pub fn compose(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &Compo
             designcraft_doc::Leading::Points(v) => v,
         };
         let spacing = spacing_for(&pp, base_size);
+        // An empty paragraph takes its height from its paragraph mark's character format.
+        let mark_chars = if glyphs.is_empty() {
+            std::borrow::Cow::Owned(doc.styles.resolve_char(&base_chars, story.char_format_at(prange.start)))
+        } else {
+            std::borrow::Cow::Borrowed(&base_chars)
+        };
+        let mark_leading = match mark_chars.leading {
+            designcraft_doc::Leading::Auto => mark_chars.size * pp.auto_leading,
+            designcraft_doc::Leading::Points(v) => v,
+        };
         // Paragraph start options.
         if force_col[pi] {
             cur.next_column(&cols);
@@ -708,7 +718,7 @@ pub fn compose(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &Compo
             for (k, b) in breaks.iter().enumerate() {
                 let (s, e) = (g0 + b.start, g0 + b.end);
                 let line_glyphs = &glyphs[s..e.max(s)];
-                let (asc, desc, lead) = line_metrics(line_glyphs, &glyphs, s, base_leading, base_chars.size, db, &base_chars);
+                let (asc, desc, lead) = line_metrics(line_glyphs, &glyphs, s, mark_leading, mark_chars.size, db, &mark_chars);
                 let mut baseline = cur.next_baseline(f, col, lead, asc, &pp);
                 // Baseline grid.
                 if let Some((g_start, inc)) = f.grid
