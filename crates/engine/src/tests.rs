@@ -26,6 +26,15 @@ fn create_frame_type_and_undo() {
 }
 
 #[test]
+fn story_get_of_a_missing_story_is_an_error() {
+    let mut s = session();
+    for sid in [0, 999] {
+        let e = s.execute("story.get", &json!({"story": sid})).unwrap_err();
+        assert_eq!(e.to_string(), format!("no such story s{sid}"));
+    }
+}
+
+#[test]
 fn smart_quotes_and_formatting() {
     let mut s = session();
     s.execute("frame.create", &json!({"rect": [36, 36, 300, 200], "content": "text"})).unwrap();
@@ -39,6 +48,22 @@ fn smart_quotes_and_formatting() {
     assert_eq!(a["chars"]["size"], 24.0);
     s.execute("type.para", &json!({"attrs": {"align": "center"}})).unwrap();
     assert_eq!(s.execute("type.selectionAttrs", &json!({})).unwrap()["para"]["align"], "center");
+}
+
+#[test]
+fn a_caret_from_a_command_activates_a_type_tool() {
+    let mut s = session();
+    let r = s.execute("frame.create", &json!({"rect": [36, 36, 300, 200], "content": "text", "text": "Hello"})).unwrap();
+    assert_eq!(s.tool_id(), "selection");
+    s.execute("text.select", &json!({"story": r["story"], "anchor": 5, "focus": 5})).unwrap();
+    assert_eq!(s.tool_id(), "type");
+    s.set_tool("selection");
+    s.execute("text.placeCaret", &json!({"frame": r["id"], "point": [100, 50]})).unwrap();
+    assert_eq!(s.tool_id(), "type");
+    // A tool that already types into the selection stays.
+    s.set_tool("verticalType");
+    s.execute("text.select", &json!({"story": r["story"], "anchor": 0, "focus": 0})).unwrap();
+    assert_eq!(s.tool_id(), "verticalType");
 }
 
 #[test]

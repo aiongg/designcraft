@@ -328,7 +328,10 @@ fn handle_request(app: &mut DesignApp, ctx: &egui::Context, req: &ControlRequest
         }
         "ui.render" => {
             let Some(st) = app.session.active() else { return err("no document") };
-            let page = p.get("page").and_then(Value::as_u64).map(|v| v as usize).or_else(|| crate::canvas::current_page(app)).unwrap_or(0);
+            let page = match designcraft_engine::cmd::page_param(p) {
+                Ok(page) => page.or_else(|| crate::canvas::current_page(app)).unwrap_or(0),
+                Err(e) => return err(e),
+            };
             let scale = p.get("scale").and_then(Value::as_f64).unwrap_or(1.0);
             let Some(img) = app.canvas.renderer.render_page(
                 &st.doc,

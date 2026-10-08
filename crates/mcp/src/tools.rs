@@ -106,7 +106,8 @@ pub fn tool_definitions() -> Vec<Value> {
             "Run any DesignCraft command by id with JSON params (ids and params from list_commands). Examples: \
              {\"command\":\"frame.create\",\"params\":{\"rect\":[36,36,576,300],\"content\":\"text\",\"text\":\"Hello\"}} → {id, story}; \
              {\"command\":\"type.char\",\"params\":{\"size\":24}}; {\"command\":\"edit.undo\"}. Coordinates are points in spread space. \
-             In the desktop app UI-only commands (view.*, window.*, app.*) work too.",
+             In the desktop app the UI-only commands (view.*, window.*, help.*, edit.dynamicSpelling, and app.* except app.links, \
+             which works everywhere) work too.",
             obj(json!({"command": string("Command id, e.g. frame.create"), "params": params_schema()}), &["command"]),
             false,
         ),
@@ -137,16 +138,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "inspect_document",
             "Inspect document",
             "Summary of the active document: settings, pages (index, name, bounds, margins, columns), spreads with items (id, kind, \
-             bounds, fill, stroke, story), stories (id, frames, length, overset, preview), layers, paragraph/character styles, \
-             swatches, selection, active tool.",
+             bounds, fill, stroke, story), stories (id, frames, length in UTF-8 bytes, overset, preview), layers, \
+             paragraph/character styles, swatches, selection, active tool.",
             empty(),
             true,
         ),
         tool(
             "get_story",
             "Get story",
-            "Full text of a story plus its frames, paragraph count, line count and overset position. Identify it by `story` id or \
-             by a text `frame` id (default: the selection).",
+            "Full text of a story plus its length, frames, paragraph count, line count and overset position (length and positions \
+             are UTF-8 byte offsets, the unit text.select takes). Identify it by `story` id or by a text `frame` id (default: the \
+             selection).",
             obj(json!({"story": int("Story id"), "frame": int("Text frame id")}), &[]),
             true,
         ),

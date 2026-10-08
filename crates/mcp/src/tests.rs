@@ -226,6 +226,34 @@ fn type_tool_gesture_then_typing() {
 }
 
 #[test]
+fn type_text_after_text_select_or_place_caret() {
+    for command in ["text.select", "text.placeCaret"] {
+        let mut s = server();
+        ok(&mut s, "new_document", json!({"preset": "A4", "margins": 36}));
+        // No caret yet: type_text says how to place one.
+        let r = call(&mut s, "type_text", json!({"text": "X"}));
+        assert_eq!(r["isError"], true);
+        assert!(text_of(&r).contains("text.select"), "{r}");
+        let f = ok(&mut s, "execute", json!({"command": "frame.create", "params": {"rect": [36, 36, 559, 200], "content": "text", "text": "Hello"}}));
+        let params = match command {
+            "text.select" => json!({"story": f["story"], "anchor": 5, "focus": 5}),
+            _ => json!({"frame": f["id"], "point": [100, 50]}),
+        };
+        ok(&mut s, "execute", json!({"command": command, "params": params}));
+        ok(&mut s, "type_text", json!({"text": "X"}));
+        assert_eq!(ok(&mut s, "get_story", json!({"story": f["story"]}))["text"], "HelloX", "{command}");
+    }
+}
+
+#[test]
+fn get_story_of_a_missing_story_is_an_error() {
+    let mut s = server();
+    let r = call(&mut s, "get_story", json!({"story": 999}));
+    assert_eq!(r["isError"], true);
+    assert_eq!(text_of(&r), "get_story: no such story s999");
+}
+
+#[test]
 fn batch_stops_on_first_error() {
     let mut s = server();
     let r = call(
@@ -313,6 +341,23 @@ fn files_place_and_export() {
     assert!(ok(&mut s, "inspect_document", json!({}))["pageCount"].as_u64().unwrap() > 1);
     let r = call(&mut s, "render_page", json!({"page": 999}));
     assert_eq!(r["isError"], true);
+}
+
+#[test]
+fn page_must_be_a_page_index() {
+    let mut s = server();
+    let out = tmp("bad-page.png");
+    for page in [json!(-1), json!(-2), json!(0.5), json!("1"), json!(true)] {
+        for (tool, args) in [("render_page", json!({"page": page})), ("export_png", json!({"page": page, "path": out}))] {
+            let r = call(&mut s, tool, args);
+            assert_eq!(r["isError"], true, "{tool} page {page}: {r}");
+            assert!(text_of(&r).contains("`page`"), "{tool}: {}", text_of(&r));
+        }
+    }
+    assert!(!out.exists(), "nothing is exported");
+    // Without `page`, the first page.
+    assert_eq!(call(&mut s, "render_page", json!({}))["isError"], false);
+    assert_eq!(call(&mut s, "render_page", json!({"page": 0}))["isError"], false);
 }
 
 #[test]

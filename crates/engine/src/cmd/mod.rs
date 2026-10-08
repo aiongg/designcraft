@@ -256,6 +256,18 @@ pub(crate) fn rect_param(p: &Value, key: &str) -> Option<Rect> {
     let f = |i: usize| a.get(i).and_then(Value::as_f64);
     Some(Rect::new(f(0)?, f(1)?, f(2)?, f(3)?))
 }
+/// A 0-based page index from `page`: `None` when absent or null (the caller's default page), an
+/// error for anything but a whole number ≥ 0.
+pub fn page_param(p: &Value) -> std::result::Result<Option<usize>, String> {
+    match p.get("page") {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => v
+            .as_u64()
+            .and_then(|n| usize::try_from(n).ok())
+            .map(Some)
+            .ok_or_else(|| format!("`page` must be a 0-based page index (0, 1, 2…), not {v}")),
+    }
+}
 /// `{"kind":"doc","index":0}`, `0` or absent (= spread 0).
 pub(crate) fn spread_param(p: &Value, key: &str) -> SpreadRef {
     match p.get(key) {
