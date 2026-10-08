@@ -125,11 +125,26 @@ pub(crate) fn parse(xml: &str) -> Result<El, ImportError> {
     Ok(root.kids.drain(..).find_map(|n| if let Node::El(e) = n { Some(e) } else { None }).unwrap_or_default())
 }
 
-pub(crate) fn part(zip: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>, name: &str) -> Option<String> {
-    let mut f = zip.by_name(name).ok()?;
+/// Largest decompressed zip part read (a small file can inflate to gigabytes).
+pub(crate) const PART_LIMIT: u64 = 64 * 1024 * 1024;
+
+/// A zip part as text. `Ok(None)` when the part is missing or isn't text; an error when it
+/// decompresses to more than [`PART_LIMIT`].
+pub(crate) fn part(zip: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>, name: &str) -> Result<Option<String>, ImportError> {
+    part_capped(zip, name, PART_LIMIT)
+}
+
+pub(crate) fn part_capped(zip: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>, name: &str, limit: u64) -> Result<Option<String>, ImportError> {
+    let Ok(f) = zip.by_name(name) else { return Ok(None) };
     let mut s = String::new();
-    f.read_to_string(&mut s).ok()?;
-    Some(s)
+    // Read one byte past the limit to tell "exactly at the limit" from "over it".
+    if f.take(limit.saturating_add(1)).read_to_string(&mut s).is_err() {
+        return Ok(None);
+    }
+    if s.len() as u64 > limit {
+        return Err(ImportError::Corrupt(format!("{name} is larger than {} MiB uncompressed", limit / (1024 * 1024))));
+    }
+    Ok(Some(s))
 }
 
 /// Character attributes from `<w:rPr>`.
@@ -313,13 +328,13 @@ impl Ctx {
 
 pub fn import(bytes: &[u8]) -> Result<Imported, ImportError> {
     let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| ImportError::Corrupt(e.to_string()))?;
-    let doc = part(&mut zip, "word/document.xml").ok_or_else(|| ImportError::Corrupt("no word/document.xml (not a Word document)".into()))?;
+    let doc = part(&mut zip, "word/document.xml")?.ok_or_else(|| ImportError::Corrupt("no word/document.xml (not a Word document)".into()))?;
     let doc = parse(&doc)?;
     // Styles.
     let mut ctx = Ctx { para_names: HashMap::new(), char_names: HashMap::new(), footnotes: HashMap::new(), warnings: vec![], next_table: 0 };
     let mut para_styles = Vec::new();
     let mut char_styles = Vec::new();
-    if let Some(styles) = part(&mut zip, "word/styles.xml").map(|s| parse(&s)).transpose()? {
+    if let Some(styles) = part(&mut zip, "word/styles.xml")?.map(|s| parse(&s)).transpose()? {
         let ids: HashMap<String, String> =
             styles.els().filter(|s| s.name == "style").filter_map(|s| Some((s.attr("styleId")?.to_string(), s.val("name")?))).collect();
         for s in styles.els().filter(|s| s.name == "style") {
@@ -351,7 +366,7 @@ pub fn import(bytes: &[u8]) -> Result<Imported, ImportError> {
         }
     }
     // Footnotes (ids -1 / 0 are the separators).
-    if let Some(f) = part(&mut zip, "word/footnotes.xml").map(|s| parse(&s)).transpose()? {
+    if let Some(f) = part(&mut zip, "word/footnotes.xml")?.map(|s| parse(&s)).transpose()? {
         for n in f.els().filter(|n| n.name == "footnote") {
             if let Some(id) = n.attr("id").filter(|id| id.parse::<i64>().is_ok_and(|v| v > 0)) {
                 ctx.footnotes.insert(id.to_string(), n.clone());
@@ -398,6 +413,17 @@ mod tests {
     }
 
     const W: &str = r#"xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main""#;
+
+    #[test]
+    fn oversized_part_is_an_error_not_a_huge_read() {
+        // A highly compressible part: 64 KiB of spaces inflates past a 4 KiB cap.
+        let big = docx(&" ".repeat(64 * 1024), "", "");
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(big.as_slice())).unwrap();
+        assert!(matches!(part_capped(&mut zip, "word/document.xml", 4096), Err(ImportError::Corrupt(_))));
+        // At or under the cap reads fine; a missing part is `None`.
+        assert_eq!(part_capped(&mut zip, "word/document.xml", 64 * 1024).unwrap().map(|s| s.len()), Some(64 * 1024));
+        assert_eq!(part_capped(&mut zip, "word/missing.xml", 4096).unwrap(), None);
+    }
 
     #[test]
     fn imports_styles_runs_footnotes_and_tables() {
