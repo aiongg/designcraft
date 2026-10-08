@@ -57,6 +57,26 @@ pub fn specs() -> Vec<CommandSpec> {
             st.revision += 1;
             ok()
         }),
+        cmd!(
+            "story.setDirection",
+            "Story Column Direction",
+            ["Type", "Story Column Direction"],
+            None,
+            "{story?, direction: leftToRight|rightToLeft} — column progression, independent of paragraph direction",
+            has_doc,
+            |s, p| {
+                let sid = story_of(s, p).ok_or_else(|| bad("story.setDirection", "no story"))?;
+                let direction: designcraft_doc::TextDirection =
+                    serde_json::from_value(p.get("direction").cloned().ok_or_else(|| bad("story.setDirection", "missing direction"))?)
+                        .map_err(|e| bad("story.setDirection", e.to_string()))?;
+                s.edit(|d, _| {
+                    let st = d.story_mut(sid).ok_or(designcraft_doc::DocError::NoStory(sid))?;
+                    st.direction = direction;
+                    st.rev = st.rev.wrapping_add(1);
+                    ok()
+                })
+            }
+        ),
         cmd!("story.setText", "Set Story Text", [], None, "{story, text} — replace a story's whole text", has_doc, |s, p| {
             let sid = StoryId(p.get("story").and_then(Value::as_u64).ok_or_else(|| bad("story.setText", "missing story"))?);
             let text = str_param(p, "text").unwrap_or("").to_string();
@@ -94,7 +114,7 @@ pub fn specs() -> Vec<CommandSpec> {
                 })
             }
         ),
-        cmd!(query "story.get", "Get Story", [], None, "{story? | frame?} → text, frames, paragraphs, overset", has_doc, |s, p| {
+        cmd!(query "story.get", "Get Story", [], None, "{story? | frame?} → text, frames, paragraphs, vertical, overset", has_doc, |s, p| {
             let st = s.doc()?;
             let sid = story_of(s, p).ok_or_else(|| bad("story.get", "no story"))?;
             let cs = s.cache.get(&st.doc, sid, None);
@@ -205,6 +225,15 @@ pub fn specs() -> Vec<CommandSpec> {
                 format_chars(s, &json!({"kenten": on}))
             }
         ),
+        cmd!(
+            "type.storyDirection",
+            "Story Direction",
+            [],
+            None,
+            "{vertical: bool} — the stories of the text selection or the selected frames: vertical lines run top to bottom and follow each other right to left, in every frame of the thread",
+            has_text_or_frames,
+            story_direction
+        ),
         cmd!("type.sizeUp", "Increase Point Size", [], Some("Cmd+Shift+."), "{}", has_text_or_frames, |s, _| step_size(s, 2.0)),
         cmd!("type.sizeDown", "Decrease Point Size", [], Some("Cmd+Shift+,"), "{}", has_text_or_frames, |s, _| step_size(s, -2.0)),
         cmd!(
@@ -267,7 +296,7 @@ fn hit_byte_with(
     let loc = st.doc.find(frame)?;
     let it = st.doc.item_at(&loc)?;
     let sid = it.text_frame()?.story;
-    let xf = st.doc.parent_xf(&loc) * it.text_xf();
+    let xf = st.doc.parent_xf(&loc) * st.doc.text_xf(it);
     let inner = xf.inverse() * pt;
     let cs = s.cache.get(&st.doc, sid, None);
     let fi = cs.frames.iter().position(|f| f.frame == frame)?;
@@ -549,42 +578,29 @@ fn smart_quotes(s: &Session, text: &str) -> String {
     out
 }
 
-/// Typographer's quotes of a language: [double open, double close, single open, single close].
+/// Typographer's quotes of a language (a name or locale code, see
+/// [`designcraft_doc::language_tag`]): [double open, double close, single open, single close].
 pub fn quote_marks(language: &str) -> [char; 4] {
-    let l = language.to_ascii_lowercase();
-    if l.starts_with("german: swiss") || l.contains("swiss") {
-        ['\u{00AB}', '\u{00BB}', '\u{2039}', '\u{203A}']
-    } else if l.starts_with("german")
-        || l.starts_with("czech")
-        || l.starts_with("slovak")
-        || l.starts_with("bulgarian")
-        || l.starts_with("lithuanian")
-    {
-        ['\u{201E}', '\u{201C}', '\u{201A}', '\u{2018}']
-    } else if l.starts_with("french")
-        || l.starts_with("russian")
-        || l.starts_with("ukrainian")
-        || l.starts_with("norwegian")
-        || l.starts_with("greek")
-    {
-        ['\u{00AB}', '\u{00BB}', '\u{2039}', '\u{203A}']
-    } else if l.starts_with("spanish") || l.starts_with("italian") || l.starts_with("portuguese") || l.starts_with("catalan") {
-        ['\u{00AB}', '\u{00BB}', '\u{201C}', '\u{201D}']
-    } else if l.starts_with("dutch")
-        || l.starts_with("polish")
-        || l.starts_with("romanian")
-        || l.starts_with("hungarian")
-        || l.starts_with("croatian")
-    {
-        ['\u{201E}', '\u{201D}', '\u{201A}', '\u{2019}']
-    } else if l.starts_with("swedish") || l.starts_with("finnish") {
-        ['\u{201D}', '\u{201D}', '\u{2019}', '\u{2019}']
-    } else if l.starts_with("japanese") || l.starts_with("chinese") {
-        ['\u{300C}', '\u{300D}', '\u{300E}', '\u{300F}']
-    } else if l.starts_with("danish") {
-        ['\u{00BB}', '\u{00AB}', '\u{203A}', '\u{2039}']
-    } else {
-        ['\u{201C}', '\u{201D}', '\u{2018}', '\u{2019}']
+    const ENGLISH: [char; 4] = ['\u{201C}', '\u{201D}', '\u{2018}', '\u{2019}'];
+    let Some(tag) = designcraft_doc::language_tag(language) else { return ENGLISH };
+    // Swiss German, French and Italian use guillemets.
+    if tag.ends_with("-CH") {
+        return ['\u{00AB}', '\u{00BB}', '\u{2039}', '\u{203A}'];
+    }
+    match tag {
+        "zh-Hans" => return ENGLISH,
+        "zh" | "zh-Hant" => return ['\u{300C}', '\u{300D}', '\u{300E}', '\u{300F}'],
+        _ => {}
+    }
+    match designcraft_doc::language_subtag(tag) {
+        "de" | "cs" | "sk" | "bg" | "lt" => ['\u{201E}', '\u{201C}', '\u{201A}', '\u{2018}'],
+        "fr" | "ru" | "uk" | "no" | "nb" | "nn" | "el" => ['\u{00AB}', '\u{00BB}', '\u{2039}', '\u{203A}'],
+        "es" | "it" | "pt" | "ca" => ['\u{00AB}', '\u{00BB}', '\u{201C}', '\u{201D}'],
+        "nl" | "pl" | "ro" | "hu" | "hr" => ['\u{201E}', '\u{201D}', '\u{201A}', '\u{2019}'],
+        "sv" | "fi" => ['\u{201D}', '\u{201D}', '\u{2019}', '\u{2019}'],
+        "da" => ['\u{00BB}', '\u{00AB}', '\u{203A}', '\u{2039}'],
+        "ja" => ['\u{300C}', '\u{300D}', '\u{300E}', '\u{300F}'],
+        _ => ENGLISH,
     }
 }
 
@@ -674,6 +690,36 @@ fn word_bounds(s: &str, i: usize) -> (usize, usize) {
     (a, b)
 }
 
+/// Type ▸ Story Direction.
+fn story_direction(s: &mut Session, p: &Value) -> Result<Value> {
+    let vertical = p.get("vertical").and_then(Value::as_bool).ok_or_else(|| bad("type.storyDirection", "missing vertical"))?;
+    let st = s.doc()?;
+    let mut stories: Vec<StoryId> = st.selection.text.map(|t| t.story).into_iter().chain(st.selection.cells.map(|c| c.story)).collect();
+    for id in &st.selection.items {
+        if let Some(tf) = st.doc.item(*id).and_then(|i| i.text_frame())
+            && !stories.contains(&tf.story)
+        {
+            stories.push(tf.story);
+        }
+    }
+    s.edit(|d, _| {
+        set_story_direction(d, &stories, vertical);
+        Ok(json!({"stories": stories.len()}))
+    })
+}
+
+/// Set the direction of `stories` (all their frames turn together).
+pub(crate) fn set_story_direction(d: &mut designcraft_doc::Document, stories: &[StoryId], vertical: bool) {
+    for sid in stories {
+        if let Some(st) = d.story_mut(*sid)
+            && st.vertical != vertical
+        {
+            st.vertical = vertical;
+            st.rev += 1;
+        }
+    }
+}
+
 fn move_caret(s: &mut Session, p: &Value) -> Result<Value> {
     let dir = str_param(p, "dir").unwrap_or("right").to_string();
     let extend = bool_or(p, "extend", false);
@@ -685,8 +731,18 @@ fn move_caret(s: &mut Session, p: &Value) -> Result<Value> {
     // In a cell, lines come from the cell's own composition.
     let cs = text_composition(s.cache.get(&st.doc, t.story, None), t.cell);
     let pos = t.focus.min(text.len());
+    // Vertical lines run top to bottom and follow each other right to left: Down and Up move along
+    // the line (Right and Left of horizontal text), Left and Right to the next and previous line.
+    let vertical_text = compose::caret(&cs, pos).and_then(|(fi, ..)| cs.frames.get(fi)).is_some_and(|f| f.vertical);
+    let dir = match (vertical_text, dir.as_str()) {
+        (true, "down") => "right",
+        (true, "up") => "left",
+        (true, "left") => "down",
+        (true, "right") => "up",
+        (_, d) => d,
+    };
     let collapse_to = |left: bool| if left { t.range().start } else { t.range().end };
-    let new = match dir.as_str() {
+    let new = match dir {
         "left" if !extend && !t.is_caret() => collapse_to(true),
         "right" if !extend && !t.is_caret() => collapse_to(false),
         "left" | "right" => {
@@ -971,7 +1027,8 @@ fn link_style(s: &mut Session, p: &Value, bold: bool) -> Result<Value> {
     let cur = selection_attrs(s, &json!({}))?;
     let family = cur["chars"]["fontFamily"].as_str().unwrap_or_default().to_string();
     let style = cur["chars"]["fontStyle"].as_str().unwrap_or_default().to_string();
-    let db = designcraft_fonts::FontDb::global();
+    // The document's own fonts count too.
+    let db = designcraft_fonts::FontDb::global().scoped(s.doc()?.doc.font_scope);
     let (weight, italic) = db.traits_of(&family, &style);
     let on = p.get("on").and_then(Value::as_bool).unwrap_or(if bold { weight < 650.0 } else { !italic });
     let (want_bold, want_italic) = if bold { (Some(on), None) } else { (None, Some(on)) };
@@ -1571,6 +1628,90 @@ mod language_tests {
         let st = s.execute("spelling.check", &json!({"story": sid})).unwrap();
         assert!(st.as_array().unwrap().is_empty(), "{st}");
     }
+
+    #[test]
+    fn cjk_languages_have_their_quotes_and_no_english_rules() {
+        use super::quote_marks;
+        assert_eq!(quote_marks("Chinese: Simplified"), ['\u{201C}', '\u{201D}', '\u{2018}', '\u{2019}']);
+        assert_eq!(quote_marks("Chinese: Traditional"), ['\u{300C}', '\u{300D}', '\u{300E}', '\u{300F}']);
+        assert_eq!(quote_marks("Chinese"), ['\u{300C}', '\u{300D}', '\u{300E}', '\u{300F}']);
+        assert_eq!(quote_marks("Japanese"), ['\u{300C}', '\u{300D}', '\u{300E}', '\u{300F}']);
+        // Other spellings of the language names take the same quotes.
+        assert_eq!(quote_marks("Simplified Chinese"), ['\u{201C}', '\u{201D}', '\u{2018}', '\u{2019}']);
+        assert_eq!(quote_marks("zh_CN"), ['\u{201C}', '\u{201D}', '\u{2018}', '\u{2019}']);
+        assert_eq!(quote_marks("Chinese (Traditional)"), ['\u{300C}', '\u{300D}', '\u{300E}', '\u{300F}']);
+        assert_eq!(quote_marks("zh-TW"), ['\u{300C}', '\u{300D}', '\u{300E}', '\u{300F}']);
+        assert_eq!(quote_marks("ja_JP"), ['\u{300C}', '\u{300D}', '\u{300E}', '\u{300F}']);
+        for l in ["Japanese", "Korean", "Chinese", "Chinese: Simplified", "Chinese: Traditional"] {
+            assert!(!designcraft_compose::is_english(l), "{l}: no English hyphenation or spelling");
+        }
+    }
+
+    #[test]
+    fn locale_coded_languages_take_their_quotes_and_rules() {
+        use super::quote_marks;
+        const GERMAN: [char; 4] = ['\u{201E}', '\u{201C}', '\u{201A}', '\u{2018}'];
+        const DUTCH: [char; 4] = ['\u{201E}', '\u{201D}', '\u{201A}', '\u{2019}'];
+        const GUILLEMETS: [char; 4] = ['\u{00AB}', '\u{00BB}', '\u{2039}', '\u{203A}'];
+        const SPANISH: [char; 4] = ['\u{00AB}', '\u{00BB}', '\u{201C}', '\u{201D}'];
+        const ENGLISH: [char; 4] = ['\u{201C}', '\u{201D}', '\u{2018}', '\u{2019}'];
+        const CORNERS: [char; 4] = ['\u{300C}', '\u{300D}', '\u{300E}', '\u{300F}'];
+        for (language, quotes, english) in [
+            ("de_DE_2006", GERMAN, false),
+            ("German: 2006 Reform", GERMAN, false),
+            ("de_CH_2006", GUILLEMETS, false),
+            ("German: Swiss 2006 Reform", GUILLEMETS, false),
+            ("nl_NL_2005", DUTCH, false),
+            ("Dutch: 2005 Reform", DUTCH, false),
+            ("English: USA", ENGLISH, true),
+            ("English: UK", ENGLISH, true),
+            ("en_GB", ENGLISH, true),
+            ("Spanish: Castilian", SPANISH, false),
+            ("es_ES", SPANISH, false),
+            ("French", GUILLEMETS, false),
+            ("fr_FR", GUILLEMETS, false),
+            ("nb_NO", GUILLEMETS, false),
+            ("ja_JP", CORNERS, false),
+            ("[No Language]", ENGLISH, false),
+        ] {
+            assert_eq!(quote_marks(language), quotes, "{language}");
+            assert_eq!(designcraft_compose::is_english(language), english, "{language}");
+        }
+    }
+
+    #[test]
+    fn idml_language_names_keep_their_spelling_and_pick_the_language() {
+        use std::io::Read;
+        // A stand-in for Songti SC (first in the Simplified Chinese chain; the real one when installed).
+        designcraft_fonts::FontDb::global().add_font(designcraft_fonts::testing::font_with("Songti SC", &['直']).unwrap());
+        let mut s = Session::new();
+        s.execute("file.new", &json!({})).unwrap();
+        let r = s.execute("frame.create", &json!({"rect": [72, 72, 300, 200], "content": "text", "text": "直"})).unwrap();
+        s.execute("text.select", &json!({"story": r["story"], "anchor": 0, "focus": 3})).unwrap();
+        s.execute("type.char", &json!({"attrs": {"language": "Simplified Chinese"}})).unwrap();
+        let idml = designcraft_idml::export_idml(&s.doc().unwrap().doc);
+        let mut z = zip::ZipArchive::new(std::io::Cursor::new(idml.clone())).unwrap();
+        let stories: String = (0..z.len())
+            .map(|i| {
+                let mut f = z.by_index(i).unwrap();
+                let mut x = String::new();
+                if f.name().starts_with("Stories/") {
+                    f.read_to_string(&mut x).unwrap();
+                }
+                x
+            })
+            .collect();
+        assert!(stories.contains(r#"AppliedLanguage="$ID/Simplified Chinese""#), "{stories}");
+        // The name comes back as written and sets the text as Simplified Chinese.
+        let mut back = designcraft_idml::import_idml(&idml).unwrap();
+        back.settings.glyph_fallback = true;
+        let st = back.stories.values().find(|st| st.text.contains('直')).unwrap();
+        let (_, base) = back.styles.resolve_para(&st.paras[0]);
+        assert_eq!(back.styles.resolve_char(&base, st.char_format_at(0)).language, "Simplified Chinese");
+        let cs = designcraft_compose::compose_story(&back, st.id, &Default::default());
+        let face = cs.frames[0].lines[0].glyphs.iter().find(|g| g.byte == 0).unwrap().face;
+        assert_eq!(face.family, "Songti SC");
+    }
 }
 
 #[cfg(test)]
@@ -1637,5 +1778,180 @@ mod bidi_caret_tests {
         // By words too.
         let p = s.execute("text.move", &json!({"dir": "left", "word": true})).unwrap()["pos"].as_u64().unwrap();
         assert!(p >= "سلام".len() as u64, "{p}");
+    }
+}
+
+#[cfg(test)]
+mod arabic_tests {
+    use super::*;
+    #[test]
+    fn arabic_story_direction_command_validates_and_supports_undo() {
+        let mut s = Session::new();
+        s.execute("file.new", &json!({})).unwrap();
+        let r = s.execute("frame.create", &json!({"rect": [0, 0, 300, 200], "content": "text", "text": "abc"})).unwrap();
+        let sid = StoryId(r["story"].as_u64().unwrap());
+        let before = s.cache.get(&s.doc().unwrap().doc, sid, None);
+        s.execute("story.setDirection", &json!({"story": sid.0, "direction": "rightToLeft"})).unwrap();
+        assert_eq!(s.doc().unwrap().doc.story(sid).unwrap().direction, designcraft_doc::TextDirection::RightToLeft);
+        let after = s.cache.get(&s.doc().unwrap().doc, sid, None);
+        assert!(!std::sync::Arc::ptr_eq(&before, &after));
+        assert!(s.execute("story.setDirection", &json!({"story": sid.0, "direction": "unknown"})).is_err());
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(s.doc().unwrap().doc.story(sid).unwrap().direction, designcraft_doc::TextDirection::LeftToRight);
+    }
+}
+
+#[cfg(test)]
+mod korean_breaks_tests {
+    use serde_json::json;
+
+    use crate::Session;
+
+    #[test]
+    fn korean_character_breaks_are_a_paragraph_attribute() {
+        let mut s = Session::new();
+        s.execute("file.new", &json!({})).unwrap();
+        let r = s.execute("frame.create", &json!({"rect": [72, 72, 400, 200], "content": "text", "text": "한국어 문장"})).unwrap();
+        let sid = designcraft_doc::StoryId(r["story"].as_u64().unwrap());
+        s.execute("type.para", &json!({"attrs": {"koreanCharBreaks": true}})).unwrap();
+        assert_eq!(s.doc().unwrap().doc.story(sid).unwrap().paras[0].para.korean_char_breaks, Some(true));
+        s.execute("style.paragraph.create", &json!({"name": "Korean", "para": {"koreanCharBreaks": true}})).unwrap();
+        assert_eq!(s.doc().unwrap().doc.styles.para("Korean").unwrap().para.korean_char_breaks, Some(true));
+    }
+}
+
+#[cfg(test)]
+mod story_direction_tests {
+    use designcraft_doc::{ItemId, StoryId};
+    use serde_json::json;
+
+    use crate::Session;
+
+    fn frame(s: &mut Session, rect: [f64; 4], text: &str, vertical: bool) -> (ItemId, StoryId) {
+        let r = s.execute("frame.create", &json!({"rect": rect, "content": "text", "text": text, "caret": false, "vertical": vertical})).unwrap();
+        (ItemId(r["id"].as_u64().unwrap()), StoryId(r["story"].as_u64().unwrap()))
+    }
+
+    /// Which frames of the story are composed vertically, in thread order.
+    fn composed(s: &Session, sid: StoryId) -> Vec<bool> {
+        s.cache.get(&s.doc().unwrap().doc, sid, None).frames.iter().map(|f| f.vertical).collect()
+    }
+
+    #[test]
+    fn story_direction_turns_every_frame_of_the_story() {
+        let mut s = Session::new();
+        s.execute("file.new", &json!({})).unwrap();
+        let (a, sid) = frame(&mut s, [72.0, 72.0, 200.0, 400.0], "縦書きの文章です。", false);
+        let (b, _) = frame(&mut s, [300.0, 72.0, 428.0, 400.0], "", false);
+        s.edit(|d, _| Ok(d.thread(a, b)?)).unwrap();
+        assert_eq!(composed(&s, sid), [false, false]);
+        // From the second frame selected, through Type ▸ Story Direction.
+        s.execute("selection.set", &json!({"ids": [b.0]})).unwrap();
+        s.execute("type.storyDirection", &json!({"vertical": true})).unwrap();
+        assert_eq!(composed(&s, sid), [true, true]);
+        // From a caret in the text.
+        s.execute("text.select", &json!({"story": sid.0, "anchor": 0, "focus": 0})).unwrap();
+        s.execute("type.storyDirection", &json!({"vertical": false})).unwrap();
+        assert_eq!(composed(&s, sid), [false, false]);
+        // The frame option sets the frame's story.
+        s.execute("object.textFrameOptions", &json!({"ids": [a.0], "vertical": true})).unwrap();
+        assert_eq!(composed(&s, sid), [true, true]);
+        // Undo puts it back.
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(composed(&s, sid), [false, false]);
+    }
+
+    #[test]
+    fn a_frame_threaded_onto_a_vertical_story_turns_vertical() {
+        let mut s = Session::new();
+        s.execute("file.new", &json!({})).unwrap();
+        let (a, sid) = frame(&mut s, [72.0, 72.0, 200.0, 400.0], "縦書きの文章です。", true);
+        let (b, _) = frame(&mut s, [300.0, 72.0, 428.0, 400.0], "", false);
+        let c = s.execute("frame.create", &json!({"rect": [450, 72, 550, 400]})).unwrap();
+        let c = ItemId(c["id"].as_u64().unwrap());
+        s.edit(|d, _| {
+            d.thread(a, b)?;
+            Ok(d.thread(b, c)?)
+        })
+        .unwrap();
+        assert_eq!(composed(&s, sid), [true, true, true]);
+    }
+}
+
+#[cfg(test)]
+mod vertical_caret_tests {
+    use designcraft_doc::StoryId;
+    use serde_json::json;
+
+    use crate::Session;
+
+    /// A story set in three or more lines; returns its id.
+    fn story(s: &mut Session, vertical: bool) -> StoryId {
+        s.execute("file.new", &json!({})).unwrap();
+        let text = "一二三四五六七八九十".repeat(8);
+        let rect = if vertical { [72, 72, 200, 400] } else { [72, 72, 400, 200] };
+        let r = s.execute("frame.create", &json!({"rect": rect, "content": "text", "text": text, "vertical": vertical})).unwrap();
+        StoryId(r["story"].as_u64().unwrap())
+    }
+
+    fn mv(s: &mut Session, dir: &str, extend: bool, word: bool) -> usize {
+        s.execute("text.move", &json!({"dir": dir, "extend": extend, "word": word})).unwrap()["pos"].as_u64().unwrap() as usize
+    }
+
+    /// (line index, position along the line) of the caret at `pos`.
+    fn place(s: &Session, sid: StoryId, pos: usize) -> (usize, f64) {
+        let cs = s.cache.get(&s.doc().unwrap().doc, sid, None);
+        let (_, x, baseline, _, _) = crate::compose::caret(&cs, pos).unwrap();
+        let line = cs.frames[0].lines.iter().position(|l| (l.baseline - baseline).abs() < 0.01).unwrap();
+        (line, x)
+    }
+
+    #[test]
+    fn arrow_keys_follow_vertical_lines() {
+        let mut s = Session::new();
+        let sid = story(&mut s, true);
+        assert!(s.cache.get(&s.doc().unwrap().doc, sid, None).frames[0].lines.len() >= 3);
+        let c = '一'.len_utf8();
+        s.execute("text.select", &json!({"story": sid.0, "anchor": 3 * c, "focus": 3 * c})).unwrap();
+        // Down and Up move along the line, a character at a time.
+        assert_eq!(mv(&mut s, "down", false, false), 4 * c);
+        assert_eq!(mv(&mut s, "up", false, false), 3 * c);
+        // Left moves to the next line (lines follow each other right to left), keeping the
+        // position along the line; Right comes back.
+        let (line, x) = place(&s, sid, 3 * c);
+        let next = mv(&mut s, "left", false, false);
+        let (nline, nx) = place(&s, sid, next);
+        assert_eq!(nline, line + 1);
+        assert!((nx - x).abs() < 0.5, "{x} {nx}");
+        assert_eq!(mv(&mut s, "right", false, false), 3 * c);
+        // Shift extends.
+        assert_eq!(mv(&mut s, "down", true, false), 4 * c);
+        let t = s.doc().unwrap().selection.text.unwrap();
+        assert_eq!((t.anchor, t.focus), (3 * c, 4 * c));
+        let p = mv(&mut s, "left", true, false);
+        let t = s.doc().unwrap().selection.text.unwrap();
+        assert_eq!((t.anchor, t.focus), (3 * c, p));
+        assert_eq!(place(&s, sid, p).0, line + 1);
+        // With a selection, Up collapses it to its start.
+        assert_eq!(mv(&mut s, "up", false, false), 3 * c);
+        // By words: Alt+Down is the vertical Alt+Right.
+        let text = s.doc().unwrap().doc.story(sid).unwrap().text.clone();
+        assert_eq!(mv(&mut s, "down", false, true), super::next_word(&text, 3 * c));
+    }
+
+    #[test]
+    fn arrow_keys_in_horizontal_lines() {
+        let mut s = Session::new();
+        let sid = story(&mut s, false);
+        let c = '一'.len_utf8();
+        s.execute("text.select", &json!({"story": sid.0, "anchor": 3 * c, "focus": 3 * c})).unwrap();
+        assert_eq!(mv(&mut s, "right", false, false), 4 * c);
+        assert_eq!(mv(&mut s, "left", false, false), 3 * c);
+        let (line, x) = place(&s, sid, 3 * c);
+        let next = mv(&mut s, "down", false, false);
+        let (nline, nx) = place(&s, sid, next);
+        assert_eq!(nline, line + 1);
+        assert!((nx - x).abs() < 0.5, "{x} {nx}");
+        assert_eq!(mv(&mut s, "up", false, false), 3 * c);
     }
 }

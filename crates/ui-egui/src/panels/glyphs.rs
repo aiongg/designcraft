@@ -1,6 +1,5 @@
 //! Glyphs panel: every character of a font in a grid; click to insert it at the text cursor.
 
-use designcraft_fonts::FontDb;
 use egui::{Sense, vec2};
 use serde_json::json;
 
@@ -32,14 +31,13 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
             .unwrap_or_else(|| designcraft_fonts::DEFAULT_FAMILY.into());
         st.style = a.as_ref().and_then(|a| a["chars"]["fontStyle"].as_str().map(str::to_string)).unwrap_or_else(|| "Regular".into());
     }
-    let db = FontDb::global();
+    let (db, scope) = (super::fonts(app), super::font_scope(app));
     ui.horizontal(|ui| {
-        egui::ComboBox::from_id_salt("glyph_family").selected_text(&st.family).width(140.0).show_ui(ui, |ui| {
-            for f in db.families() {
-                if ui.selectable_label(f == st.family, &f).clicked() {
-                    st.style = db.styles(&f).into_iter().next().unwrap_or_else(|| "Regular".into());
-                    st.family = f;
-                }
+        let menu = super::font_menu(app);
+        egui::ComboBox::from_id_salt("glyph_family").selected_text(super::font_label(app, &menu, &st.family)).width(140.0).show_ui(ui, |ui| {
+            if let Some(f) = super::font_menu_rows(app, ui, &menu, &st.family) {
+                st.style = db.styles(&f).into_iter().next().unwrap_or_else(|| "Regular".into());
+                st.family = f;
             }
         });
         egui::ComboBox::from_id_salt("glyph_style").selected_text(&st.style).width(80.0).show_ui(ui, |ui| {
@@ -80,11 +78,11 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
     let ppp = ui.ctx().pixels_per_point();
     let cell_px = (CELL * ppp).round() as u32;
     let ink = t.text_strong;
-    let key = egui::Id::new(("glyph_grid", &st.family, &st.style, &q, cols, cell_px, ink.to_array()));
+    let key = egui::Id::new(("glyph_grid", &st.family, &st.style, scope, &q, cols, cell_px, ink.to_array()));
     let tex: egui::TextureHandle = match ui.data(|d| d.get_temp::<egui::TextureHandle>(key)) {
         Some(t) => t,
         None => {
-            let img = designcraft_render::glyphs::glyph_grid(&st.family, &st.style, &chars, cols, cell_px, ink.to_array());
+            let img = designcraft_render::glyphs::glyph_grid(&db, &st.family, &st.style, &chars, cols, cell_px, ink.to_array());
             let ci = egui::ColorImage::from_rgba_premultiplied([img.width as usize, img.height as usize], &img.pixels);
             let h = ui.ctx().load_texture("glyph_grid", ci, egui::TextureOptions::LINEAR);
             ui.data_mut(|d| d.insert_temp(key, h.clone()));

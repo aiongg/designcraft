@@ -91,6 +91,20 @@ pub struct DocState {
     /// Editing parent spreads (Pages panel double-click on a parent).
     pub editing_parents: bool,
     pub uid: u64,
+    /// The fonts the document brought (`doc.font_scope`), found while it is open.
+    pub fonts: Option<Arc<FontScope>>,
+}
+
+/// A document's font scope ([`designcraft_fonts::FontDb::load_document_fonts`]): its fonts are
+/// found until the document's state (with every copy of it) is gone — closed, reverted, or its
+/// session ended.
+#[derive(Debug)]
+pub struct FontScope(pub u32);
+
+impl Drop for FontScope {
+    fn drop(&mut self) {
+        designcraft_fonts::FontDb::global().close_scope(self.0);
+    }
 }
 
 static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -111,6 +125,7 @@ impl DocState {
             interaction: None,
             editing_parents: false,
             uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            fonts: None,
         }
     }
     pub fn is_dirty(&self) -> bool {
@@ -156,6 +171,9 @@ pub struct Prefs {
     pub rich_black_output: bool,
     /// Font menu favourites (family names).
     pub favorite_fonts: Vec<String>,
+    /// Preferences › Type › Show Font Names in English: the font menus show CJK families by their
+    /// English names instead of their native ones. Documents store the English name either way.
+    pub show_font_names_in_english: bool,
     /// Preferences › Type › Smart Text Reflow: pages follow the primary text frame's story
     /// (added while it oversets, empty ones at the end removed).
     pub smart_text_reflow: bool,
@@ -209,6 +227,7 @@ impl Default for Prefs {
             highlight_substituted_fonts: true,
             rich_black_output: false,
             favorite_fonts: Vec::new(),
+            show_font_names_in_english: false,
             smart_text_reflow: true,
             autocorrect: false,
             autocorrect_list: default_autocorrect(),

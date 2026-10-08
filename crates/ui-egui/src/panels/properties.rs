@@ -986,7 +986,8 @@ fn character_section(app: &mut DesignApp, ui: &mut Ui) {
     let sty = c["fontStyle"].as_str().unwrap_or("").to_string();
     let fw = full_width(ui);
     // Family dropdown with a search segment on the left.
-    let fams = designcraft_fonts::FontDb::global().families();
+    let fonts = super::fonts(app);
+    let menu = super::font_menu(app);
     let resp = widgets::dropdown(ui, "", fw);
     let r = resp.rect;
     icons::paint(ui.painter(), Rect::from_min_size(r.min + vec2(3.0, 3.0), vec2(14.0, 14.0)), "search", t.icon);
@@ -994,7 +995,7 @@ fn character_section(app: &mut DesignApp, ui: &mut Ui) {
     ui.painter().text(
         r.min + vec2(30.0, 10.5),
         egui::Align2::LEFT_CENTER,
-        if fam.is_empty() { "—" } else { &fam },
+        if fam.is_empty() { "—".to_string() } else { super::font_label(app, &menu, &fam) },
         egui::FontId::proportional(11.5),
         t.text,
     );
@@ -1002,21 +1003,19 @@ fn character_section(app: &mut DesignApp, ui: &mut Ui) {
     egui::Popup::menu(&resp).show(|ui| {
         ui.set_min_width(fw);
         egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
-            for f in &fams {
-                if ui.selectable_label(*f == fam, f).clicked() {
-                    pick_fam = Some(f.clone());
-                    ui.close();
-                }
+            if let Some(f) = super::font_menu_rows(app, ui, &menu, &fam) {
+                pick_fam = Some(f);
+                ui.close();
             }
         });
     });
     if let Some(f) = pick_fam {
-        let styles = designcraft_fonts::FontDb::global().styles(&f);
+        let styles = fonts.styles(&f);
         let style = if styles.iter().any(|s| s == "Regular") { "Regular".to_string() } else { styles.first().cloned().unwrap_or_default() };
         let _ = app.run("type.char", json!({"attrs": {"fontFamily": f, "fontStyle": style}}));
     }
     ui.add_space(1.0);
-    let styles = designcraft_fonts::FontDb::global().styles(&fam);
+    let styles = fonts.styles(&fam);
     let cur = styles.iter().position(|s| *s == sty);
     if let Some(k) = widgets::dropdown_list(ui, if sty.is_empty() { "—" } else { &sty }, fw, &styles, cur) {
         let _ = app.run("type.char", json!({"attrs": {"fontStyle": styles[k]}}));
@@ -1206,6 +1205,8 @@ const LANGUAGES: &[&str] = &[
     "Turkish",
     "Japanese",
     "Chinese",
+    "Chinese: Simplified",
+    "Chinese: Traditional",
     "Korean",
     "Arabic",
     "Hebrew",
@@ -2123,7 +2124,7 @@ fn variable_font_axes(app: &mut DesignApp, ui: &mut egui::Ui, family: &str, styl
     if family.is_empty() {
         return;
     }
-    let db = designcraft_fonts::FontDb::global();
+    let db = super::fonts(app);
     let axes = db.axes(family, style);
     if axes.is_empty() {
         return;

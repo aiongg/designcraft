@@ -116,6 +116,7 @@ impl Document {
             horizontal_units: nd.units,
             vertical_units: nd.units,
             blend_space: if nd.intent == Intent::Print { crate::BlendSpace::Cmyk } else { crate::BlendSpace::Rgb },
+            glyph_fallback: false,
             ..Default::default()
         };
         let mut d = Document {
@@ -156,6 +157,7 @@ impl Document {
             created: crate::vars::now(),
             modified: 0,
             next_id: 0,
+            font_scope: 0,
         };
         let lid = LayerId(d.alloc());
         d.layers.push(Layer {

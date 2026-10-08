@@ -10,6 +10,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod bidi;
 pub mod breaker;
 mod cache;
 pub mod hyphen;
@@ -29,7 +30,7 @@ use designcraft_doc::{
     Align, Composer, Document, FirstBaseline, GridAlign, ItemId, ParaProps, SpanColumns, StartParagraph, Story, StoryId, TabAlign, TextFrameOptions,
     VerticalJustification, WrapMode, story,
 };
-use designcraft_fonts::FontDb;
+use designcraft_fonts::{FontDb, ScopedFonts};
 use designcraft_geom::{Point, Rect};
 
 use crate::breaker::{Break, Spacing};
@@ -67,6 +68,7 @@ pub struct RunStyle {
     /// Ruby over the run, and kenten (emphasis dots).
     pub ruby: Option<String>,
     pub kenten: bool,
+    pub kenten_character: String,
 }
 
 /// An underline or strikethrough bar: its top edge `offset` below the baseline (negative =
@@ -113,15 +115,29 @@ pub struct PlacedGlyph {
 }
 
 impl PlacedGlyph {
-    /// In a vertical frame, the turn that sets this glyph upright (about its em box centre, or
-    /// across the line in a tate-chu-yoko group), applied after drawing it at `x` on `baseline`.
+    /// In a vertical frame, the turn that sets this glyph upright, applied after drawing it at `x`
+    /// on `baseline`: it hangs from its vertical origin ([`designcraft_fonts::FontFace::v_origin`],
+    /// centred across) at `x` on the line's centre, the middle of the font's em box; a tate-chu-yoko
+    /// group sits across that centre.
     pub fn vertical_xf(&self, baseline: f64) -> Option<designcraft_geom::Affine> {
         let turn = -std::f64::consts::FRAC_PI_2;
+        // The em box centre above the baseline, in ems.
+        let (top, bottom) = self.face.em_box();
+        let centre = (top + bottom) / 2.0 / self.face.units_per_em();
         if let Some([along, across, em]) = self.tcy {
-            let c = Point::new(self.x + along, baseline + self.y - em * 0.38);
+            let c = Point::new(self.x + along, baseline + self.y - em * centre);
             return Some(designcraft_geom::Affine::rotate_about(turn, c) * designcraft_geom::Affine::translate((c.x + across - self.x, 0.0)));
         }
-        self.upright.then(|| designcraft_geom::Affine::rotate_about(turn, Point::new(self.x + self.adv / 2.0, baseline + self.y - self.adv * 0.38)))
+        if !self.upright {
+            return None;
+        }
+        // Turning about c takes the glyph's vertical origin (half across, `origin` up) to the
+        // centre point at `x`: c is where the two points' perpendicular bisector meets the turn.
+        let half = self.face.advance(self.gid) / 2.0 * self.sx;
+        let origin = self.face.v_origin(self.gid) * self.sy;
+        let mid = centre * self.face.units_per_em() * self.sy;
+        let c = Point::new(self.x + (origin - mid + half) / 2.0, baseline + self.y + (half - mid - origin) / 2.0);
+        Some(designcraft_geom::Affine::rotate_about(turn, c))
     }
 }
 
@@ -261,6 +277,9 @@ pub struct FrameSpec {
     /// Text area (inner space, after inset).
     pub area: Rect,
     pub opts: TextFrameOptions,
+    /// Lines run top to bottom and follow each other right to left (the story is vertical); the
+    /// area is the turned box.
+    pub vertical: bool,
     pub exclusions: Vec<Exclusion>,
     pub page_name: Option<String>,
     /// Absolute document page the frame is on (None on parent pages).
@@ -382,7 +401,8 @@ pub fn frame_specs(doc: &Document, sid: StoryId) -> Vec<FrameSpec> {
             None => (item.text_area(), tf.options.clone()),
         };
         // Vertical type: composed in the turned box; wraps and page rects turned with it.
-        let (area, exclusions, grid, page_rect) = if tf.options.vertical && tf.options.path.is_none() {
+        let vertical = doc.frame_vertical(item);
+        let (area, exclusions, grid, page_rect) = if vertical {
             let v = designcraft_doc::vertical_text_xf(area).inverse();
             let ex = exclusions.into_iter().map(|e| Exclusion { rect: v.transform_rect_bbox(e.rect), ..e }).collect();
             let pr = page_rect.map(|(a, b)| (v.transform_rect_bbox(a), v.transform_rect_bbox(b)));
@@ -394,6 +414,7 @@ pub fn frame_specs(doc: &Document, sid: StoryId) -> Vec<FrameSpec> {
             id: fid,
             area,
             opts,
+            vertical,
             exclusions: if tf.options.path.is_some() { vec![] } else { exclusions },
             page_name,
             page,
@@ -418,13 +439,30 @@ const DEFAULT_TAB: f64 = 36.0;
 
 /// Compose `story` into `frames`.
 pub fn compose(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &ComposeOptions) -> ComposedStory {
-    let db = FontDb::global();
+    compose_with_db(doc, story, frames, opts, FontDb::global())
+}
+
+fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &ComposeOptions, db: &FontDb) -> ComposedStory {
+    let db = &db.scoped(doc.font_scope);
     let mut out = ComposedStory { story: story.id, rev: story.rev, text_len: story.text.len(), ..Default::default() };
     let mut styles_tab: Vec<RunStyle> = Vec::new();
     let mut missing_fonts: HashMap<String, bool> = HashMap::new();
-    out.frames = frames.iter().map(|f| FrameText { frame: f.id, vertical: f.opts.vertical, columns: f.columns(), ..Default::default() }).collect();
-    let cols: Vec<Vec<Rect>> = frames.iter().map(FrameSpec::columns).collect();
-    let mut cur = Cursor { fi: 0, col: 0, last_baseline: None, last_descent: 0.0, pending: 0.0 };
+    let cols: Vec<Vec<Rect>> = frames
+        .iter()
+        .map(|f| {
+            let mut columns = f.columns();
+            if story.direction == designcraft_doc::TextDirection::RightToLeft && !f.vertical {
+                columns.reverse();
+            }
+            columns
+        })
+        .collect();
+    out.frames = frames
+        .iter()
+        .zip(&cols)
+        .map(|(f, columns)| FrameText { frame: f.id, vertical: f.vertical, columns: columns.clone(), ..Default::default() })
+        .collect();
+    let mut cur = Cursor { fi: 0, col: 0, last_baseline: None, last_descent: 0.0, last_reference: 0.0, pending: 0.0 };
     let para_ranges = story.para_ranges();
     let np = para_ranges.len();
     let hyph_exceptions = doc.hyphenation_exception_map();
@@ -515,7 +553,7 @@ pub fn compose(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &Compo
             section_marker: None,
             vars: var_values,
             hidden_conditions: doc.conditions.iter().filter(|c| !c.visible).map(|c| c.name.clone()).collect(),
-            vertical: cur_frame.is_some_and(|f| f.opts.vertical),
+            vertical: cur_frame.is_some_and(|f| f.vertical),
             ..Default::default()
         };
         if !story.endnotes.is_empty() {
@@ -546,7 +584,7 @@ pub fn compose(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &Compo
         }
         let sub_objects = sub.objects.clone();
         let mut table = StyleTable { styles: &mut styles_tab, missing: &mut missing_fonts };
-        let env = shape::TypeEnv { auto_leading: pp.auto_leading, adv: doc.settings.advanced_type };
+        let env = shape::TypeEnv { auto_leading: pp.auto_leading, adv: doc.settings.advanced_type, glyph_fallback: doc.settings.glyph_fallback };
         let mut sp = shape::shape_para(
             db,
             &doc.styles,
@@ -616,30 +654,38 @@ pub fn compose(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &Compo
                 );
             }
         }
+        // List labels take the default super/subscript settings.
+        let label_env = shape::TypeEnv { adv: Default::default(), ..env };
         match pp.list_type {
             designcraft_doc::ListType::Numbers if !pp.list_name.is_empty() => {
                 // A named list: carries on past other paragraphs (and from earlier stories).
                 let n = named_numbers.get(pi).copied().flatten().unwrap_or(1);
                 let label = format!("{}.{}", pp.number_style.format(n), pp.list_separator);
-                prepend_label(db, &mut sp.glyphs, &label, prange.start, &base_chars, &pp, &mut table);
+                prepend_label(db, &mut sp.glyphs, &label, prange.start, &base_chars, label_env, &mut table);
             }
             designcraft_doc::ListType::Numbers => {
                 list_counter = pp.start_at.map_or(list_counter + 1, |s| s.max(1));
                 let label = format!("{}.{}", pp.number_style.format(list_counter), pp.list_separator);
-                prepend_label(db, &mut sp.glyphs, &label, prange.start, &base_chars, &pp, &mut table);
+                prepend_label(db, &mut sp.glyphs, &label, prange.start, &base_chars, label_env, &mut table);
             }
             designcraft_doc::ListType::Bullets => {
                 let label = format!("{}{}", pp.bullet_char, pp.list_separator);
-                prepend_label(db, &mut sp.glyphs, &label, prange.start, &base_chars, &pp, &mut table);
+                prepend_label(db, &mut sp.glyphs, &label, prange.start, &base_chars, label_env, &mut table);
             }
             designcraft_doc::ListType::None => list_counter = 0,
         }
         if pi == 0
             && let Some(label) = &opts.label
         {
-            prepend_label(db, &mut sp.glyphs, label, prange.start, &base_chars, &pp, &mut table);
+            prepend_label(db, &mut sp.glyphs, label, prange.start, &base_chars, label_env, &mut table);
         }
         let mut glyphs = sp.glyphs;
+        let bidi_text = bidi::paragraph_text(&mut glyphs, &story.text);
+        let bidi_info = unicode_bidi::BidiInfo::new(
+            &bidi_text,
+            Some(if pp.direction == designcraft_doc::TextDirection::RightToLeft { unicode_bidi::Level::rtl() } else { unicode_bidi::Level::ltr() }),
+        );
+        bidi::resolve_mirroring(&mut glyphs, &bidi_info);
         apply_desired_spacing(&mut glyphs, &pp);
         let hyph_after = hyphenation_points(&story.text, &glyphs, &pp, &hyph_exceptions, &foreign_ranges(doc, story, prange.clone(), &base_chars));
         let base_size = base_chars.size;
@@ -683,7 +729,8 @@ pub fn compose(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &Compo
             let col = match pp.span_columns {
                 SpanColumns::Span(n) if cur.col == 0 => {
                     let n = if n == 0 { cols[cur.fi].len() } else { (n as usize).min(cols[cur.fi].len()) };
-                    Rect::new(col.x0, col.y0, cols[cur.fi][n - 1].x1, col.y1)
+                    let other = cols[cur.fi][n - 1];
+                    Rect::new(col.x0.min(other.x0), col.y0, col.x1.max(other.x1), col.y1)
                 }
                 _ => col,
             };
@@ -709,7 +756,11 @@ pub fn compose(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &Compo
                 let (s, e) = (g0 + b.start, g0 + b.end);
                 let line_glyphs = &glyphs[s..e.max(s)];
                 let (asc, desc, lead) = line_metrics(line_glyphs, &glyphs, s, base_leading, base_chars.size, db, &base_chars);
+                let reference = cjk_line_reference(line_glyphs);
                 let mut baseline = cur.next_baseline(f, col, lead, asc, &pp);
+                if cur.last_baseline.is_some() {
+                    baseline += cur.last_reference - reference;
+                }
                 // Baseline grid.
                 if let Some((g_start, inc)) = f.grid
                     && (pp.grid_align == GridAlign::AllLines || (pp.grid_align == GridAlign::FirstLineOnly && line_no == 0))
@@ -794,17 +845,17 @@ pub fn compose(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &Compo
                 let lx1 = x1 - pp.right_indent;
                 let last = k + 1 == breaks.len();
                 let (mut placed, end_x, ratio) =
-                    layout_line(&glyphs, s, e, b.hyphen, lx0, lx1, col.x0, &pp, &spacing, last, b.forced && !last, f.left_page);
+                    layout_line(&glyphs, s, e, b.hyphen, lx0, lx1, col.x0, &pp, &spacing, last, b.forced && !last, f.left_page, &bidi_info);
                 // The spaces the break trimmed off the end follow the line undrawn, so the caret
                 // and the selection reach them; alignment and justification ignore them.
-                if !placed.iter().any(|g| g.rtl) {
+                if pp.direction != designcraft_doc::TextDirection::RightToLeft && !placed.iter().any(|g| g.rtl) {
                     let mut x = end_x;
                     for g in glyphs.get(e..(g0 + b.next).min(glyphs.len())).unwrap_or(&[]).iter().filter(|g| g.is_space()) {
                         placed.push(PlacedGlyph { visible: false, ..place(g, x) });
                         x += g.adv;
                     }
                 }
-                ruby::annotate(&styles_tab, &mut placed);
+                ruby::annotate(db, &styles_tab, &mut placed, doc.settings.glyph_fallback);
                 let range_end = if last { prange.end } else { glyphs.get(g0 + b.next).map(|g| g.byte).unwrap_or(prange.end) };
                 let range_start = glyphs.get(s).map(|g| g.byte).unwrap_or(prange.start).min(range_end);
                 let range_start = if line_no == 0 { prange.start } else { range_start };
@@ -846,6 +897,7 @@ pub fn compose(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &Compo
                     }
                 }
                 cur.last_baseline = Some(baseline);
+                cur.last_reference = reference;
                 cur.last_descent = desc;
                 cur.pending = 0.0;
                 line_no += 1;
@@ -1107,11 +1159,42 @@ fn spacing_for(pp: &ParaProps, base_size: f64) -> Spacing {
         ragged_stretch: base_size * 2.0,
         hyph_zone: if pp.align.is_justified() { 0.0 } else { pp.hyph_zone },
         optical: pp.optical_margin,
+        korean_char_breaks: pp.korean_char_breaks,
     }
 }
 
 /// Desired word spacing, letter spacing and glyph scaling apply to every line (any alignment).
 fn apply_desired_spacing(glyphs: &mut [Glyph], pp: &ParaProps) {
+    for i in 0..glyphs.len() {
+        let (left, right) = glyphs.split_at_mut(i + 1);
+        let Some(g) = left.last_mut() else { continue };
+        if pp.kinsoku_hang != designcraft_doc::cjk::KinsokuHang::None && pp.kinsoku.as_ref().is_some_and(|k| k.hanging.contains(g.ch)) {
+            g.cjk_hang = g.adv;
+        }
+        g.ideographic_space_elastic = pp.treat_ideographic_space_as_space;
+        if g.ch == '\u{3000}' && pp.treat_ideographic_space_as_space {
+            g.space = g.adv;
+        }
+        if let Some(next) = right.first() {
+            let a = g.ch;
+            let b = next.ch;
+            // A kinsoku set rules where CJK text may break; Korean still breaks at spaces.
+            let cjk = breaker::cjk_pair(g, next, pp.korean_char_breaks);
+            if g.break_after != Some(false) {
+                if let Some(set) = &pp.kinsoku {
+                    if !set.allows(a, b) {
+                        g.break_after = Some(false);
+                    } else if cjk {
+                        g.break_after = Some(true);
+                    }
+                }
+                if (pp.bunri_kinshi && a == b && matches!(a, '.' | '-' | '…' | '‥' | '—' | '―')) || (pp.rensuuji && a.is_numeric() && b.is_numeric())
+                {
+                    g.break_after = Some(false);
+                }
+            }
+        }
+    }
     let ws = pp.word_space_desired;
     let ls = pp.letter_space_desired;
     let gs = pp.glyph_scale_desired.max(0.01);
@@ -1119,7 +1202,10 @@ fn apply_desired_spacing(glyphs: &mut [Glyph], pp: &ParaProps) {
         return;
     }
     for g in glyphs {
-        if g.ch == ' ' {
+        if g.locked_advance {
+            continue;
+        }
+        if g.ch == ' ' || (g.ch == '\u{3000}' && g.ideographic_space_elastic) {
             g.adv += g.space * (ws - 1.0);
         } else if !g.is_space() && g.adv > 0.0 {
             g.adv = g.adv * gs + ls * g.space;
@@ -1276,6 +1362,7 @@ struct Cursor {
     col: usize,
     last_baseline: Option<f64>,
     last_descent: f64,
+    last_reference: f64,
     /// Space before/after waiting to be added to the next line.
     pending: f64,
 }
@@ -1314,28 +1401,61 @@ impl Cursor {
     }
 }
 
+/// Em box relative to the baseline. Font ascender/descender proportions locate it;
+/// the box's total extent is the em, rather than the font's optional line gap.
+fn cjk_em_box(g: &Glyph) -> (f64, f64) {
+    let height = g.face.units_per_em() * g.sy.abs();
+    let top = -height * g.ascent / (g.ascent + g.descent).max(1e-9);
+    (top, top + height)
+}
+fn cjk_alignment_shift(g: &Glyph, reference: &Glyph) -> f64 {
+    use designcraft_doc::cjk::CharacterAlignment as A;
+    let (t, b) = cjk_em_box(g);
+    let (rt, rb) = cjk_em_box(reference);
+    match g.character_alignment {
+        A::Baseline => 0.0,
+        A::EmTop => t - rt,
+        A::EmCenter => (t + b - rt - rb) / 2.0,
+        A::EmBottom => b - rb,
+        A::IcfTop => reference.ascent - g.ascent,
+        A::IcfBottom => g.descent - reference.descent,
+    }
+}
+fn cjk_line_reference(line: &[Glyph]) -> f64 {
+    use designcraft_doc::cjk::LeadingModel as L;
+    let Some(g) = line.iter().max_by(|a, b| a.size.total_cmp(&b.size)) else { return 0.0 };
+    let (top, bottom) = cjk_em_box(g);
+    match g.leading_model {
+        L::Roman => 0.0,
+        L::AkiBelow => bottom,
+        L::AkiAbove => top,
+        L::Center | L::CenterDown => (top + bottom) / 2.0,
+    }
+}
+
 fn line_metrics(
     line: &[Glyph],
     all: &[Glyph],
     s: usize,
     base_leading: f64,
     base_size: f64,
-    db: &FontDb,
+    db: &ScopedFonts<'_>,
     base: &designcraft_doc::CharProps,
 ) -> (f64, f64, f64) {
-    let _ = db;
     let src: &[Glyph] = if line.is_empty() { all.get(s..(s + 1).min(all.len())).unwrap_or(&[]) } else { line };
     if src.is_empty() {
-        let face = FontDb::global().face(&base.font_family, &base.font_style);
+        let face = db.face(&base.font_family, &base.font_style);
         let k = base_size / face.upem;
         return (face.ascent * k, face.descent * k, base_leading);
     }
     let mut asc: f64 = 0.0;
     let mut desc: f64 = 0.0;
     let mut lead: f64 = 0.0;
+    let reference = src.iter().max_by(|a, b| a.size.total_cmp(&b.size));
     for g in src {
-        asc = asc.max(g.ascent + g.shift.max(0.0));
-        desc = desc.max(g.descent - g.shift.min(0.0));
+        let shift = g.shift + reference.map_or(0.0, |r| cjk_alignment_shift(g, r));
+        asc = asc.max(g.ascent + shift.max(0.0));
+        desc = desc.max(g.descent - shift.min(0.0));
         lead = lead.max(g.leading);
     }
     (asc, desc, lead)
@@ -1439,8 +1559,15 @@ fn layout_line(
     last: bool,
     forced_mid: bool,
     left_page: bool,
+    bidi_info: &unicode_bidi::BidiInfo<'_>,
 ) -> (Vec<PlacedGlyph>, f64, f64) {
     let mut line: Vec<Glyph> = glyphs[s..e.max(s)].to_vec();
+    let reference = line.iter().max_by(|a, b| a.size.total_cmp(&b.size)).cloned();
+    if let Some(reference) = reference {
+        for g in &mut line {
+            g.shift += cjk_alignment_shift(g, &reference);
+        }
+    }
     if hyphen && let Some(g) = line.last() {
         let h = shape::hyphen_after(g);
         line.push(h);
@@ -1488,11 +1615,18 @@ fn layout_line(
     let has_tab = line.iter().any(|g| g.ch == '\t' || g.ch == story::RIGHT_INDENT_TAB);
     // Optical margin alignment: the measure grows by the hang of the edge glyphs.
     let (mut x0, mut measure) = (x0, measure);
-    if sp.optical && !has_tab {
+    if (sp.optical || pp.kinsoku_hang != designcraft_doc::cjk::KinsokuHang::None) && !has_tab {
         let first = line.iter().find(|g| g.adv > 0.0 && !g.is_space());
         let lastg = line.iter().rev().find(|g| g.adv > 0.0 && !g.is_space());
-        let hl = first.map_or(0.0, |g| breaker::hang(g.ch).0 * g.adv);
-        let hr = lastg.map_or(0.0, |g| breaker::hang(g.ch).1 * g.adv);
+        let hl = if sp.optical { first.map_or(0.0, |g| breaker::hang(g.ch).0 * g.adv) } else { 0.0 };
+        let optical_right = if sp.optical { lastg.map_or(0.0, |g| breaker::hang(g.ch).1 * g.adv) } else { 0.0 };
+        let cjk_right = lastg.map_or(0.0, |g| g.cjk_hang);
+        let cjk_right = if pp.kinsoku_hang == designcraft_doc::cjk::KinsokuHang::Regular {
+            cjk_right.min((line.iter().map(|g| g.adv).sum::<f64>() - measure).max(0.0))
+        } else {
+            cjk_right
+        };
+        let hr = optical_right.max(cjk_right);
         x0 -= hl;
         measure += hl + hr;
     }
@@ -1525,7 +1659,7 @@ fn layout_line(
     let mut offset = 0.0;
     // Kashidas: in justified Arabic, the joins of words take the extra length first.
     let mut kashidas: Vec<(usize, f64)> = Vec::new();
-    if justify_this && extra > 0.0 && pp.kashidas {
+    if justify_this && extra > 0.0 && pp.kashidas && pp.arabic_justification != "DefaultJustification" {
         let points = kashida_points(&line);
         if !points.is_empty() {
             let total = extra.min(points.iter().map(|&i| line[i].size * 1.5).sum());
@@ -1543,9 +1677,18 @@ fn layout_line(
         // Single word: Single Word Justification.
         match pp.single_word_justify {
             Align::FullyJustified => {
-                let per = extra / (line.len() - 1) as f64;
-                for a in &mut add[..line.len() - 1] {
-                    *a = per;
+                let gaps: Vec<_> = line
+                    .iter()
+                    .enumerate()
+                    .take(line.len() - 1)
+                    .filter(|(_, g)| !g.locked_advance || g.break_after != Some(false))
+                    .map(|(i, _)| i)
+                    .collect();
+                if !gaps.is_empty() {
+                    let per = extra / gaps.len() as f64;
+                    for i in gaps {
+                        add[i] = per;
+                    }
                 }
             }
             Align::Center => offset = extra / 2.0,
@@ -1583,8 +1726,7 @@ fn layout_line(
     let ratio = if ratio_n > 0 { ratio_sum / ratio_n as f64 } else { 1.0 };
     let mut out = Vec::with_capacity(line.len());
     let mut x = x0 + offset;
-    let rtl_para = pp.direction == designcraft_doc::TextDirection::RightToLeft;
-    let bidi = (rtl_para || line.iter().any(|g| designcraft_fonts::is_rtl(g.ch))) && leaders.is_empty();
+    let bidi = bidi_info.has_rtl();
     let mut pens = Vec::with_capacity(if bidi { line.len() } else { 0 });
     for (i, g) in line.iter().enumerate() {
         if bidi {
@@ -1597,28 +1739,29 @@ fn layout_line(
             p.adv *= scale[i];
         }
         p.adv += add[i];
-        if let Some((_, l)) = kashidas.iter().find(|k| k.0 == i) {
-            // Right to left: the stretch is on the glyph's left, toward the letter it joins.
+        if let Some((_, l)) = kashidas.iter().find(|k| line[k.0].byte == g.byte) {
+            // Move the whole cluster, including its attached marks, past the elongation.
             p.x += l;
         }
-        let leader = leaders.iter().find(|(k, _)| *k == i).map(|(_, l)| l.as_str());
-        let (tab_x, tab_w) = (x, p.adv);
         x += p.adv;
         if let Some((_, l)) = kashidas.iter().find(|k| k.0 == i) {
             // The glyph keeps its own width; the gap before it is the tatweel's.
             p.adv -= l;
         }
         out.push(p);
-        if let Some(l) = leader {
-            tab_leader(g, l, tab_x, tab_w, tab_origin, &mut out);
-        }
     }
     if bidi {
         pens.push(x);
-        reorder_visual(&line, &mut out, &pens, x0 + offset, rtl_para);
+        reorder_visual(&line, &mut out, &pens, x0 + offset, bidi_info);
+    }
+    for (i, leader) in &leaders {
+        if let Some((g, p)) = line.get(*i).zip(out.get(*i)) {
+            tab_leader(g, leader, p.x, p.adv, tab_origin, &mut out);
+        }
     }
     for (i, l) in kashidas {
-        let (g, at) = (&line[i], out[i].x - l);
+        let first = (0..=i).rev().take_while(|&j| line[j].byte == line[i].byte).last().unwrap_or(i);
+        let (g, at) = (&line[i], out[first].x - line[first].dx - l);
         let gid = designcraft_fonts::first_glyph(&g.face, &['\u{0640}']);
         let w = g.face.advance(gid) * g.sx;
         if gid == 0 || w <= 0.0 {
@@ -1649,23 +1792,25 @@ fn joins_prev(c: char) -> bool {
 /// Where kashidas go on a line: one join per word, after a seen or sad when there is one, else the
 /// word's last join (indices of the glyph before the join).
 fn kashida_points(line: &[Glyph]) -> Vec<usize> {
-    let is_mark = |g: &Glyph| matches!(g.ch as u32, 0x064B..=0x065F | 0x0670 | 0x06D6..=0x06ED);
     let mut out = Vec::new();
     let mut best: Option<(bool, usize)> = None;
-    for i in 0..line.len() {
-        let g = &line[i];
-        if g.is_space() || g.len == 0 {
+    for (i, g) in line.iter().enumerate() {
+        if g.is_space() {
             if let Some((_, k)) = best.take() {
                 out.push(k);
             }
             continue;
         }
-        if !joins_next(g.ch) || line.get(i + 1).is_some_and(|n| n.byte == g.byte) {
+        // Only consider boundaries between complete clusters. Marks with len=0
+        // are part of their base cluster, not word boundaries or insertion sites.
+        let Some(n) = line.get(i + 1) else { continue };
+        if n.byte == g.byte || !g.allow_kashidas || !n.allow_kashidas || !n.safe_tatweel_before {
             continue;
         }
-        // The next letter (past any marks) must join back, and lam–alef stays a ligature.
-        let Some(n) = line[i + 1..].iter().find(|n| !is_mark(n)) else { continue };
-        if !joins_prev(n.ch) || n.len == 0 || (g.ch == '\u{0644}' && matches!(n.ch, '\u{0622}' | '\u{0623}' | '\u{0625}' | '\u{0627}')) {
+        if g.face.id() != n.face.id() || g.face.glyph_for('\u{0640}') == 0 {
+            continue;
+        }
+        if !joins_next(g.ch) || !joins_prev(n.ch) || (g.ch == '\u{0644}' && matches!(n.ch, '\u{0622}' | '\u{0623}' | '\u{0625}' | '\u{0627}')) {
             continue;
         }
         let seen = matches!(g.ch as u32, 0x0633..=0x0636);
@@ -1680,19 +1825,21 @@ fn kashida_points(line: &[Glyph]) -> Vec<usize> {
 /// Bidi: put a laid-out line (glyphs in text order, `pens` their pen positions and then the end
 /// position) into visual order from `start`, cluster by cluster (Unicode Bidirectional
 /// Algorithm, rule L2).
-fn reorder_visual(line: &[Glyph], out: &mut [PlacedGlyph], pens: &[f64], start: f64, rtl: bool) {
+fn reorder_visual(line: &[Glyph], out: &mut [PlacedGlyph], pens: &[f64], start: f64, info: &unicode_bidi::BidiInfo<'_>) {
     use unicode_bidi::{BidiInfo, Level};
     // Clusters: runs of glyphs from the same source character.
     let mut units: Vec<std::ops::Range<usize>> = Vec::new();
     for i in 0..line.len() {
         match units.last_mut() {
-            Some(u) if line[u.start].byte == line[i].byte && line[i].len > 0 => u.end = i + 1,
+            Some(u) if line[u.start].bidi_offset == line[i].bidi_offset && line[u.start].byte == line[i].byte => u.end = i + 1,
             _ => units.push(i..i + 1),
         }
     }
-    let text: String = units.iter().map(|u| line[u.start].ch).collect();
-    let info = BidiInfo::new(&text, Some(if rtl { Level::rtl() } else { Level::ltr() }));
-    let levels: Vec<Level> = text.char_indices().map(|(b, _)| info.levels[b]).collect();
+    let Some(first) = line.first() else { return };
+    let Some(para) = info.paragraphs.iter().find(|p| p.range.contains(&first.bidi_offset)) else { return };
+    let end = line.iter().map(|g| g.bidi_end).max().unwrap_or(first.bidi_end).min(para.range.end);
+    let resolved = info.reordered_levels(para, first.bidi_offset..end);
+    let levels: Vec<Level> = units.iter().map(|u| resolved.get(line[u.start].bidi_offset).copied().unwrap_or(para.level)).collect();
     let order = BidiInfo::reorder_visual(&levels);
     let width = |u: &std::ops::Range<usize>| pens[u.end] - pens[u.start];
     let mut cur = start;
@@ -1757,7 +1904,7 @@ fn distribute(line: &[Glyph], spaces: &[usize], extra: f64, sp: &Spacing, add: &
         .iter()
         .map(|&i| {
             let g = &line[i];
-            if g.ch != ' ' {
+            if g.ch != ' ' && !(g.ch == '\u{3000}' && g.ideographic_space_elastic) {
                 0.0
             } else if stretch {
                 g.space * (sp.word_max - sp.word_desired).max(0.0)
@@ -1768,7 +1915,7 @@ fn distribute(line: &[Glyph], spaces: &[usize], extra: f64, sp: &Spacing, add: &
         .collect();
     // Letter gaps: between visible glyphs (not after the line's last glyph).
     let last_box = line.iter().rposition(|g| !g.is_space() && g.adv > 0.0).unwrap_or(0);
-    let is_box = |i: usize, g: &Glyph| i < last_box && !g.is_space() && g.adv > 0.0;
+    let is_box = |i: usize, g: &Glyph| i < last_box && !g.is_space() && g.adv > 0.0 && (!g.locked_advance || g.break_after != Some(false));
     let letter: Vec<f64> = line
         .iter()
         .enumerate()
@@ -1785,7 +1932,7 @@ fn distribute(line: &[Glyph], spaces: &[usize], extra: f64, sp: &Spacing, add: &
     let glyph: Vec<f64> = line
         .iter()
         .map(|g| {
-            if g.is_space() || g.adv <= 0.0 {
+            if g.is_space() || g.adv <= 0.0 || g.locked_advance {
                 0.0
             } else {
                 let natural = g.adv / sp.glyph_desired.max(0.01);
@@ -1843,39 +1990,26 @@ fn place(g: &Glyph, x: f64) -> PlacedGlyph {
         byte: g.byte,
         len: g.len,
         visible,
-        upright: upright_in_vertical(g.ch),
+        upright: g.upright,
         tcy: g.tcy,
         rtl: false,
     }
 }
 
 fn prepend_label(
-    db: &FontDb,
+    db: &ScopedFonts<'_>,
     glyphs: &mut Vec<Glyph>,
     label: &str,
     at: usize,
     base: &designcraft_doc::CharProps,
-    pp: &ParaProps,
+    env: shape::TypeEnv,
     table: &mut StyleTable<'_>,
 ) {
     // Shape the label as a tiny standalone story so it uses the paragraph's base character style.
     let mut tmp = Story::new(StoryId(0));
     tmp.insert(0, label);
     let styles = designcraft_doc::Styles::default();
-    let shaped = shape::shape_para(
-        db,
-        &styles,
-        &tmp,
-        0,
-        0..label.len(),
-        base,
-        shape::TypeEnv { auto_leading: pp.auto_leading, adv: Default::default() },
-        &SubstCtx::default(),
-        table,
-        &[],
-        &[],
-        &[],
-    );
+    let shaped = shape::shape_para(db, &styles, &tmp, 0, 0..label.len(), base, env, &SubstCtx::default(), table, &[], &[], &[]);
     let mut pre: Vec<Glyph> = shaped
         .glyphs
         .into_iter()
@@ -1893,9 +2027,11 @@ type LimitsKey = (usize, usize, usize, bool);
 
 /// Mark glyphs after which a hyphen may be inserted (dictionary/pattern points within the
 /// paragraph's limits; words with discretionary hyphens break only there).
-/// Whether a language uses the English hyphenation and spelling dictionaries.
+/// Whether a language (a name or locale code, see [`designcraft_doc::language_tag`]) uses the
+/// English hyphenation and spelling dictionaries.
 pub fn is_english(language: &str) -> bool {
-    language.starts_with("English")
+    // InDesign's English names first: composition asks this for every run.
+    language.starts_with("English") || designcraft_doc::language_tag(language).is_some_and(|t| designcraft_doc::language_subtag(t) == "en")
 }
 
 /// Byte ranges of paragraph `prange` set in a language other than English (no English

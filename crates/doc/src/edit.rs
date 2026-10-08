@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use designcraft_geom::{Point, Rect, shapes};
+use designcraft_geom::{Affine, Point, Rect, shapes};
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{ItemId, LayerId, StoryId};
@@ -224,9 +224,13 @@ impl Document {
         let pos_to = other.frames.iter().position(|f| *f == to).unwrap_or(0);
         let after = other.frames.split_off(pos_to);
         let before = std::mem::take(&mut other.frames);
+        let (vertical, direction) = (other.vertical, other.direction);
         {
             let st = self.story_mut(fs).ok_or(DocError::NoStory(fs))?;
+            // The story keeps its own direction, even when it was empty and takes the other's text.
+            let own = (st.vertical, st.direction);
             st.append_story(other);
+            (st.vertical, st.direction) = own;
             let at = st.frames.iter().position(|f| *f == from).map_or(st.frames.len(), |p| p + 1);
             for (k, f) in after.iter().enumerate() {
                 st.frames.insert(at + k, *f);
@@ -242,6 +246,8 @@ impl Document {
             let nid = StoryId(self.alloc());
             let mut ns = Story::new(nid);
             ns.frames = before.clone();
+            ns.vertical = vertical;
+            ns.direction = direction;
             for f in &before {
                 if let Some(t) = self.item_mut(*f).and_then(Item::text_frame_mut) {
                     t.story = nid;
@@ -331,12 +337,12 @@ impl Document {
     /// stays with the first part and may become overset).
     pub fn unthread_after(&mut self, frame: ItemId) -> Result<()> {
         let sid = self.item(frame).and_then(|i| i.text_frame()).map(|t| t.story).ok_or(DocError::NoItem(frame))?;
-        let tail = {
+        let (tail, vertical, direction) = {
             let st = self.story_mut(sid).ok_or(DocError::NoStory(sid))?;
             let p = st.frames.iter().position(|f| *f == frame).ok_or(DocError::NoItem(frame))?;
             let tail = st.frames.split_off(p + 1);
             st.rev += 1;
-            tail
+            (tail, st.vertical, st.direction)
         };
         if tail.is_empty() {
             return Ok(());
@@ -344,6 +350,8 @@ impl Document {
         let nid = StoryId(self.alloc());
         let mut ns = Story::new(nid);
         ns.frames = tail.clone();
+        ns.vertical = vertical;
+        ns.direction = direction;
         self.stories.insert(nid, Arc::new(ns));
         for f in tail {
             if let Some(t) = self.item_mut(f).and_then(Item::text_frame_mut) {
@@ -357,17 +365,20 @@ impl Document {
     /// `frame` stays on the page with a new empty story.
     pub fn remove_from_thread(&mut self, frame: ItemId) -> Result<()> {
         let sid = self.item(frame).and_then(|i| i.text_frame()).map(|t| t.story).ok_or(DocError::NoItem(frame))?;
-        {
+        let (vertical, direction) = {
             let st = self.story_mut(sid).ok_or(DocError::NoStory(sid))?;
             if st.frames.len() < 2 {
                 return Err(DocError::Invalid(format!("frame {frame} is not threaded to another frame")));
             }
             st.frames.retain(|f| *f != frame);
             st.rev += 1;
-        }
+            (st.vertical, st.direction)
+        };
         let nid = StoryId(self.alloc());
         let mut ns = Story::new(nid);
         ns.frames = vec![frame];
+        ns.vertical = vertical;
+        ns.direction = direction;
         self.stories.insert(nid, Arc::new(ns));
         let t = self.item_mut(frame).and_then(Item::text_frame_mut).ok_or(DocError::NoItem(frame))?;
         t.story = nid;
@@ -384,6 +395,24 @@ impl Document {
         let st = self.story(self.item(frame)?.text_frame()?.story)?;
         let p = st.frames.iter().position(|f| *f == frame)?;
         p.checked_sub(1).map(|i| st.frames[i])
+    }
+
+    /// Does this text frame set its text vertically (its story is vertical; type on a path stays
+    /// along the path)?
+    pub fn frame_vertical(&self, item: &Item) -> bool {
+        item.text_frame().is_some_and(|t| t.options.path.is_none() && self.story(t.story).is_some_and(|s| s.vertical))
+    }
+
+    /// Text space → item inner space for a frame's composed text (identity except for vertical
+    /// frames).
+    pub fn text_local(&self, item: &Item) -> Affine {
+        if self.frame_vertical(item) { crate::item::vertical_text_xf(item.text_area()) } else { Affine::IDENTITY }
+    }
+
+    /// Text space → spread-parent space for a frame's composed text (the item transform, with the
+    /// quarter turn of a vertical frame).
+    pub fn text_xf(&self, item: &Item) -> Affine {
+        item.xf * self.text_local(item)
     }
 
     /// Hit test: the frontmost visible, unlocked-layer item on spread `si` containing `p` (spread space).
@@ -421,8 +450,10 @@ impl Document {
         Some(serde_json::json!({
             "id": sid.0,
             "length": st.text.len(),
+            "direction": st.direction,
             "paragraphs": st.paras.len(),
             "frames": st.frames.iter().map(|f| f.0).collect::<Vec<_>>(),
+            "vertical": st.vertical,
             "text": st.text,
         }))
     }
