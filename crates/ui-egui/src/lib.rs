@@ -798,6 +798,9 @@ impl DesignApp {
 
     /// Inject synthetic events (one pointer event per frame).
     pub fn raw_input_hook(&mut self, raw: &mut egui::RawInput) {
+        // In the browser a key without a character (AltGr, a dead key, a media key) can arrive as
+        // its name typed as text.
+        raw.events.retain(|e| !matches!(e, egui::Event::Text(t) if is_key_name(t)));
         if self.synthetic.is_empty() {
             return;
         }
@@ -1011,6 +1014,109 @@ pub fn opens_as_document(name: &str) -> bool {
     [".designcraft", ".idml"].iter().any(|ext| n.ends_with(ext))
 }
 
+/// Keyboard key names (the web's `KeyboardEvent.key` values) that are never typed text. Names
+/// that are also ordinary words (Copy, Paste, Clear, Print…) are left out: as text they may be
+/// real input.
+const KEY_NAMES: &[&str] = &[
+    "AltGraph",
+    "Dead",
+    "Compose",
+    "Fn",
+    "FnLock",
+    "Hyper",
+    "Super",
+    "OS",
+    "Unidentified",
+    "Process",
+    "SymbolLock",
+    "AllCandidates",
+    "Alphanumeric",
+    "CodeInput",
+    "FinalMode",
+    "GroupFirst",
+    "GroupLast",
+    "GroupNext",
+    "GroupPrevious",
+    "ModeChange",
+    "NextCandidate",
+    "NonConvert",
+    "PreviousCandidate",
+    "SingleCandidate",
+    "HangulMode",
+    "HanjaMode",
+    "JunjaMode",
+    "Eisu",
+    "Hankaku",
+    "Hiragana",
+    "HiraganaKatakana",
+    "KanaMode",
+    "KanjiMode",
+    "Katakana",
+    "Romaji",
+    "Zenkaku",
+    "ZenkakuHankaku",
+    "EraseEof",
+    "CrSel",
+    "ExSel",
+    "PrintScreen",
+    "BrightnessDown",
+    "BrightnessUp",
+    "LogOff",
+    "PowerOff",
+    "WakeUp",
+    "ZoomIn",
+    "ZoomOut",
+    "ZoomToggle",
+    "AudioVolumeDown",
+    "AudioVolumeUp",
+    "AudioVolumeMute",
+    "MicrophoneToggle",
+    "MicrophoneVolumeDown",
+    "MicrophoneVolumeUp",
+    "MicrophoneVolumeMute",
+    "MediaClose",
+    "MediaFastForward",
+    "MediaPause",
+    "MediaPlay",
+    "MediaPlayPause",
+    "MediaRecord",
+    "MediaRewind",
+    "MediaStop",
+    "MediaTrackNext",
+    "MediaTrackPrevious",
+    "ChannelDown",
+    "ChannelUp",
+    "MailForward",
+    "MailReply",
+    "MailSend",
+    "SpellCheck",
+    "BrowserBack",
+    "BrowserFavorites",
+    "BrowserForward",
+    "BrowserHome",
+    "BrowserRefresh",
+    "BrowserSearch",
+    "BrowserStop",
+    "LaunchApplication1",
+    "LaunchApplication2",
+    "LaunchCalendar",
+    "LaunchContacts",
+    "LaunchMail",
+    "LaunchMediaPlayer",
+    "LaunchMusicPlayer",
+    "LaunchPhone",
+    "LaunchScreenSaver",
+    "LaunchSpreadsheet",
+    "LaunchWebBrowser",
+    "LaunchWebCam",
+    "LaunchWordProcessor",
+];
+
+/// A key's name rather than text typed with it.
+fn is_key_name(text: &str) -> bool {
+    KEY_NAMES.contains(&text)
+}
+
 pub fn now_ms() -> f64 {
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -1029,6 +1135,15 @@ mod tests_inbox;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn key_names_typed_as_text_are_dropped() {
+        let mut app = DesignApp::new(Session::new(), Services::default());
+        let text = |t: &str| egui::Event::Text(t.into());
+        let mut raw = egui::RawInput { events: ["AltGraph", "é", "Dead", "a", "Copy", "MediaPlayPause"].map(text).to_vec(), ..Default::default() };
+        app.raw_input_hook(&mut raw);
+        assert_eq!(raw.events, ["é", "a", "Copy"].map(text).to_vec(), "typed text stays, key names go");
+    }
 
     #[test]
     fn snap_view_uses_the_saved_switches() {
