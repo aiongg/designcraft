@@ -27,8 +27,11 @@ fn is_marker(c: char) -> bool {
     ('\u{E000}'..='\u{E1FF}').contains(&c)
 }
 
+/// Can `b` join the run `a` is in? A missing glyph (.notdef) is a run of its own.
 fn same_run(a: &PlacedGlyph, b: &PlacedGlyph) -> bool {
     b.visible
+        && a.gid != 0
+        && b.gid != 0
         && a.face.id() == b.face.id()
         && a.style == b.style
         && (a.sx - b.sx).abs() < 1e-9
@@ -277,6 +280,11 @@ impl Exporter<'_> {
         let hs = g0.sx / g0.sy;
         let skew = if st.skew != 0.0 { Affine::new([1.0, 0.0, -st.skew.to_radians().tan(), 1.0, 0.0, 0.0]) } else { Affine::IDENTITY };
         let origin = Affine::translate((g0.x, baseline + g0.y)) * skew * Affine::scale_non_uniform(hs, 1.0);
+        // A missing glyph is drawn as its box: PDF/A and PDF/UA forbid showing .notdef as text.
+        if g0.gid == 0 {
+            self.outline_run(s, glyphs, origin, size, fill, stroke, st.stroke_weight);
+            return;
+        }
         let Some(font) = self.font(&face) else {
             self.warn(format!("font `{} {}` could not be embedded; its text was drawn as outlines", face.family, face.style));
             self.outline_run(s, glyphs, origin, size, fill, stroke, st.stroke_weight);

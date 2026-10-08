@@ -104,6 +104,7 @@ struct Importer<'r> {
     inks: designcraft_doc::InkManager,
     stroke_styles: Vec<designcraft_doc::StrokeStyleDef>,
     styles: Styles,
+    kinsoku: HashMap<String, designcraft_doc::cjk::Kinsoku>,
     para_names: HashMap<String, String>,
     char_names: HashMap<String, String>,
     lists: Vec<designcraft_doc::NumberedList>,
@@ -114,8 +115,6 @@ struct Importer<'r> {
     layer_ids: HashMap<String, LayerId>,
     stories: BTreeMap<StoryId, Story>,
     story_ids: HashMap<String, StoryId>,
-    /// Stories with a vertical StoryOrientation (their frames set text vertically).
-    vertical_stories: std::collections::HashSet<StoryId>,
     parents: Vec<Spread>,
     parent_ids: HashMap<String, SpreadId>,
     spreads: Vec<Spread>,
@@ -189,6 +188,7 @@ impl<'r> Importer<'r> {
             inks: Default::default(),
             stroke_styles: Vec::new(),
             styles,
+            kinsoku: HashMap::new(),
             para_names: HashMap::new(),
             char_names: HashMap::new(),
             lists: Vec::new(),
@@ -197,7 +197,6 @@ impl<'r> Importer<'r> {
             layers: Vec::new(),
             layer_ids: HashMap::new(),
             stories: BTreeMap::new(),
-            vertical_stories: Default::default(),
             story_ids: HashMap::new(),
             parents: Vec::new(),
             parent_ids: HashMap::new(),
@@ -273,6 +272,61 @@ impl<'r> Importer<'r> {
                 _ => {}
             }
         }
+        for e in top.iter().filter(|e| e.local() == "CompositeFont") {
+            let entries = e
+                .find_all("CompositeFontEntry")
+                .map(|c| designcraft_doc::cjk::CompositeFontEntry {
+                    name: c.get("Name").unwrap_or("").into(),
+                    characters: c.get("CustomCharacters").unwrap_or("").into(),
+                    family: c.prop("AppliedFont").unwrap_or_default(),
+                    style: c.get("FontStyle").unwrap_or("Regular").trim_start_matches("$ID/").into(),
+                    relative_size: c.num("RelativeSize").unwrap_or(100.0) / 100.0,
+                    horizontal_scale: c.num("HorizontalScale").unwrap_or(100.0) / 100.0,
+                    vertical_scale: c.num("VerticalScale").unwrap_or(100.0) / 100.0,
+                    baseline_shift: c.num("BaselineShift").unwrap_or(0.0) / 100.0,
+                    scale_option: c.boolean("ScaleOption").unwrap_or(true),
+                })
+                .collect();
+            self.styles.composite_fonts.push(designcraft_doc::cjk::CompositeFont { name: unescape_id(e.get("Name").unwrap_or("")), entries });
+        }
+        for e in top.iter().filter(|e| e.local() == "KinsokuTable") {
+            if e.get("CantBeginLineChars").is_some() || e.get("CantEndLineChars").is_some() {
+                self.kinsoku.insert(
+                    e.get("Self").unwrap_or("").into(),
+                    designcraft_doc::cjk::Kinsoku {
+                        name: e.get("Name").unwrap_or("").into(),
+                        no_start: e.get("CantBeginLineChars").unwrap_or("").into(),
+                        no_end: e.get("CantEndLineChars").unwrap_or("").into(),
+                        inseparable: e.get("CantBeSeparatedChars").unwrap_or("").into(),
+                        hanging: e.get("HangingPunctuationChars").unwrap_or("").into(),
+                    },
+                );
+            }
+        }
+        for e in top.iter().filter(|e| e.local() == "MojikumiTable") {
+            let overrides = e
+                .prop_el("OverrideMojikumiAkiList")
+                .map(|l| {
+                    l.find_all("OverrideMojikumiAkiType")
+                        .map(|r| designcraft_doc::cjk::MojikumiAki {
+                            target_class: r.num("TargetMojikumiClass").unwrap_or(0.0) as i16,
+                            side_class: r.num("SideMojikumiClass").unwrap_or(0.0) as i16,
+                            after: r.boolean("SideIsAfterTarget").unwrap_or(false),
+                            minimum: r.num("Minimum").unwrap_or(0.0),
+                            desired: r.num("Desired").unwrap_or(0.0),
+                            maximum: r.num("Maximum").unwrap_or(0.0),
+                            priority: r.num("CompressionPriority").unwrap_or(0.0) as i16,
+                            does_not_float: r.boolean("AkiDoesNotFloat").unwrap_or(false),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            self.styles.mojikumi_tables.push(designcraft_doc::cjk::MojikumiTable {
+                name: unescape_id(e.get("Name").unwrap_or("")),
+                based_on: e.get("BasedOnMojikumiSet").unwrap_or("").into(),
+                overrides,
+            });
+        }
         self.graphics(top);
         self.styles(top);
         if let Some(e) = top.iter().find(|e| e.local() == "FootnoteOption") {
@@ -328,9 +382,6 @@ impl<'r> Importer<'r> {
                 self.story_ids.insert(s.to_string(), id);
             }
             let story = self.story(id, e);
-            if e.find("StoryPreference").and_then(|p| p.get("StoryOrientation")) == Some("Vertical") {
-                self.vertical_stories.insert(id);
-            }
             self.stories.insert(id, story);
         }
         // Topic cross-references (See / See also) become markers at the start of the first story
@@ -1005,16 +1056,24 @@ impl<'r> Importer<'r> {
         a.font_style = e.prop("FontStyle");
         a.size = e.num("PointSize");
         a.leading = e.prop("Leading").and_then(|l| names::leading_in(l.trim()));
-        if let Some(v) = e.num("KerningValue") {
-            a.kerning = Some(Kerning::Manual(v));
-        } else if let Some(k) = e.prop("KerningMethod") {
-            a.kerning = Some(match k.trim().trim_start_matches("$ID/") {
-                "Optical" => Kerning::Optical,
-                "None" => Kerning::None,
-                _ => Kerning::Metrics,
-            });
+        // Automatic kerning may carry an inactive numeric value (including the
+        // 1e11 IDML sentinel). It must not become a multi-million-em advance.
+        a.kerning = e.prop("KerningMethod").and_then(|k| match k.trim().trim_start_matches("$ID/") {
+            "Optical" => Some(Kerning::Optical),
+            "Metrics" | "Metrics - Roman Only" => Some(Kerning::Metrics),
+            "None" => Some(Kerning::None),
+            _ => None,
+        });
+        if a.kerning.is_none() {
+            a.kerning = e.num("KerningValue").filter(|v| v.is_finite() && v.abs() < 1e10).map(Kerning::Manual);
         }
         a.tracking = e.num("Tracking");
+        a.leading_aki = e.num("LeadingAki").map(|v| (v >= 0.0).then_some(v));
+        a.trailing_aki = e.num("TrailingAki").map(|v| (v >= 0.0).then_some(v));
+        a.tsume = e.num("Tsume").map(|v| (v / 100.0).clamp(0.0, 1.0));
+        a.jidori = e.num("Jidori").map(|v| v.clamp(0.0, 10000.0) as u32);
+        a.leading_model = e.prop("LeadingModel").and_then(|v| crate::cjk::leading_in(&v));
+        a.character_alignment = e.prop("CharacterAlignment").and_then(|v| crate::cjk::alignment_in(&v));
         a.h_scale = e.num("HorizontalScale").map(|v| v / 100.0);
         a.v_scale = e.num("VerticalScale").map(|v| v / 100.0);
         a.baseline_shift = e.num("BaselineShift");
@@ -1072,15 +1131,28 @@ impl<'r> Importer<'r> {
         if any {
             a.otf_features = Some(otf_list);
         }
+        a.glyph_form = e.prop("GlyphForm");
         a.no_break = e.boolean("NoBreak");
         a.tate_chu_yoko = e.boolean("Tatechuyoko");
-        if e.boolean("RubyFlag") == Some(true) {
-            a.ruby = e.get("RubyString").map(str::to_string);
+        a.tate_chu_yoko_x_offset = e.num("TatechuyokoXOffset");
+        a.tate_chu_yoko_y_offset = e.num("TatechuyokoYOffset");
+        if let Some(on) = e.boolean("RubyFlag") {
+            a.ruby = Some(if on { e.prop("RubyString").unwrap_or_default() } else { String::new() });
         }
         if let Some(k) = e.get("KentenKind") {
             a.kenten = Some(k != "None");
+            a.kenten_character = crate::cjk::kenten_character(k).map(str::to_string);
+            if k == "Custom" {
+                a.kenten_character = e.prop("KentenCustomCharacter");
+            }
         }
-        a.digits = e.get("DigitsType").and_then(names::digits_in);
+        a.digits = e.prop("DigitsType").and_then(|s| names::digits_in(s.trim()));
+        a.character_direction = e.prop("CharacterDirection").and_then(|s| crate::arabic::direction_in(&s));
+        a.allow_kashidas = e.prop("Kashidas").and_then(|s| crate::arabic::kashidas_in(&s));
+        a.diacritic_position = e.prop("DiacriticPosition").and_then(|s| crate::arabic::diacritic_in(&s));
+        a.diacritic_x_offset = e.num("XOffsetDiacritic").filter(|v| v.is_finite());
+        a.diacritic_y_offset = e.num("YOffsetDiacritic").filter(|v| v.is_finite());
+        a.positional_form = e.prop("PositionalForm");
         if let Some(v) = e.get("AppliedConditions").filter(|v| !v.trim().is_empty()) {
             let names: Vec<String> = v.split_whitespace().filter_map(|r| self.condition_names.get(r).cloned()).collect();
             if !names.is_empty() {
@@ -1096,9 +1168,32 @@ impl<'r> Importer<'r> {
         let u = |k: &str| e.num(k).map(|v| v.max(0.0) as u32);
         let frac = |k: &str| e.num(k).map(|v| v / 100.0);
         a.align = e.prop("Justification").and_then(|v| names::align_in(v.trim()));
+        a.kinsoku_hang = e.prop("KinsokuHangType").and_then(|v| match v.as_str() {
+            "None" => Some(designcraft_doc::cjk::KinsokuHang::None),
+            "KinsokuHangRegular" => Some(designcraft_doc::cjk::KinsokuHang::Regular),
+            "KinsokuHangForce" => Some(designcraft_doc::cjk::KinsokuHang::Force),
+            _ => None,
+        });
+        a.mojikumi = e.prop("Mojikumi");
+        a.kinsoku_type = e.prop("KinsokuType");
+        a.bunri_kinshi = e.boolean("BunriKinshi");
+        a.rensuuji = e.boolean("Rensuuji");
+        a.treat_ideographic_space_as_space = e.boolean("TreatIdeographicSpaceAsSpace");
+        if let Some(k) = e.prop("KinsokuSet") {
+            if k == "Nothing" || k == "None" {
+                a.kinsoku = Some(Some(Default::default()));
+            } else if let Some(set) = self.kinsoku.get(&k) {
+                a.kinsoku = Some(Some(set.clone()));
+            } else if let Some(set) = designcraft_doc::cjk::Kinsoku::named(&k) {
+                a.kinsoku = Some(Some(set));
+            }
+        }
         a.direction = e.prop("ParagraphDirection").map(|v| {
             if v.trim() == "RightToLeftDirection" { designcraft_doc::TextDirection::RightToLeft } else { designcraft_doc::TextDirection::LeftToRight }
         });
+        a.kashidas = e.prop("Kashidas").and_then(|s| crate::arabic::kashidas_in(&s));
+        a.arabic_justification = e.prop("ParagraphJustification");
+        a.paragraph_kashida_width = e.num("ParagraphKashidaWidth").filter(|v| v.is_finite()).map(Some);
         a.left_indent = e.num("LeftIndent");
         a.right_indent = e.num("RightIndent");
         a.first_line_indent = e.num("FirstLineIndent");
@@ -1317,6 +1412,12 @@ impl<'r> Importer<'r> {
             paras,
             chars,
             frames: vec![],
+            direction: if e.find("StoryPreference").and_then(|p| p.get("StoryDirection")) == Some("RightToLeftDirection") {
+                designcraft_doc::TextDirection::RightToLeft
+            } else {
+                designcraft_doc::TextDirection::LeftToRight
+            },
+            vertical: e.find("StoryPreference").and_then(|p| p.get("StoryOrientation")) == Some("Vertical"),
             rev: 0,
             tables,
             notes,
@@ -1348,6 +1449,11 @@ impl<'r> Importer<'r> {
         let nr = rows.len().max(1);
         let nc = cols.len().max(1);
         let mut t = Table::new(id, nr, nc, 0, 0, 0.0);
+        t.options.direction = if e.get("TableDirection") == Some("RightToLeftDirection") {
+            designcraft_doc::TextDirection::RightToLeft
+        } else {
+            designcraft_doc::TextDirection::LeftToRight
+        };
         for (r, re) in rows.iter().enumerate() {
             let auto = re.boolean("AutoGrow").unwrap_or(true);
             t.rows[r].mode = if auto { RowHeightMode::AtLeast } else { RowHeightMode::Exactly };
@@ -1442,6 +1548,9 @@ impl<'r> Importer<'r> {
             for (i, side) in ["TopEdge", "LeftEdge", "BottomEdge", "RightEdge"].iter().enumerate() {
                 let base = cell.strokes[i].clone();
                 cell.strokes[i] = stroke(self, ce, side, &base);
+                // A positive edge priority records a local cell override, including an
+                // explicit None stroke. Keep it when this edge meets the table perimeter.
+                cell.border_overrides[i] = ce.num(&format!("{side}StrokePriority")).is_some_and(|priority| priority > 0.0);
             }
             if let Some(slot) = t.cell_mut(r, c) {
                 *slot = cell;
@@ -1934,7 +2043,6 @@ impl<'r> Importer<'r> {
                     }
                 };
                 let mut options = e.find("TextFramePreference").map(text_frame_options).unwrap_or_default();
-                options.vertical = self.vertical_stories.contains(&story);
                 if let Some(g) = e.find("BaselineFrameGridOption")
                     && g.get("UseCustomBaselineFrameGrid") == Some("true")
                 {
@@ -2123,6 +2231,7 @@ impl<'r> Importer<'r> {
             sections: std::mem::take(&mut self.sections),
             assets: std::mem::take(&mut self.assets),
             hyperlinks: vec![],
+            data_merge: Default::default(),
             bookmarks: vec![],
             user_words: vec![],
             hyphenation_exceptions: vec![],
@@ -2134,6 +2243,7 @@ impl<'r> Importer<'r> {
             created: designcraft_doc::vars::now(),
             modified: 0,
             next_id: self.next_id,
+            font_scope: 0,
         };
         Ok(d)
     }
@@ -2244,13 +2354,8 @@ fn text_frame_options(e: &El) -> TextFrameOptions {
         o.column_width = v;
     }
     o.balance_columns = e.get("VerticalBalanceColumns") == Some("true");
-    if let Some(l) = e.prop_el("InsetSpacing") {
-        let v: Vec<f64> = l.find_all("ListItem").filter_map(|i| i.text_content().trim().parse().ok()).collect();
-        if v.len() == 4 {
-            o.inset = [v[0], v[1], v[2], v[3]];
-        }
-    } else if let Some(v) = e.num("InsetSpacing") {
-        o.inset = [v; 4];
+    if let Some(inset) = inset_spacing(e) {
+        o.inset = inset;
     }
     if let Some(v) = e.get("VerticalJustification") {
         o.vertical_justification = names::vj_in(v);
@@ -2272,6 +2377,32 @@ fn text_frame_options(e: &El) -> TextFrameOptions {
         o.auto_size_ref = names::REF_POINTS.iter().position(|p| *p == v).unwrap_or(1) as u8;
     }
     o
+}
+
+/// A scalar applies to every edge; a list is top, left, bottom, right. Keep the
+/// existing property-element precedence over the legacy scalar attribute, even
+/// when the property is malformed. Finite negative insets remain supported.
+fn inset_spacing(e: &El) -> Option<[f64; 4]> {
+    let number = |s: &str| s.trim().parse::<f64>().ok().filter(|v| v.is_finite());
+    let Some(property) = e.prop_el("InsetSpacing") else {
+        return e.get("InsetSpacing").and_then(number).map(|v| [v; 4]);
+    };
+    let mut items = property.elements();
+    if property.get("type") == Some("list") || property.find("ListItem").is_some() {
+        let mut inset = [0.0; 4];
+        for edge in &mut inset {
+            let item = items.next()?;
+            if item.local() != "ListItem" || item.elements().next().is_some() {
+                return None;
+            }
+            *edge = number(&item.text_content())?;
+        }
+        items.next().is_none().then_some(inset)
+    } else if items.next().is_none() {
+        number(&property.text_content()).map(|v| [v; 4])
+    } else {
+        None
+    }
 }
 
 fn path_of(pg: &El) -> PathData {

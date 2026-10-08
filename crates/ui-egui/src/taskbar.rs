@@ -107,15 +107,19 @@ fn text_controls(app: &mut DesignApp, ui: &mut Ui, in_text: bool) {
     let c = a["chars"].clone();
     let fam = c["fontFamily"].as_str().unwrap_or("").to_string();
     let sty = c["fontStyle"].as_str().unwrap_or("").to_string();
-    let fams = designcraft_fonts::FontDb::global().families();
-    let cur = fams.iter().position(|f| *f == fam);
-    if let Some(k) = widgets::dropdown_list(ui, if fam.is_empty() { "—" } else { &fam }, 150.0, &fams, cur) {
-        let f = fams[k].clone();
-        let styles = designcraft_fonts::FontDb::global().styles(&f);
+    let fonts = panels::fonts(app);
+    let menu = panels::font_menu(app);
+    let english = app.session.prefs.show_font_names_in_english;
+    let labels: Vec<String> = menu.iter().map(|f| f.label(english).to_string()).collect();
+    let cur = menu.iter().position(|f| f.family == fam);
+    let shown = if fam.is_empty() { "—".to_string() } else { panels::font_label(app, &menu, &fam) };
+    if let Some(f) = widgets::dropdown_list(ui, &shown, 150.0, &labels, cur).and_then(|k| menu.get(k)) {
+        let f = f.family.clone();
+        let styles = fonts.styles(&f);
         let style = if styles.iter().any(|s| s == "Regular") { "Regular".to_string() } else { styles.first().cloned().unwrap_or_default() };
         let _ = app.run("type.char", json!({"attrs": {"fontFamily": f, "fontStyle": style}}));
     }
-    let styles = designcraft_fonts::FontDb::global().styles(&fam);
+    let styles = fonts.styles(&fam);
     let cur = styles.iter().position(|s| *s == sty);
     if let Some(k) = widgets::dropdown_list(ui, if sty.is_empty() { "—" } else { &sty }, 90.0, &styles, cur) {
         let _ = app.run("type.char", json!({"attrs": {"fontStyle": styles[k]}}));

@@ -147,12 +147,26 @@ pub fn paint(p: &Painter, r: Rect, name: &str, c: Color32) {
             pen.line(&[(7.5, 12.5), (14.0, 3.0)]);
             pen.line(&[(12.5, 12.5), (6.0, 3.0)]);
         }
-        "tool-free-transform" | "tool-scale" | "tool-shear" => {
+        "tool-free-transform" => {
             pen.rect(4.0, 4.0, 13.0, 13.0);
             pen.frect(2.8, 2.8, 5.2, 5.2);
             pen.frect(11.8, 11.8, 14.2, 14.2);
             pen.line(&[(14.0, 14.0), (18.0, 18.0)]);
             pen.line(&[(15.0, 18.0), (18.0, 18.0), (18.0, 15.0)]);
+        }
+        "tool-scale" => {
+            // A small square grown into a larger one from their shared corner.
+            Pen { p, r, c: c.gamma_multiply(0.45), w: 1.0 }.rect(3.0, 3.0, 17.0, 17.0);
+            pen.rect(3.0, 10.0, 10.0, 17.0);
+            pen.line(&[(10.0, 10.0), (15.0, 5.0)]);
+            pen.line(&[(11.5, 5.0), (15.0, 5.0), (15.0, 8.5)]);
+        }
+        "tool-shear" => {
+            // A rectangle slanted into a parallelogram along its base.
+            Pen { p, r, c: c.gamma_multiply(0.45), w: 1.0 }.rect(3.0, 8.0, 13.0, 17.0);
+            pen.closed(&[(7.0, 8.0), (17.0, 8.0), (13.0, 17.0), (3.0, 17.0)]);
+            pen.line(&[(7.0, 4.0), (16.0, 4.0)]);
+            pen.line(&[(13.5, 2.0), (16.0, 4.0), (13.5, 6.0)]);
         }
         "tool-rotate" => {
             let pts: Vec<(f32, f32)> = (0..24)
@@ -762,6 +776,14 @@ pub fn paint(p: &Painter, r: Rect, name: &str, c: Color32) {
         }
         "format-container" => pen.rect(4.0, 4.0, 16.0, 16.0),
         "format-text" => pen.text(10.0, 10.5, "T", 15.0),
+        "panel-datamerge" => {
+            pen.w = 1.2;
+            pen.rect(3.0, 2.0, 17.0, 18.0);
+            pen.line(&[(3.0, 6.0), (17.0, 6.0)]);
+            pen.line(&[(6.5, 10.0), (8.5, 13.5), (6.5, 13.5)]);
+            pen.line(&[(13.5, 10.0), (11.5, 13.5), (13.5, 13.5)]);
+            pen.line(&[(9.2, 15.0), (11.0, 9.0)]);
+        }
         "screen-mode" => {
             pen.rect(3.0, 4.0, 17.0, 16.0);
             pen.line(&[(3.0, 7.0), (17.0, 7.0)]);
@@ -789,5 +811,33 @@ pub fn button(ui: &mut egui::Ui, name: &str, size: f32, selected: bool, tip: &st
         resp.on_hover_ui(|ui| {
             crate::rtl::label(ui, tip);
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What icon `name` paints into a 20×20 rect, as the painter's shape list.
+    fn drawing(name: &str) -> String {
+        let ctx = egui::Context::default();
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            paint(ui.painter(), Rect::from_min_size(pos2(0.0, 0.0), vec2(20.0, 20.0)), name, Color32::WHITE);
+        });
+        out.textures_delta.clear();
+        format!("{:?}", out.shapes.iter().map(|s| &s.shape).collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn transform_tools_have_their_own_icons() {
+        let names = ["tool-free-transform", "tool-scale", "tool-shear"];
+        let unknown = drawing("no-such-icon");
+        let drawn: Vec<String> = names.iter().map(|n| drawing(n)).collect();
+        for (n, d) in names.iter().zip(&drawn) {
+            assert_ne!(*d, unknown, "{n} falls back to the placeholder");
+        }
+        assert_ne!(drawn[0], drawn[1], "Scale draws like Free Transform");
+        assert_ne!(drawn[0], drawn[2], "Shear draws like Free Transform");
+        assert_ne!(drawn[1], drawn[2], "Scale and Shear draw alike");
     }
 }

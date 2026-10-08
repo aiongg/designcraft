@@ -2,14 +2,41 @@
 //! Source strings stay logical. Never use these galleys for editable text/caret mapping.
 use egui::text::{LayoutJob, TextWrapping};
 use egui::{Align, Align2, Color32, FontFamily, FontId, Galley, Pos2, Rect, WidgetText};
-use std::{ops::Range, sync::Arc};
-use unicode_bidi::BidiInfo;
+use std::{collections::HashMap, ops::Range, sync::Arc};
+use unicode_bidi::{BidiClass, BidiInfo, bidi_class};
 use unicode_segmentation::UnicodeSegmentation;
+
+/// Allocation-free preflight: ordinary Latin, CJK and emoji labels need no bidi analysis.
+/// Include directional controls so explicit embeddings/overrides keep their existing behavior.
+fn may_have_rtl(text: &str) -> bool {
+    !text.is_ascii()
+        && text.chars().any(|c| {
+            matches!(
+                bidi_class(c),
+                BidiClass::R
+                    | BidiClass::AL
+                    | BidiClass::AN
+                    | BidiClass::LRE
+                    | BidiClass::RLE
+                    | BidiClass::LRO
+                    | BidiClass::RLO
+                    | BidiClass::PDF
+                    | BidiClass::LRI
+                    | BidiClass::RLI
+                    | BidiClass::FSI
+                    | BidiClass::PDI
+            )
+        })
+}
+
+fn has_rtl(text: &str) -> bool {
+    may_have_rtl(text) && BidiInfo::new(text, None).has_rtl()
+}
 
 /// Resolve translated labels through bidi, without changing IDs, commands or stored text.
 pub fn widget(ui: &egui::Ui, text: impl Into<WidgetText>) -> WidgetText {
     let text = text.into();
-    if text.text().is_ascii() || !BidiInfo::new(text.text(), None).has_rtl() {
+    if !has_rtl(text.text()) {
         return text;
     }
     let mut job = (*text.into_layout_job(ui.style(), egui::FontSelection::Default, Align::Center)).clone();
@@ -21,7 +48,7 @@ pub fn widget(ui: &egui::Ui, text: impl Into<WidgetText>) -> WidgetText {
 /// Accessibility still receives the original logical string through Galley::job.
 pub fn label(ui: &mut egui::Ui, text: impl Into<WidgetText>) -> egui::Response {
     let text = text.into();
-    let rtl = !text.text().is_ascii() && BidiInfo::new(text.text(), None).has_rtl();
+    let rtl = has_rtl(text.text());
     if !rtl {
         return ui.label(text);
     }
@@ -111,8 +138,73 @@ fn visual_line(job: &LayoutJob, bidi: &BidiInfo<'_>, line: Range<usize>) -> Layo
     visual
 }
 
-fn layout(ctx: &egui::Context, mut job: LayoutJob) -> Arc<Galley> {
-    if job.text.is_ascii() || !BidiInfo::new(&job.text, None).has_rtl() {
+const MAX_CACHED_LABELS: usize = 256;
+const MAX_CACHED_TEXT_BYTES: usize = 4096;
+
+#[derive(Clone)]
+struct CachedLayout {
+    galley: Arc<Galley>,
+    last_used: u64,
+}
+
+#[derive(Clone, Default)]
+struct LayoutCache {
+    // A tiny galley owned by egui's font cache acts as a lifetime token. Font changes,
+    // DPI changes, atlas rebuilds and eviction replace it. Holding the old Arc prevents
+    // address reuse. Unlike a font-definition hash, this also detects atlas resets.
+    font_token: Option<Arc<Galley>>,
+    entries: HashMap<u64, CachedLayout>,
+    clock: u64,
+}
+
+impl LayoutCache {
+    fn lookup(&mut self, token: Arc<Galley>, key: u64, job: &LayoutJob) -> Option<Arc<Galley>> {
+        if self.font_token.as_ref().is_none_or(|old| !Arc::ptr_eq(old, &token)) {
+            self.entries.clear();
+            self.font_token = Some(token);
+        }
+        self.clock = self.clock.saturating_add(1);
+        let entry = self.entries.get_mut(&key)?;
+        // Check equality as well as the hash: collisions must never display another label.
+        if *entry.galley.job != *job {
+            return None;
+        }
+        entry.last_used = self.clock;
+        Some(Arc::clone(&entry.galley))
+    }
+
+    fn insert(&mut self, key: u64, galley: Arc<Galley>) {
+        if self.entries.len() >= MAX_CACHED_LABELS
+            && let Some(oldest) = self.entries.iter().min_by_key(|(_, entry)| entry.last_used).map(|(key, _)| *key)
+        {
+            self.entries.remove(&oldest);
+        }
+        self.entries.insert(key, CachedLayout { galley, last_used: self.clock });
+    }
+}
+
+fn layout(ctx: &egui::Context, job: LayoutJob) -> Arc<Galley> {
+    if !may_have_rtl(&job.text) {
+        return ctx.fonts_mut(|fonts| fonts.layout_job(job));
+    }
+    // Keep unusually large/dynamic content from filling a UI-label cache.
+    if job.text.len() > MAX_CACHED_TEXT_BYTES || job.sections.len() > 256 {
+        return layout_uncached(ctx, job);
+    }
+    let token = ctx.fonts_mut(|fonts| fonts.layout_no_wrap(String::new(), FontId::default(), Color32::TRANSPARENT));
+    let id = egui::Id::new("designcraft.rtl.layout-cache");
+    let key = egui::util::hash(&job);
+    let cached = ctx.data_mut(|data| data.get_temp_mut_or_default::<LayoutCache>(id).lookup(token, key, &job));
+    if let Some(galley) = cached {
+        return galley;
+    }
+    let galley = layout_uncached(ctx, job);
+    ctx.data_mut(|data| data.get_temp_mut_or_default::<LayoutCache>(id).insert(key, Arc::clone(&galley)));
+    galley
+}
+
+fn layout_uncached(ctx: &egui::Context, mut job: LayoutJob) -> Arc<Galley> {
+    if !has_rtl(&job.text) {
         return ctx.fonts_mut(|fonts| fonts.layout_job(job));
     }
     let original = Arc::new(job.clone());
@@ -217,6 +309,149 @@ mod tests {
 
     fn displayed(galley: &Galley) -> String {
         galley.rows.iter().flat_map(|row| row.glyphs.iter().filter(|g| g.advance_width > 0.0).map(|g| g.chr)).collect()
+    }
+
+    fn cache_job() -> LayoutJob {
+        LayoutJob::simple("ملف (PDF 123) جديد للنشر والطباعة".repeat(4), FontId::proportional(15.0), Color32::WHITE, 150.0)
+    }
+
+    #[test]
+    fn cache_reuses_final_layout_across_frames_and_matches_uncached_output() {
+        with_fonts(|ctx| {
+            let job = cache_job();
+            let first = layout(ctx, job.clone());
+            let reference = layout_uncached(ctx, job.clone());
+            assert_eq!(displayed(&first), displayed(&reference));
+            assert_eq!(first.rect, reference.rect);
+            assert_eq!(first.rows.len(), reference.rows.len());
+            assert!(Arc::ptr_eq(&first, &layout(ctx, job.clone())));
+            ctx.end_pass().textures_delta.clear();
+            ctx.begin_pass(egui::RawInput { max_texture_side: Some(8192), ..Default::default() });
+            assert!(Arc::ptr_eq(&first, &layout(ctx, job)));
+        });
+    }
+
+    #[test]
+    fn cache_respects_text_formatting_wrapping_and_elision() {
+        with_fonts(|ctx| {
+            let job = cache_job();
+            let first = layout(ctx, job.clone());
+            let mut variants = Vec::new();
+            let mut changed = job.clone();
+            changed.wrap.max_width = 80.0;
+            variants.push(changed);
+            let mut changed = job.clone();
+            changed.wrap.max_rows = 1;
+            variants.push(changed);
+            let mut changed = job.clone();
+            changed.sections[0].format.font_id.size = 24.0;
+            variants.push(changed);
+            let mut changed = job.clone();
+            changed.sections[0].format.color = Color32::RED;
+            variants.push(changed);
+            variants.push(LayoutJob::simple_singleline("עברית 123".into(), FontId::default(), Color32::WHITE));
+            for changed in variants {
+                let cached = layout(ctx, changed.clone());
+                let reference = layout_uncached(ctx, changed);
+                assert!(!Arc::ptr_eq(&first, &cached));
+                assert_eq!(cached.job, reference.job);
+                assert_eq!(cached.rect, reference.rect);
+                assert_eq!(cached.elided, reference.elided);
+                assert_eq!(displayed(&cached), displayed(&reference));
+            }
+        });
+    }
+
+    #[test]
+    fn cache_invalidates_when_fonts_or_scale_change() {
+        with_fonts(|ctx| {
+            let job = cache_job();
+            let first = layout(ctx, job.clone());
+            ctx.end_pass().textures_delta.clear();
+            ctx.set_pixels_per_point(2.0);
+            ctx.begin_pass(egui::RawInput { max_texture_side: Some(8192), ..Default::default() });
+            let scaled = layout(ctx, job.clone());
+            assert!(!Arc::ptr_eq(&first, &scaled));
+            ctx.end_pass().textures_delta.clear();
+            let mut fonts = ctx.fonts(|fonts| fonts.definitions().clone());
+            fonts.families.insert(FontFamily::Name("cache-test".into()), Vec::new());
+            ctx.set_fonts(fonts);
+            ctx.begin_pass(egui::RawInput { max_texture_side: Some(8192), ..Default::default() });
+            let new_fonts = layout(ctx, job.clone());
+            assert!(!Arc::ptr_eq(&scaled, &new_fonts));
+            ctx.end_pass().textures_delta.clear();
+            // Changing atlas options recreates the atlas without changing font definitions.
+            ctx.begin_pass(egui::RawInput { max_texture_side: Some(4096), ..Default::default() });
+            let new_atlas = layout(ctx, job.clone());
+            assert!(!Arc::ptr_eq(&new_fonts, &new_atlas));
+            assert_eq!(displayed(&new_atlas), displayed(&layout_uncached(ctx, job)));
+        });
+    }
+
+    #[test]
+    fn cache_is_bounded_and_font_token_replacement_invalidates_entries() {
+        with_fonts(|ctx| {
+            let job = cache_job();
+            let galley = layout_uncached(ctx, job.clone());
+            let token = ctx.fonts_mut(|fonts| fonts.layout_no_wrap(String::new(), FontId::default(), Color32::TRANSPARENT));
+            let mut cache = LayoutCache::default();
+            cache.lookup(token, 0, &job);
+            for key in 0..=MAX_CACHED_LABELS as u64 {
+                cache.clock += 1;
+                cache.insert(key, Arc::clone(&galley));
+            }
+            assert_eq!(cache.entries.len(), MAX_CACHED_LABELS);
+            assert!(!cache.entries.contains_key(&0));
+            // Replacing the font-cache token models atlas recreation, even with identical fonts.
+            let replacement = Arc::new((*galley).clone());
+            assert!(cache.lookup(replacement, 1, &job).is_none());
+            assert!(cache.entries.is_empty());
+        });
+    }
+
+    #[test]
+    #[ignore = "manual timing comparison, no machine-dependent pass threshold"]
+    fn benchmark_cached_wrapping() {
+        with_fonts(|ctx| {
+            let job = cache_job();
+            let _ = layout(ctx, job.clone());
+            let start = std::time::Instant::now();
+            for _ in 0..200 {
+                std::hint::black_box(layout_uncached(ctx, job.clone()));
+            }
+            let uncached = start.elapsed();
+            let start = std::time::Instant::now();
+            for _ in 0..200 {
+                std::hint::black_box(layout(ctx, job.clone()));
+            }
+            eprintln!("200 wrapped labels: uncached={uncached:?}, cached={:?}", start.elapsed());
+        });
+    }
+
+    #[test]
+    fn ordinary_multilingual_labels_skip_bidi_analysis() {
+        for text in ["", "File (123)", "Édition", "中文排版", "スウォッチ", "e\u{301}", "🎨 🙂"] {
+            assert!(!may_have_rtl(text), "{text:?}");
+            assert!(!BidiInfo::new(text, None).has_rtl(), "{text:?}");
+        }
+        for text in ["ملف", "עברית", "PDF ملف 123", "\u{1e900}", "\u{200f}", "\u{202e}abc\u{202c}", "\u{2067}abc\u{2069}", "١٢٣"] {
+            assert!(may_have_rtl(text), "{text:?}");
+            assert_eq!(has_rtl(text), BidiInfo::new(text, None).has_rtl(), "{text:?}");
+        }
+    }
+
+    #[test]
+    fn non_rtl_widgets_keep_native_text_and_formatting() {
+        with_fonts(|ctx| {
+            egui::Area::new(egui::Id::new("rtl-fast-path-test")).show(ctx, |ui| {
+                for text in ["中文", "日本語", "Édition", "🎨"] {
+                    let rendered = widget(ui, egui::RichText::new(text).strong());
+                    assert!(matches!(rendered, WidgetText::RichText(_)));
+                    assert_eq!(rendered.text(), text);
+                    assert!(label(ui, text).rect.is_finite());
+                }
+            });
+        });
     }
 
     #[test]

@@ -48,6 +48,8 @@ pub struct Spacing {
     pub hyph_zone: f64,
     /// Optical margin alignment: punctuation hangs outside the measure (counted as extra width).
     pub optical: bool,
+    /// Korean text breaks between syllables instead of at spaces.
+    pub korean_char_breaks: bool,
 }
 
 impl Default for Spacing {
@@ -68,6 +70,7 @@ impl Default for Spacing {
             ragged_stretch: 24.0,
             hyph_zone: 0.0,
             optical: false,
+            korean_char_breaks: false,
         }
     }
 }
@@ -75,7 +78,7 @@ impl Default for Spacing {
 impl Spacing {
     /// Per-tier (word, letter, glyph) stretch and shrink of glyph `g` as a box.
     fn box_elastic(&self, g: &Glyph) -> ([f64; 3], [f64; 3]) {
-        if !self.justify {
+        if !self.justify || g.locked_advance {
             return ([0.0; 3], [0.0; 3]);
         }
         let natural = g.adv / self.glyph_desired.max(0.01);
@@ -86,7 +89,7 @@ impl Spacing {
     }
     /// Word-space stretch and shrink of space glyph `g` (only U+0020 is elastic).
     fn space_elastic(&self, g: &Glyph) -> (f64, f64) {
-        if g.ch != ' ' {
+        if g.ch != ' ' && !(g.ch == '\u{3000}' && g.ideographic_space_elastic) {
             return (0.0, 0.0);
         }
         (g.space * (self.word_max - self.word_desired).max(0.0), g.space * (self.word_desired - self.word_min).max(0.0))
@@ -168,13 +171,39 @@ const INF: f64 = 10000.0;
 /// hangul), except where kinsoku forbids it: no line starts with closing punctuation, small
 /// kana or the prolonged sound mark, and none ends with opening brackets.
 pub fn cjk_break_between(a: char, b: char) -> bool {
-    let cjk = |c: char| crate::upright_in_vertical(c) || matches!(c as u32, 0x3000..=0x303F);
-    if !(cjk(a) || cjk(b)) {
-        return false;
-    }
+    (is_cjk(a) || is_cjk(b)) && kinsoku_allows(a, b)
+}
+
+fn is_cjk(c: char) -> bool {
+    crate::upright_in_vertical(c) || matches!(c as u32, 0x3000..=0x303F)
+}
+
+fn kinsoku_allows(a: char, b: char) -> bool {
     const NO_START: &str = "、。，．・：；？！ー）」』】〕〉》｝］〙〗ぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮヵヶ々〻ゝゞヽヾ!),.:;?]}";
     const NO_END: &str = "（「『【〔〈《｛［〘〖([{";
     !NO_START.contains(b) && !NO_END.contains(a)
+}
+
+/// Hangul, and Han ideographs (hanja) in Korean text: Korean is set word by word (KLREQ), so
+/// these letters break like Western ones, at spaces.
+fn korean_letter(g: &Glyph) -> bool {
+    let c = g.ch as u32;
+    let hangul = matches!(c, 0x1100..=0x11FF | 0x3130..=0x318F | 0xA960..=0xA97F | 0xAC00..=0xD7FF);
+    let han = matches!(c, 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF | 0x20000..=0x3FFFF);
+    hangul || (han && g.lang.is_some_and(|t| designcraft_doc::language_subtag(t) == "ko"))
+}
+
+/// Is the place between glyphs `a` and `b` one where CJK text may break (next to an ideograph, kana
+/// or hangul)? Korean letters take no breaks between characters unless the paragraph asks for
+/// character-based breaking.
+pub(crate) fn cjk_pair(a: &Glyph, b: &Glyph, korean_char_breaks: bool) -> bool {
+    let cjk = |g: &Glyph| is_cjk(g.ch) && (korean_char_breaks || !korean_letter(g));
+    cjk(a) || cjk(b)
+}
+
+/// [`cjk_break_between`] for glyphs `a` and `b` (see [`cjk_pair`]).
+fn cjk_break(a: &Glyph, b: &Glyph, sp: &Spacing) -> bool {
+    cjk_pair(a, b, sp.korean_char_breaks) && kinsoku_allows(a.ch, b.ch)
 }
 
 pub fn is_forced(c: char) -> bool {
@@ -203,6 +232,10 @@ pub fn hang(c: char) -> (f64, f64) {
 
 fn hang_left(g: &Glyph) -> f64 {
     hang(g.ch).0 * g.adv
+}
+
+fn right_hang(g: &Glyph, sp: &Spacing) -> f64 {
+    g.cjk_hang.max(if sp.optical { hang_right(g) } else { 0.0 })
 }
 
 fn hang_right(g: &Glyph) -> f64 {
@@ -248,7 +281,7 @@ fn items(glyphs: &[Glyph], hyph_after: &[bool], sp: &Spacing) -> (Vec<Item>, Vec
     let mut hy_cache = Vec::new();
     let mut last_space = NONE;
     for (i, g) in glyphs.iter().enumerate() {
-        let prev_hang = if sp.optical && i > 0 { hang_right(&glyphs[i - 1]) } else { 0.0 };
+        let prev_hang = if i > 0 { right_hang(&glyphs[i - 1], sp) } else { 0.0 };
         if is_forced(g.ch) {
             it.push(Item::glue(0.0, INF, 0.0));
             ig.push(i);
@@ -259,7 +292,7 @@ fn items(glyphs: &[Glyph], hyph_after: &[bool], sp: &Spacing) -> (Vec<Item>, Vec
             last_space = NONE;
             continue;
         }
-        if g.is_space() && !g.no_break {
+        if g.is_space() && !g.no_break && g.break_after != Some(false) {
             let w = g.adv;
             if sp.justify {
                 let (st, sh) = sp.space_elastic(g);
@@ -301,14 +334,14 @@ fn items(glyphs: &[Glyph], hyph_after: &[bool], sp: &Spacing) -> (Vec<Item>, Vec
         it.push(bx);
         ig.push(i);
         let next_is_space = glyphs.get(i + 1).is_none_or(|n| n.is_space());
-        if i + 1 < n && !next_is_space && !g.no_break {
+        if i + 1 < n && !next_is_space && !g.no_break && g.break_after != Some(false) {
             if matches!(g.ch, '-' | '\u{2010}') {
                 let mut p = Item::penalty(0.0, 50.0, true);
-                p.hang = if sp.optical { hang_right(g) } else { 0.0 };
+                p.hang = right_hang(g, sp);
                 push_inword(&mut it, &mut ig, p, i + 1, sp);
-            } else if matches!(g.ch, '\u{2013}' | '\u{2014}' | '/') || cjk_break_between(g.ch, glyphs[i + 1].ch) {
+            } else if matches!(g.ch, '\u{2013}' | '\u{2014}' | '/') || g.break_after.unwrap_or_else(|| cjk_break(g, &glyphs[i + 1], sp)) {
                 let mut p = Item::penalty(0.0, 0.0, false);
-                p.hang = if sp.optical { hang_right(g) } else { 0.0 };
+                p.hang = right_hang(g, sp);
                 push_inword(&mut it, &mut ig, p, i + 1, sp);
             } else if hyph_after[i] {
                 let hw = hyphen_width(g, &mut hy_cache);
@@ -326,7 +359,7 @@ fn items(glyphs: &[Glyph], hyph_after: &[bool], sp: &Spacing) -> (Vec<Item>, Vec
     it.push(Item::glue(0.0, INF, 0.0));
     ig.push(n);
     let mut p = Item::penalty(0.0, -INF, false);
-    p.hang = if sp.optical && n > 0 { hang_right(&glyphs[n - 1]) } else { 0.0 };
+    p.hang = if n > 0 { right_hang(&glyphs[n - 1], sp) } else { 0.0 };
     it.push(p);
     ig.push(n);
     (it, ig)
@@ -581,8 +614,17 @@ fn breaks_from_positions(items: &[Item], ig: &[usize], glyphs: &[Glyph], chain: 
         out.push(Break { start: 0, end: n, next: n, hyphen: false, forced: true });
     }
     // Lines produced past the paragraph end (e.g. a trailing forced break) are dropped.
-    out.retain(|b| b.start <= n);
+    let trailing_forced = glyphs.last().is_some_and(|g| is_forced(g.ch));
+    out.retain(|b| b.start < n || (b.start == n && trailing_forced));
     out
+}
+
+/// Where a line with no break opportunity before glyph `i` (a word wider than the measure) is
+/// split: before `i`, or earlier where kinsoku forbids that (no line starts with closing
+/// punctuation).
+fn emergency_split(glyphs: &[Glyph], start: usize, i: usize) -> usize {
+    let allowed = |j: usize| matches!((glyphs.get(j.wrapping_sub(1)), glyphs.get(j)), (Some(a), Some(b)) if kinsoku_allows(a.ch, b.ch));
+    (start + 1..=i).rev().find(|&j| allowed(j)).unwrap_or(i)
 }
 
 /// Greedy first-fit breaking (single-line composer; also used for paragraphs with tabs).
@@ -611,7 +653,7 @@ pub fn greedy(glyphs: &[Glyph], hyph_after: &[bool], sp: &Spacing, width: &dyn F
                 brk = Some((i + 1, false, true));
                 break;
             }
-            if g.is_space() && !g.no_break {
+            if g.is_space() && !g.no_break && g.break_after != Some(false) {
                 if sp.justify {
                     shrink += sp.space_elastic(g).1;
                 }
@@ -621,8 +663,11 @@ pub fn greedy(glyphs: &[Glyph], hyph_after: &[bool], sp: &Spacing, width: &dyn F
                 i += 1;
                 continue;
             }
-            let hang_r = if sp.optical { hang_right(g) } else { 0.0 };
-            if x + g.adv - hang_r > w + shrink && i > start {
+            let hang_r = right_hang(g, sp);
+            if x + g.adv - hang_r > w + shrink
+                && i > start
+                && (last_ok.is_some() || glyphs.get(i - 1).is_none_or(|p| p.break_after != Some(false) && !p.no_break))
+            {
                 // Overflow: break at the last opportunity, else before this glyph.
                 brk = Some(match last_ok {
                     // Hyphenation zone: break before the word if that leaves little space.
@@ -630,7 +675,7 @@ pub fn greedy(glyphs: &[Glyph], hyph_after: &[bool], sp: &Spacing, width: &dyn F
                         (last_space.map_or(i, |s| s.0), false, false)
                     }
                     Some((p, h)) => (p, h, false),
-                    None => (i, false, false),
+                    None => (emergency_split(glyphs, start, i), false, false),
                 });
                 break;
             }
@@ -638,8 +683,10 @@ pub fn greedy(glyphs: &[Glyph], hyph_after: &[bool], sp: &Spacing, width: &dyn F
             if sp.justify {
                 shrink += sp.box_elastic(g).1.iter().sum::<f64>();
             }
-            if i + 1 < n && !glyphs[i + 1].is_space() && !g.no_break {
-                if matches!(g.ch, '-' | '\u{2010}' | '\u{2013}' | '\u{2014}' | '/') || cjk_break_between(g.ch, glyphs[i + 1].ch) {
+            if i + 1 < n && !glyphs[i + 1].is_space() && !g.no_break && g.break_after != Some(false) {
+                if matches!(g.ch, '-' | '\u{2010}' | '\u{2013}' | '\u{2014}' | '/')
+                    || g.break_after.unwrap_or_else(|| cjk_break(g, &glyphs[i + 1], sp))
+                {
                     last_ok = Some((i + 1, false));
                 } else if hyph_after[i] && may_hyphenate(hyphens) {
                     let hy = hyphen_width(g, &mut hy_cache) * if sp.optical { 1.0 - hang('-').1 } else { 1.0 };

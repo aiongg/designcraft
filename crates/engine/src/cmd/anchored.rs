@@ -207,7 +207,7 @@ fn release(s: &mut Session, p: &Value) -> Result<Value> {
     let (spread, xf) = match placed {
         Some((fid, origin)) => {
             let loc = d0.find(fid).ok_or_else(|| bad("anchored.release", "frame not found"))?;
-            let fxf = d0.parent_xf(&loc) * d0.item(fid).map_or(Affine::IDENTITY, |i| i.text_xf());
+            let fxf = d0.parent_xf(&loc) * d0.item(fid).map_or(Affine::IDENTITY, |i| d0.text_xf(i));
             (loc.spread, fxf * Affine::translate(origin.to_vec2()))
         }
         None => (SpreadRef::Doc(0), Affine::IDENTITY),

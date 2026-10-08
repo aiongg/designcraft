@@ -20,7 +20,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Create Frame",
             [],
             None,
-            "{spread?, rect: [x0,y0,x1,y1] (spread coords), shape?: rectangle|ellipse|polygon, content?: graphic|text|unassigned, sides?: 6, text?: string, caret?: bool}",
+            "{spread?, rect: [x0,y0,x1,y1] (spread coords), shape?: rectangle|ellipse|polygon, content?: graphic|text|unassigned, sides?: 6, text?: string, caret?: bool, vertical?: bool (text: a new vertical story)}",
             has_doc,
             frame_create
         ),
@@ -479,7 +479,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Text Frame Options…",
             ["Object"],
             Some("Cmd+B"),
-            "{columns?, gutter?, inset?: number|[t,l,b,r], verticalJustification?: top|center|bottom|justify, firstBaseline?, autoSize?, ignoreWrap?, balanceColumns?, vertical?: bool (Vertical Type), ids?}",
+            "{columns?, gutter?, inset?: number|[t,l,b,r], verticalJustification?: top|center|bottom|justify, firstBaseline?, autoSize?, ignoreWrap?, balanceColumns?, vertical?: bool (sets the story direction of the frames' stories, as Type ▸ Story Direction), ids?}",
             has_selection,
             text_frame_options
         ),
@@ -815,10 +815,8 @@ fn frame_create(s: &mut Session, p: &Value) -> Result<Value> {
             if let Some(it) = d.item_mut(id) {
                 it.path = path;
                 it.shape = sh;
-                if vertical && let Some(tf) = it.text_frame_mut() {
-                    tf.options.vertical = true;
-                }
             }
+            super::text::set_story_direction(d, &[sid], vertical);
             *sel = if caret {
                 Selection::text(TextSel { story: sid, anchor: text.len(), focus: text.len(), frame: Some(id), cell: None })
             } else {
@@ -1452,15 +1450,17 @@ fn text_frame_options(s: &mut Session, p: &Value) -> Result<Value> {
             if let Some(v) = p.get("ignoreWrap").and_then(Value::as_bool) {
                 o.ignore_wrap = v;
             }
-            if let Some(v) = p.get("vertical").and_then(Value::as_bool) {
-                o.vertical = v;
-            }
             if let Some(v) = p.get("balanceColumns").and_then(Value::as_bool) {
                 o.balance_columns = v;
             }
             if let Some(v) = p.get("columnRule").and_then(Value::as_bool) {
                 o.column_rule = v;
             }
+        }
+        // Story direction belongs to the story: every frame of the thread turns.
+        if let Some(v) = p.get("vertical").and_then(Value::as_bool) {
+            let stories: Vec<StoryId> = ids.iter().filter_map(|id| d.item(*id).and_then(Item::text_frame).map(|t| t.story)).collect();
+            super::text::set_story_direction(d, &stories, v);
         }
         Ok(json!({"changed": ids.len()}))
     })

@@ -13,7 +13,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "{path?, embedImages?: true} — writes an IDML package to `path`, or returns {base64} without a path",
             has_doc, export_idml),
         cmd!(noundo "file.openIdml", "Open IDML", [], None,
-            "{path | base64, name?} — opens an IDML package as a new document (linked images are read next to the file or from its Links/ folder)",
+            "{path | base64, name?} — opens an IDML package as a new document (linked images are read next to the file or from its Links/ folder; the fonts in a `Document Fonts` folder beside it load first) → {index, documentFonts, warnings}",
             always, open_idml),
     ]
 }
@@ -34,16 +34,14 @@ fn export_idml(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// Import IDML bytes; `dir` is the folder the package came from (for relative link lookup).
 pub fn import(bytes: &[u8], dir: Option<&std::path::Path>) -> Result<Document> {
-    let dir = dir.map(|d| d.to_path_buf());
-    let read = move |link: &str| -> Option<Vec<u8>> {
+    #[cfg(not(target_arch = "wasm32"))]
+    let resolved = std::cell::RefCell::new(std::collections::HashMap::new());
+    let read = |link: &str| -> Option<Vec<u8>> {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            if let Ok(b) = std::fs::read(link) {
-                return Some(b);
-            }
-            let name = link.rsplit(['/', '\\']).next()?;
-            let dir = dir.as_ref()?;
-            std::fs::read(dir.join(name)).or_else(|_| std::fs::read(dir.join("Links").join(name))).ok()
+            let (path, data) = read_packaged_link(link, dir)?;
+            resolved.borrow_mut().insert(link.to_string(), path);
+            Some(data)
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -51,7 +49,53 @@ pub fn import(bytes: &[u8], dir: Option<&std::path::Path>) -> Result<Document> {
             None
         }
     };
-    designcraft_idml::import_idml_with(bytes, &read).map_err(|e| EngineError::Other(e.to_string()))
+    let document = designcraft_idml::import_idml_with(bytes, &read).map_err(|e| EngineError::Other(e.to_string()))?;
+    #[cfg(not(target_arch = "wasm32"))]
+    let document = {
+        let mut document = document;
+        for asset in document.assets.values_mut() {
+            if let Some(path) = asset.link.as_ref().and_then(|link| resolved.borrow().get(link).cloned()) {
+                // Relocated packages must also use the new path for preflight and link updates.
+                std::sync::Arc::make_mut(asset).link = Some(path);
+            }
+        }
+        document
+    };
+    Ok(document)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn read_packaged_link(link: &str, dir: Option<&std::path::Path>) -> Option<(String, Vec<u8>)> {
+    let mut candidates = vec![std::path::PathBuf::from(link)];
+    if let Some(dir) = dir {
+        // IDML may retain Windows paths even when the package is opened on another platform.
+        let parts: Vec<&str> = link.split(['/', '\\']).filter(|part| !part.is_empty()).collect();
+        let safe_part = |part: &&str| *part != "." && *part != ".." && !part.contains(':');
+        if !link.starts_with(['/', '\\']) && parts.iter().all(safe_part) {
+            candidates.push(dir.join(parts.iter().collect::<std::path::PathBuf>()));
+        }
+        // Packagers can keep subfolders under Links (for example, Links/illustrations/logo.ai).
+        // Preserve that suffix instead of flattening every resource to its basename.
+        if let Some(index) = parts.iter().rposition(|part| part.eq_ignore_ascii_case("Links")) {
+            let suffix = &parts[index + 1..];
+            if !suffix.is_empty() && suffix.iter().all(safe_part) {
+                candidates.push(dir.join("Links").join(suffix.iter().collect::<std::path::PathBuf>()));
+            }
+        }
+        if let Some(name) = parts.last().filter(|part| safe_part(part)) {
+            candidates.push(dir.join(name));
+            candidates.push(dir.join("Links").join(name));
+        }
+    }
+    for path in candidates {
+        if let Ok(bytes) = std::fs::read(&path) {
+            // Keep ordinary Windows drive/UNC syntax for IDML URI export; canonicalize
+            // would introduce a verbatim prefix that is not an IDML file URI.
+            let path = std::path::absolute(&path).unwrap_or(path);
+            return Some((path.to_string_lossy().into_owned(), bytes));
+        }
+    }
+    None
 }
 
 pub(crate) fn open_idml(s: &mut Session, p: &Value) -> Result<Value> {
@@ -71,7 +115,68 @@ pub(crate) fn open_idml(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(n) = name {
         d.title = n;
     }
+    let (fonts, faces, warnings) = match str_param(p, "path").filter(|_| str_param(p, "base64").is_none()) {
+        Some(path) => super::file::load_document_fonts(&mut d, path),
+        None => (None, 0, Vec::new()),
+    };
     // Never save over the .idml with the native format: the document starts unsaved.
-    let i = s.add_document(DocState::new(d, None));
-    Ok(json!({"index": i}))
+    let mut st = DocState::new(d, None);
+    st.fonts = fonts;
+    let i = s.add_document(st);
+    Ok(json!({"index": i, "documentFonts": faces, "warnings": warnings}))
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+
+    fn linked_idml(link: &str) -> Result<(Vec<u8>, Vec<u8>)> {
+        let png = designcraft_render::Rendered { width: 2, height: 2, pixels: vec![255; 16] }.to_png();
+        let mut session = Session::new();
+        session.execute("file.new", &json!({}))?;
+        session.execute("file.place", &json!({"base64": base64_encode(&png), "name": "logo.png"}))?;
+        session.edit(|doc, _| {
+            let asset = doc.assets.values_mut().next().ok_or_else(|| bad("fixture", "missing graphic"))?;
+            Arc::make_mut(asset).link = Some(link.into());
+            Ok(Value::Null)
+        })?;
+        let bytes = designcraft_idml::export_idml_with(&session.doc()?.doc, &designcraft_idml::ExportOptions { embed_images: false });
+        Ok((bytes, png))
+    }
+
+    #[test]
+    fn opens_nested_packaged_links_from_a_different_computer() {
+        let dir = std::env::temp_dir().join(format!("dc-idml-nested-links-{}", std::process::id()));
+        let path = dir.join("Links").join("illustrations").join("logo.png");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let (idml, png) = linked_idml("C:\\original-computer\\project\\Links\\illustrations\\logo.png").unwrap();
+        std::fs::write(&path, &png).unwrap();
+        std::fs::write(dir.join("logo.png"), b"a different file with the same basename").unwrap();
+
+        let doc = import(&idml, Some(&dir)).unwrap();
+        let asset = doc.assets.values().next().unwrap();
+        assert_eq!(*asset.data, png, "the packaged graphic must render even when its author-machine path no longer exists");
+        let resolved = std::path::absolute(&path).unwrap();
+        assert_eq!(asset.link.as_deref(), resolved.to_str(), "remember the resolved link so update and preflight use the packaged file");
+        assert_eq!(super::super::links::status(asset), "ok");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn remembers_flat_packaged_link_location() {
+        let dir = std::env::temp_dir().join(format!("dc-idml-flat-links-{}", std::process::id()));
+        let path = dir.join("Links").join("logo.png");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let (idml, png) = linked_idml("/original-computer/project/logo.png").unwrap();
+        std::fs::write(&path, &png).unwrap();
+
+        let doc = import(&idml, Some(&dir)).unwrap();
+        let asset = doc.assets.values().next().unwrap();
+        assert_eq!(*asset.data, png);
+        assert_eq!(asset.link.as_deref(), std::path::absolute(&path).unwrap().to_str());
+        assert_eq!(super::super::links::status(asset), "ok");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }
