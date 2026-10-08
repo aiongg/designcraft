@@ -999,20 +999,8 @@ fn character_section(app: &mut DesignApp, ui: &mut Ui) {
         egui::FontId::proportional(11.5),
         t.text,
     );
-    let mut pick_fam = None;
-    egui::Popup::menu(&resp).show(|ui| {
-        ui.set_min_width(fw);
-        egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
-            if let Some(f) = super::font_menu_rows(app, ui, &menu, &fam) {
-                pick_fam = Some(f);
-                ui.close();
-            }
-        });
-    });
-    if let Some(f) = pick_fam {
-        let styles = fonts.styles(&f);
-        let style = if styles.iter().any(|s| s == "Regular") { "Regular".to_string() } else { styles.first().cloned().unwrap_or_default() };
-        let _ = app.run("type.char", json!({"attrs": {"fontFamily": f, "fontStyle": style}}));
+    if let Some(f) = super::font_popup(app, &resp, &menu, &fam) {
+        super::apply_font_family(app, &f);
     }
     ui.add_space(1.0);
     let styles = fonts.styles(&fam);

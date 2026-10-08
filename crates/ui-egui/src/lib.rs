@@ -884,3 +884,45 @@ mod tests {
         assert_eq!(ui.snap_view().zone_px, 0.0);
     }
 }
+
+/// The whole window in a headless test harness, at a chosen window size.
+#[cfg(test)]
+pub(crate) mod test_window {
+    use egui_kittest::Harness;
+
+    pub struct Window {
+        pub app: crate::DesignApp,
+        ready: bool,
+    }
+
+    /// The window at `size` with a new document open.
+    pub fn open(mut app: crate::DesignApp, size: egui::Vec2) -> Harness<'static, Window> {
+        if app.session.active().is_none() {
+            app.run("file.new", serde_json::json!({})).unwrap();
+        }
+        let mut h = Harness::builder().with_size(size).with_max_steps(1000).build_ui_state(
+            |ui, w: &mut Window| {
+                // The builder runs a frame before the texture size can be raised: skip it.
+                if !w.ready {
+                    return;
+                }
+                let ctx = ui.ctx().clone();
+                w.app.logic(&ctx);
+                w.app.ui(ui);
+            },
+            Window { app, ready: false },
+        );
+        h.input_mut().max_texture_side = Some(8192);
+        h.state_mut().ready = true;
+        h.run_steps(6);
+        h
+    }
+
+    /// A primary click at `pos`, then a few frames.
+    pub fn click_at(h: &mut Harness<'static, Window>, pos: egui::Pos2) {
+        h.hover_at(pos);
+        h.drag_at(pos);
+        h.drop_at(pos);
+        h.run_steps(4);
+    }
+}
