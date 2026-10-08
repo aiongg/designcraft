@@ -196,7 +196,9 @@ pub fn specs() -> Vec<CommandSpec> {
             let b = s.book.clone().ok_or_else(no_book)?;
             let mut parts = Vec::new();
             for path in &b.documents {
-                let d = load(path)?;
+                let mut d = load(path)?;
+                // The chapter's own fonts, for this export (skipped font files are logged).
+                let _fonts = super::file::load_document_fonts(&mut d, path).0;
                 let cache = designcraft_compose::Cache::new();
                 let r = designcraft_pdf::export_pdf_with_report(&d, &cache, &designcraft_pdf::PdfOptions::default()).map_err(|e| EngineError::Other(e.to_string()))?;
                 let n = designcraft_render::pdf_page_count(&r.bytes).unwrap_or(0);

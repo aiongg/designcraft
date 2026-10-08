@@ -10,9 +10,11 @@
 #![forbid(unsafe_code)]
 
 pub mod anchored;
+pub mod arabic;
 pub mod arrow;
 pub mod attrs;
 pub mod build;
+pub mod cjk;
 mod edit;
 pub mod endnotes;
 pub mod ids;
@@ -332,6 +334,12 @@ pub struct DocSettings {
     pub overprint_black: bool,
     /// Type › Track Changes: edits are recorded as inserted / deleted text.
     pub track_changes: bool,
+    /// Preferences › Composition › Draw Missing Glyphs from Fallback Fonts: characters the
+    /// applied font lacks are drawn from other fonts. Off (InDesign's behaviour, and new
+    /// documents'), they are drawn as the font's missing-glyph box and Preflight lists them.
+    /// Documents saved before the setting existed read as on, the way they were drawn.
+    #[serde(default = "yes")]
+    pub glyph_fallback: bool,
 }
 
 impl Default for DocSettings {
@@ -363,6 +371,7 @@ impl Default for DocSettings {
             blend_space: BlendSpace::Cmyk,
             overprint_black: true,
             track_changes: false,
+            glyph_fallback: false,
         }
     }
 }
@@ -507,6 +516,11 @@ pub struct Document {
     #[serde(default)]
     pub modified: i64,
     pub next_id: u64,
+    /// While the document is open, the font scope of the fonts it brought (its `Document Fonts`
+    /// folder): composition, export and the font menus look its fonts up there. 0: none. Not
+    /// saved.
+    #[serde(skip)]
+    pub font_scope: u32,
 }
 
 /// What a hyperlink is attached to.
@@ -669,6 +683,18 @@ impl Document {
 
     /// Validate structural invariants (ids unique, threads consistent, stories well-formed).
     pub fn check(&self) -> Result<()> {
+        for f in &self.styles.composite_fonts {
+            if f.entries.iter().any(|e| {
+                ![e.relative_size, e.horizontal_scale, e.vertical_scale].iter().all(|v| v.is_finite() && *v > 0.0) || !e.baseline_shift.is_finite()
+            }) {
+                return Err(DocError::Invalid(format!("invalid composite font metrics: {}", f.name)));
+            }
+        }
+        for t in &self.styles.mojikumi_tables {
+            if t.overrides.iter().any(|r| ![r.minimum, r.desired, r.maximum].iter().all(|v| v.is_finite())) {
+                return Err(DocError::Invalid(format!("non-finite mojikumi spacing: {}", t.name)));
+            }
+        }
         let mut ids = std::collections::HashSet::new();
         for sp in self.spreads.iter().chain(self.parents.iter()) {
             for it in &sp.items {

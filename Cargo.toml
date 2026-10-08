@@ -39,6 +39,7 @@ log = "0.4"
 proptest = "1"
 rayon = "1"
 unicode-bidi = "0.3"
+unicode-script = "0.5"
 unicode-bidi-mirroring = "0.4"
 unicode-segmentation = "1"
 regex = { version = "1", default-features = false, features = ["std", "unicode", "perf"] }
@@ -49,10 +50,11 @@ harfrust = "0.13"
 vello_cpu = "0.2"
 vello_common = { version = "0.2", default-features = false }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "tiff", "bmp"] }
-# SVG (same usvg as krilla-svg) and Photoshop composites.
+# CMYK TIFF samples for PDF export (`image` decodes them to RGB); the version `image` uses.
+tiff = "0.11"
+# SVG (same usvg as krilla-svg).
 resvg = { version = "0.47", default-features = false, features = ["text"] }
 krilla-svg = "0.8"
-psd = "0.3"
 # Boolean operations on Bézier paths (Pathfinder).
 flo_curves = "0.8"
 # QR codes (Object › Generate QR Code); MIT.

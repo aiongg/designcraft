@@ -10,6 +10,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+use std::collections::HashSet;
 use std::io::{Cursor, Read, Write};
 use std::sync::Arc;
 
@@ -96,7 +97,9 @@ fn load_zip(bytes: &[u8]) -> Result<Document, FormatError> {
         return Err(FormatError::TooNew(version));
     }
     let json = read(&mut z, "document.json").ok_or_else(|| FormatError::NotOurs("missing document.json".into()))?;
-    let mut doc: Document = serde_json::from_slice(&json).map_err(|e| FormatError::NotOurs(e.to_string()))?;
+    let mut v: Value = serde_json::from_slice(&json).map_err(|e| FormatError::NotOurs(e.to_string()))?;
+    upgrade_json(&mut v);
+    let mut doc: Document = serde_json::from_value(v).map_err(|e| FormatError::NotOurs(e.to_string()))?;
     let names: Vec<String> = z.file_names().map(str::to_string).collect();
     for name in names {
         let Some(stem) = name.strip_prefix("assets/") else { continue };
@@ -158,7 +161,8 @@ fn pin_para_default<T: Clone>(doc: &mut Document, field: fn(&mut ParaAttrs) -> &
 }
 
 fn load_legacy_json(bytes: &[u8]) -> Result<Document, FormatError> {
-    let v: Value = serde_json::from_slice(bytes).map_err(|e| FormatError::NotOurs(e.to_string()))?;
+    let mut v: Value = serde_json::from_slice(bytes).map_err(|e| FormatError::NotOurs(e.to_string()))?;
+    upgrade_json(&mut v);
     let mut doc: Document = serde_json::from_value(v.clone()).map_err(|e| FormatError::NotOurs(e.to_string()))?;
     if let Some(data) = v.get("assetData").and_then(Value::as_object) {
         for (k, s) in data {
@@ -172,6 +176,54 @@ fn load_legacy_json(bytes: &[u8]) -> Result<Document, FormatError> {
     upgrade(&mut doc, 1);
     doc.check().map_err(|e| FormatError::NotOurs(e.to_string()))?;
     Ok(doc)
+}
+
+/// Bring older documents' JSON up to the current model. Vertical Type was a text frame option
+/// (`content.options.vertical`); it is the story's direction, which a story takes from its first
+/// frame.
+fn upgrade_json(doc: &mut Value) {
+    let mut vertical = HashSet::new();
+    vertical_frames(doc, &mut vertical, 0);
+    if vertical.is_empty() {
+        return;
+    }
+    let Some(stories) = doc.get_mut("stories").and_then(Value::as_object_mut) else { return };
+    for st in stories.values_mut() {
+        let first = st.get("frames").and_then(|f| f.get(0)).and_then(Value::as_u64);
+        if let (Some(f), Some(st)) = (first, st.as_object_mut())
+            && vertical.contains(&f)
+            && !st.contains_key("vertical")
+        {
+            st.insert("vertical".into(), Value::Bool(true));
+        }
+    }
+}
+
+/// Ids of the text frames in `v` (any depth: groups, anchored objects) whose options say vertical.
+fn vertical_frames(v: &Value, out: &mut HashSet<u64>, depth: usize) {
+    // serde_json already refuses JSON nested deeper than 128 levels.
+    if depth > 256 {
+        return;
+    }
+    match v {
+        Value::Object(m) => {
+            if let (Some(id), Some(c)) = (m.get("id").and_then(Value::as_u64), m.get("content"))
+                && c.get("type").and_then(Value::as_str) == Some("text")
+                && c.get("options").and_then(|o| o.get("vertical")).and_then(Value::as_bool) == Some(true)
+            {
+                out.insert(id);
+            }
+            for c in m.values() {
+                vertical_frames(c, out, depth + 1);
+            }
+        }
+        Value::Array(a) => {
+            for c in a {
+                vertical_frames(c, out, depth + 1);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn base64_decode(s: &str) -> Vec<u8> {
@@ -343,6 +395,62 @@ mod tests {
         assert_eq!(aligned, [false, true, false]);
         let now = load(&save(&d).unwrap()).unwrap();
         assert!(now.styles.resolve_para(&now.story(sid).unwrap().paras[0]).0.drop_cap_align_left);
+    }
+
+    /// The object of the item `id` in a document's JSON.
+    fn item_json(v: &mut Value, id: u64) -> Option<&mut Value> {
+        if v.get("id").and_then(Value::as_u64) == Some(id) && v.get("content").is_some() {
+            return Some(v);
+        }
+        match v {
+            Value::Object(m) => m.values_mut().find_map(|c| item_json(c, id)),
+            Value::Array(a) => a.iter_mut().find_map(|c| item_json(c, id)),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn frame_level_vertical_text_opens_as_a_vertical_story() {
+        // Documents that set Vertical on the frame: the story takes its first frame's direction.
+        let mut d = Document::new(&NewDocument::default());
+        let lid = d.default_layer();
+        let (a, sid) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(72.0, 72.0, 200.0, 400.0), lid, "縦書き", ParaFormat::default()).unwrap();
+        let (b, _) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(300.0, 72.0, 428.0, 400.0), lid, "", ParaFormat::default()).unwrap();
+        d.thread(a, b).unwrap();
+        let (c, other) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(450.0, 72.0, 550.0, 400.0), lid, "横", ParaFormat::default()).unwrap();
+        let mut v = serde_json::to_value(&d).unwrap();
+        item_json(&mut v, a.0).unwrap()["content"]["options"]["vertical"] = json!(true);
+        item_json(&mut v, c.0).unwrap()["content"]["options"]["vertical"] = json!(false);
+        let json = serde_json::to_vec(&v).unwrap();
+        let mut zipped = Cursor::new(Vec::new());
+        {
+            let mut z = zip::ZipWriter::new(&mut zipped);
+            z.start_file("document.json", zip::write::SimpleFileOptions::default()).unwrap();
+            z.write_all(&json).unwrap();
+            z.finish().unwrap();
+        }
+        for bytes in [json.clone(), zipped.into_inner()] {
+            let back = load(&bytes).unwrap();
+            assert!(back.stories[&sid].vertical);
+            assert!(!back.stories[&other].vertical);
+            // Saved again, the direction is the story's.
+            let again = load(&save(&back).unwrap()).unwrap();
+            assert!(again.stories[&sid].vertical && !again.stories[&other].vertical);
+        }
+    }
+
+    #[test]
+    fn documents_saved_before_glyph_fallback_keep_their_fallback_fonts() {
+        let d = Document::new(&NewDocument::default());
+        assert!(!d.settings.glyph_fallback);
+        assert!(!load(&save(&d).unwrap()).unwrap().settings.glyph_fallback, "saved and read as off");
+        let mut on = d.clone();
+        on.settings.glyph_fallback = true;
+        assert!(load(&save(&on).unwrap()).unwrap().settings.glyph_fallback);
+        // Written before the setting existed: drawn from fallback fonts, as they were.
+        let mut v = serde_json::to_value(&d).unwrap();
+        v["settings"].as_object_mut().unwrap().remove("glyphFallback").unwrap();
+        assert!(load(&serde_json::to_vec(&v).unwrap()).unwrap().settings.glyph_fallback);
     }
 
     #[test]

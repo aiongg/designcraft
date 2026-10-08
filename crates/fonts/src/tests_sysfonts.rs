@@ -129,8 +129,38 @@ fn a_link_back_to_a_parent_folder_ends_the_scan() {
 #[test]
 fn the_scan_reads_names_without_loading_the_font() {
     let dir = font_dir("names");
-    assert_eq!(file_face_names(&dir.join("Sysfont-Regular.ttf")), [(FAMILY.to_string(), "Regular".to_string())]);
+    let names: Vec<(String, String)> = file_face_names(&dir.join("Sysfont-Regular.ttf")).into_iter().map(|f| (f.family, f.style)).collect();
+    assert_eq!(names, [(FAMILY.to_string(), "Regular".to_string())]);
     assert!(file_face_names(&dir.join("damaged.ttf")).is_empty());
     assert!(file_face_names(&dir.join("readme.txt")).is_empty());
     assert!(file_face_names(&dir.join("missing.ttf")).is_empty());
+}
+
+#[test]
+fn font_menus_group_installed_and_loaded_fonts_without_loading_them() {
+    use crate::testing::{font_with, with_code_pages, with_names};
+    use crate::{FamilyInfo, FontGroup};
+    let dir = std::env::temp_dir().join(format!("dc-sysfonts-groups-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let names = |family: &str, lang: u16, native: &str| {
+        let font = font_with(family, &['a']).unwrap();
+        with_names(&font, &[(3, 1, 0x409, 1, family), (3, 1, 0x409, 2, "Regular"), (3, 1, lang, 1, native)]).unwrap()
+    };
+    std::fs::write(dir.join("jp.ttf"), names("Groups Mincho", 0x0411, "グループ明朝")).unwrap();
+    // Declares nothing (no code pages): its kana make it Japanese, read from the cmap.
+    std::fs::write(dir.join("kana.otf"), with_code_pages(font_with("Groups Kana", &['a', 'あ']).unwrap(), 0, 0).unwrap()).unwrap();
+    let db = FontDb::with_font_dirs(vec![dir.clone()]);
+    db.set_system_fallback(false);
+    db.add_font(with_code_pages(font_with("Groups Ming", &['a']).unwrap(), 1 << 20, 0).unwrap());
+    let infos = db.scoped(0).family_infos();
+    let find = |f: &str| infos.iter().find(|i| i.family == f).cloned().unwrap_or_else(|| panic!("{f} in {infos:?}"));
+    assert_eq!(find("Groups Mincho"), FamilyInfo { family: "Groups Mincho".into(), group: FontGroup::Japanese, native: Some("グループ明朝".into()) });
+    assert_eq!(find("Groups Kana").group, FontGroup::Japanese);
+    assert_eq!(find("Groups Ming").group, FontGroup::ChineseTraditional);
+    assert_eq!(find(crate::DEFAULT_FAMILY).group, FontGroup::Western);
+    assert!(!db.is_loaded("Groups Mincho"), "the scan read its tables, not the font");
+    // Families are listed once.
+    assert_eq!(infos.iter().filter(|i| i.family == "Groups Mincho").count(), 1);
+    let _ = std::fs::remove_dir_all(&dir);
 }

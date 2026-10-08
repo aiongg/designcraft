@@ -579,7 +579,7 @@ impl Renderer {
                 if let Some(ft) = cs.frame(it.id) {
                     match &tf.options.path {
                         Some(pt) => self.draw_path_text(ctx, f, &cs, ft, xf, bp, pt),
-                        None => self.draw_text(ctx, f, &cs, ft, xf * it.text_local()),
+                        None => self.draw_text(ctx, f, &cs, ft, xf * f.doc.text_local(it)),
                     }
                 }
             }
@@ -695,16 +695,17 @@ impl Renderer {
                 ctx.pop_layer();
             }
             StrokeAlign::Outside if closed => {
-                let outline =
-                    kurbo::stroke(bp.iter(), &kurbo::Stroke { width: st.weight * 2.0, ..stroke }, &kurbo::StrokeOpts::default(), 0.05 * f.px);
-                let mut p = outline;
-                // Remove the interior: even-odd with the path itself.
-                for el in bp.elements() {
-                    p.push(*el);
-                }
-                ctx.set_fill_rule(peniko::Fill::EvenOdd);
-                ctx.fill_path(&p);
-                ctx.set_fill_rule(peniko::Fill::NonZero);
+                // Subtract the filled path from a double-width stroke. Combining a stroked
+                // outline (already hollow) with the path using even-odd would paint its centre.
+                // Isolate the stroke so the subtraction leaves the item's fill/content and
+                // backdrop intact; the same nonzero fill rule also preserves compound holes.
+                ctx.push_layer(None, None, None, None, None);
+                ctx.set_stroke(kurbo::Stroke { width: st.weight * 2.0, ..stroke });
+                ctx.stroke_path(bp);
+                ctx.push_layer(None, Some(BlendMode::new(Mix::Normal, Compose::DestOut)), None, None, None);
+                ctx.fill_path(bp);
+                ctx.pop_layer();
+                ctx.pop_layer();
             }
             _ => {
                 ctx.set_stroke(stroke);

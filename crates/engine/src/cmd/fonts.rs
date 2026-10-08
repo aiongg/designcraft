@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use designcraft_doc::{CharAttrs, Document, Story};
+use designcraft_fonts::FontSource;
 use serde_json::{Value, json};
 
 use super::{CommandSpec, bad, cmd, has_doc, str_param};
@@ -12,7 +13,7 @@ use crate::{Result, Session};
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        cmd!(query "font.list", "Fonts in Document", [], None, "{} → [{family, style, characters, missing, styleMissing}] (missing first)", has_doc, |s, _| {
+        cmd!(query "font.list", "Fonts in Document", [], None, "{} → [{family, style, characters, missing, styleMissing, source: bundled|installed|document|added (null when missing)}] (missing first)", has_doc, |s, _| {
             Ok(Value::Array(list(&s.doc()?.doc)))
         }),
         cmd!(
@@ -43,7 +44,7 @@ fn for_each_story(d: &Document, f: &mut dyn FnMut(&Story)) {
 }
 
 fn list(d: &Document) -> Vec<Value> {
-    let db = designcraft_fonts::FontDb::global();
+    let db = designcraft_fonts::FontDb::global().scoped(d.font_scope);
     let mut used: BTreeMap<(String, String), usize> = BTreeMap::new();
     for_each_story(d, &mut |st| {
         let ranges = st.para_ranges();
@@ -55,7 +56,16 @@ fn list(d: &Document) -> Vec<Value> {
                     continue;
                 }
                 let p = d.styles.resolve_char(&base, fmt);
-                *used.entry((p.font_family, p.font_style)).or_default() += n;
+                if let Some(f) = d.styles.composite_fonts.iter().find(|f| f.name == p.font_family.trim_start_matches("CompositeFont/")) {
+                    let text = st.text.get(rr.start.max(r.start)..rr.end.min(r.end).max(rr.start.max(r.start))).unwrap_or("");
+                    for c in text.chars() {
+                        if let Some(e) = f.entry(c) {
+                            *used.entry((e.family.clone(), e.style.clone())).or_default() += 1;
+                        }
+                    }
+                } else {
+                    *used.entry((p.font_family, p.font_style)).or_default() += n;
+                }
             }
         }
     });
@@ -64,7 +74,16 @@ fn list(d: &Document) -> Vec<Value> {
         .map(|((family, style), n)| {
             let missing = !db.has_family(&family);
             let style_missing = !missing && !db.styles(&family).iter().any(|s| s.eq_ignore_ascii_case(&style));
-            (missing || style_missing, json!({"family": family, "style": style, "characters": n, "missing": missing, "styleMissing": style_missing}))
+            let source = (!missing).then(|| match db.face(&family, &style).source {
+                FontSource::Bundled => "bundled",
+                FontSource::Installed(_) => "installed",
+                FontSource::Document(_) => "document",
+                FontSource::Memory => "added",
+            });
+            (
+                missing || style_missing,
+                json!({"family": family, "style": style, "characters": n, "missing": missing, "styleMissing": style_missing, "source": source}),
+            )
         })
         .collect();
     out.sort_by_key(|(m, _)| !*m);
@@ -100,6 +119,17 @@ fn replace(s: &mut Session, p: &Value) -> Result<Value> {
             }
             for cs in &mut st.character {
                 changed += swap(&mut cs.chars, &family, style.as_deref(), &to_family, to_style.as_deref()) as usize;
+            }
+            for f in &mut st.composite_fonts {
+                for e in &mut f.entries {
+                    if e.family.eq_ignore_ascii_case(&family) && style.as_ref().is_none_or(|s| e.style.eq_ignore_ascii_case(s)) {
+                        e.family.clone_from(&to_family);
+                        if let Some(s) = &to_style {
+                            e.style.clone_from(s);
+                        }
+                        changed += 1;
+                    }
+                }
             }
         }
         // Local formatting in every story (cells and footnotes too).

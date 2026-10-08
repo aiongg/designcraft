@@ -653,6 +653,119 @@ fn imports_hand_written_fixture() {
     assert_eq!(a.name, "photo.jpg");
 }
 
+/// Hand-written inset encodings, independent of the exporter's four-item list.
+fn inset_fixture(preference: &str, object_styles: &str) -> Document {
+    let designmap = format!(
+        r#"<Document xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" Self="d">
+          <RootObjectStyleGroup Self="ro">{object_styles}</RootObjectStyleGroup>
+          <idPkg:Spread src="Spreads/Spread_s.xml"/>
+        </Document>"#
+    );
+    let spread = format!(
+        r#"<idPkg:Spread xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging">
+          <Spread Self="s">
+            <Page Self="p" GeometricBounds="0 0 100 100" ItemTransform="1 0 0 1 0 0"/>
+            <TextFrame Self="f" AppliedObjectStyle="ObjectStyle/Padded">
+              <Properties><PathGeometry><GeometryPathType PathOpen="false"><PathPointArray>
+                <PathPointType Anchor="0 0"/><PathPointType Anchor="0 100"/>
+                <PathPointType Anchor="100 100"/><PathPointType Anchor="100 0"/>
+              </PathPointArray></GeometryPathType></PathGeometry></Properties>
+              {preference}
+            </TextFrame>
+          </Spread>
+        </idPkg:Spread>"#
+    );
+    import_idml(&zip_files(&[("designmap.xml", &designmap), ("Spreads/Spread_s.xml", &spread)])).unwrap()
+}
+
+fn frame_inset(d: &Document) -> [f64; 4] {
+    d.spreads[0].items[0].text_frame().unwrap().options.inset
+}
+
+fn inset_list(values: &[&str]) -> String {
+    let items = values.iter().map(|v| format!(r#"<ListItem type="unit">{v}</ListItem>"#)).collect::<String>();
+    format!(r#"<Properties><InsetSpacing type="list">{items}</InsetSpacing></Properties>"#)
+}
+
+#[test]
+fn imports_scalar_inset_properties_like_lists_and_attributes() {
+    let scalar =
+        inset_fixture(r#"<TextFramePreference><Properties><InsetSpacing type="unit"> 9 </InsetSpacing></Properties></TextFramePreference>"#, "");
+    let list = inset_fixture(&format!("<TextFramePreference>{}</TextFramePreference>", inset_list(&["9"; 4])), "");
+    let attribute = inset_fixture(r#"<TextFramePreference InsetSpacing="9"/>"#, "");
+    let untyped = inset_fixture(r#"<TextFramePreference><Properties><InsetSpacing>9</InsetSpacing></Properties></TextFramePreference>"#, "");
+    assert_eq!(frame_inset(&scalar), [9.0; 4]);
+    assert_eq!(frame_inset(&scalar), frame_inset(&list));
+    assert_eq!(frame_inset(&scalar), frame_inset(&attribute));
+    assert_eq!(frame_inset(&scalar), frame_inset(&untyped));
+    assert_eq!(scalar.spreads[0].items[0].text_area(), Rect::new(9.0, 9.0, 91.0, 91.0));
+    let round_trip = import_idml(&export_idml(&scalar)).unwrap();
+    assert_eq!(frame_inset(&round_trip), [9.0; 4]);
+}
+
+#[test]
+fn inset_property_keeps_precedence_over_attribute() {
+    for (property, expected) in [
+        (r#"<Properties><InsetSpacing type="unit">9</InsetSpacing></Properties>"#.to_string(), [9.0; 4]),
+        (inset_list(&["1", "2", "3", "4"]), [1.0, 2.0, 3.0, 4.0]),
+        (inset_list(&["1", "2", "3"]), [0.0; 4]),
+        (r#"<Properties><InsetSpacing type="unit">invalid</InsetSpacing></Properties>"#.to_string(), [0.0; 4]),
+    ] {
+        let d = inset_fixture(&format!(r#"<TextFramePreference InsetSpacing="42">{property}</TextFramePreference>"#), "");
+        assert_eq!(frame_inset(&d), expected, "{property}");
+    }
+}
+
+#[test]
+fn inset_spacing_rejects_malformed_and_nonfinite_values() {
+    let mut preferences = vec![
+        String::new(),
+        "<TextFramePreference/>".to_string(),
+        r#"<TextFramePreference><Properties><InsetSpacing type="list">9</InsetSpacing></Properties></TextFramePreference>"#.to_string(),
+        r#"<TextFramePreference><Properties><InsetSpacing type="unit"><Other>9</Other></InsetSpacing></Properties></TextFramePreference>"#
+            .to_string(),
+    ];
+    for value in ["", "invalid", "NaN", "inf", "-inf", "1e309"] {
+        preferences.push(format!(r#"<TextFramePreference InsetSpacing="{value}"/>"#));
+        preferences
+            .push(format!(r#"<TextFramePreference><Properties><InsetSpacing type="unit">{value}</InsetSpacing></Properties></TextFramePreference>"#));
+        preferences.push(format!("<TextFramePreference>{}</TextFramePreference>", inset_list(&["1", value, "3", "4"])));
+    }
+    for values in [&[][..], &["9"][..], &["1", "2", "3"][..], &["1", "2", "3", "4", "5"][..], &["1", "bad", "2", "3", "4"][..]] {
+        preferences.push(format!("<TextFramePreference>{}</TextFramePreference>", inset_list(values)));
+    }
+    preferences.push(format!("<TextFramePreference>{}</TextFramePreference>", inset_list(&["1", "<Other>2</Other>", "3", "4"])));
+    for preference in preferences {
+        assert_eq!(frame_inset(&inset_fixture(&preference, "")), [0.0; 4], "{preference}");
+    }
+}
+
+#[test]
+fn inset_spacing_preserves_finite_signed_values_and_edge_order() {
+    for value in ["0", "-2.5", " 4.5 "] {
+        let expected = [value.trim().parse::<f64>().unwrap(); 4];
+        for preference in [
+            format!(r#"<TextFramePreference InsetSpacing="{value}"/>"#),
+            format!(r#"<TextFramePreference><Properties><InsetSpacing type="unit">{value}</InsetSpacing></Properties></TextFramePreference>"#),
+            format!("<TextFramePreference>{}</TextFramePreference>", inset_list(&[value; 4])),
+        ] {
+            assert_eq!(frame_inset(&inset_fixture(&preference, "")), expected, "{preference}");
+        }
+    }
+    let d = inset_fixture(&format!("<TextFramePreference>{}</TextFramePreference>", inset_list(&["1", "-2", "3.5", "4"])), "");
+    assert_eq!(frame_inset(&d), [1.0, -2.0, 3.5, 4.0], "top, left, bottom, right");
+}
+
+#[test]
+fn imports_scalar_insets_in_object_style_without_replacing_frame_override() {
+    let styles = r#"<ObjectStyle Self="ObjectStyle/Padded" Name="Padded" EnableTextFrameGeneralOptions="true">
+      <TextFramePreference><Properties><InsetSpacing type="unit">9</InsetSpacing></Properties></TextFramePreference>
+    </ObjectStyle>"#;
+    let d = inset_fixture(r#"<TextFramePreference InsetSpacing="3"/>"#, styles);
+    assert_eq!(d.styles.object.iter().find(|s| s.name == "Padded").unwrap().text_frame.as_ref().unwrap().inset, [9.0; 4]);
+    assert_eq!(frame_inset(&d), [3.0; 4]);
+}
+
 #[test]
 fn rejects_non_idml() {
     assert!(import_idml(b"not a zip").is_err());
@@ -765,6 +878,40 @@ fn round_trips_tables() {
     assert!((bt.rows[2].height - 30.0).abs() < 1e-6);
     assert!((bt.columns[0].width - 50.0).abs() < 1e-6);
     assert_eq!(bt.options.alt_rows.as_ref().map(|a| a.first_color.as_str()), Some("Brand"));
+}
+
+#[test]
+fn imports_and_round_trips_explicit_cell_border_overrides() {
+    // Hand-written IDML: the outer cell edge may explicitly suppress or replace the
+    // table border. An absent/zero priority keeps the table border's precedence.
+    let story = r#"<idPkg:Story xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging">
+<Story Self="s1"><ParagraphStyleRange><CharacterStyleRange>
+<Table HeaderRowCount="0" FooterRowCount="0" TopBorderStrokeWeight="2">
+  <Row Name="0" MinimumHeight="24"/>
+  <Column Name="0" SingleColumnWidth="60"/><Column Name="1" SingleColumnWidth="60"/>
+  <Cell Name="0:0" TopEdgeStrokeColor="Swatch/None" TopEdgeStrokePriority="1"
+        LeftEdgeStrokeColor="Color/Brand" LeftEdgeStrokeWeight="3" LeftEdgeStrokePriority="2"
+        BottomEdgeStrokeWeight="0" BottomEdgeStrokePriority="0" RightEdgeStrokeColor="Swatch/None">
+    <ParagraphStyleRange><CharacterStyleRange><Content>A</Content></CharacterStyleRange></ParagraphStyleRange>
+  </Cell>
+  <Cell Name="1:0"><ParagraphStyleRange><CharacterStyleRange><Content>B</Content></CharacterStyleRange></ParagraphStyleRange></Cell>
+</Table></CharacterStyleRange></ParagraphStyleRange></Story></idPkg:Story>"#;
+    let d = import_idml(&fixture_with_story(story)).unwrap();
+    d.check().unwrap();
+    let table = d.stories.values().flat_map(|s| s.tables.values()).next().unwrap();
+    let cell = table.cell(0, 0).unwrap();
+    assert_eq!(cell.border_overrides, [true, true, false, false]);
+    assert!(!cell.strokes[0].is_visible(), "explicit None is retained");
+    assert_eq!(cell.strokes[1].color, "Brand");
+    assert_eq!(cell.strokes[1].weight, 3.0);
+    assert_eq!(table.options.border.weight, 2.0);
+    assert_eq!(table.cell(0, 1).unwrap().border_overrides, [false; 4]);
+
+    let back = import_idml(&export_idml(&d)).unwrap();
+    let roundtrip = back.stories.values().flat_map(|s| s.tables.values()).next().unwrap();
+    assert_eq!(roundtrip.cell(0, 0).unwrap().border_overrides, cell.border_overrides);
+    assert_eq!(roundtrip.cell(0, 0).unwrap().strokes, cell.strokes);
+    assert_eq!(roundtrip.cell(0, 1).unwrap().border_overrides, [false; 4]);
 }
 
 #[test]
@@ -938,11 +1085,161 @@ fn round_trips_frames_with_pasted_in_items() {
 fn vertical_story_orientation_round_trips() {
     let mut d = Document::new(&NewDocument::default());
     let lid = d.default_layer();
-    let (fid, _) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(72.0, 72.0, 200.0, 400.0), lid, "縦書き", ParaFormat::default()).unwrap();
-    d.item_mut(fid).unwrap().text_frame_mut().unwrap().options.vertical = true;
+    let (a, sid) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(72.0, 72.0, 200.0, 400.0), lid, "縦書き", ParaFormat::default()).unwrap();
+    let (b, _) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(300.0, 72.0, 428.0, 400.0), lid, "", ParaFormat::default()).unwrap();
+    d.thread(a, b).unwrap();
+    d.add_text_frame(SpreadRef::Doc(0), Rect::new(450.0, 72.0, 550.0, 400.0), lid, "横", ParaFormat::default()).unwrap();
+    d.story_mut(sid).unwrap().vertical = true;
+    // Orientation and column direction are separate settings of the story.
+    d.story_mut(sid).unwrap().direction = designcraft_doc::TextDirection::RightToLeft;
     let back = import_idml(&export_idml(&d)).unwrap();
-    let frame = back.spreads[0].items.iter().find_map(|i| i.text_frame()).unwrap();
-    assert!(frame.options.vertical);
+    use designcraft_doc::TextDirection::{LeftToRight, RightToLeft};
+    let directions: Vec<_> = back.stories.values().map(|s| (s.frames.len(), s.vertical, s.direction)).collect();
+    assert!(directions.contains(&(2, true, RightToLeft)) && directions.contains(&(1, false, LeftToRight)), "{directions:?}");
+    let frames: Vec<bool> = back.spreads[0].items.iter().map(|i| back.frame_vertical(i)).collect();
+    assert_eq!(frames, [true, true, false]);
+}
+
+#[test]
+fn cjk_character_attributes_import_from_independent_xml_and_round_trip() {
+    let story = r#"<idPkg:Story xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging"><Story Self="s1">
+      <ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/$ID/[No paragraph style]" BunriKinshi="true" Rensuuji="false" TreatIdeographicSpaceAsSpace="true">
+        <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]" LeadingAki="0.25" TrailingAki="-1" Tsume="20" Jidori="4" LeadingModel="LeadingModelCenter" CharacterAlignment="AlignEmCenter" KentenKind="KentenWhiteCircle"><Content>甲乙</Content></CharacterStyleRange>
+      </ParagraphStyleRange></Story></idPkg:Story>"#;
+    let doc = import_idml(&fixture_with_story(story)).unwrap();
+    let st = doc.stories.values().find(|s| s.text.contains("甲乙")).unwrap();
+    let a = &st.runs().next().unwrap().1.over;
+    assert_eq!(a.leading_aki, Some(Some(0.25)));
+    assert_eq!(a.trailing_aki, Some(None));
+    assert_eq!(a.jidori, Some(4));
+    assert_eq!(a.tsume, Some(0.2));
+    assert_eq!(a.kenten_character.as_deref(), Some("○"));
+    assert_eq!(a.leading_model, Some(designcraft_doc::cjk::LeadingModel::Center));
+    assert_eq!(st.paras[0].para.bunri_kinshi, Some(true));
+    assert_eq!(st.paras[0].para.rensuuji, Some(false));
+    let back = import_idml(&export_idml(&doc)).unwrap();
+    let st2 = back.stories.values().find(|s| s.text.contains("甲乙")).unwrap();
+    let b = &st2.runs().next().unwrap().1.over;
+    assert_eq!(a.leading_aki, b.leading_aki);
+    assert_eq!(a.trailing_aki, b.trailing_aki);
+    assert_eq!(a.kenten_character, b.kenten_character);
+    assert_eq!(a.leading_model, b.leading_model);
+}
+
+#[test]
+fn automatic_kerning_does_not_import_inactive_numeric_values() {
+    for (attributes, expected) in [
+        (r#"KerningMethod="$ID/Optical" KerningValue="1e+11""#, Some(designcraft_doc::Kerning::Optical)),
+        (r#"KerningMethod="$ID/Metrics" KerningValue="0""#, Some(designcraft_doc::Kerning::Metrics)),
+        (r#"KerningValue="-40""#, Some(designcraft_doc::Kerning::Manual(-40.0))),
+        (r#"KerningValue="1e+11""#, None),
+    ] {
+        let story = format!(
+            r#"<idPkg:Story xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging"><Story Self="s1">
+        <ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/$ID/[No paragraph style]">
+        <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]" {attributes}><Content>甲乙</Content></CharacterStyleRange>
+        </ParagraphStyleRange></Story></idPkg:Story>"#
+        );
+        let d = import_idml(&fixture_with_story(&story)).unwrap();
+        let s = d.stories.values().find(|s| s.text.contains("甲乙")).unwrap();
+        assert_eq!(s.runs().next().unwrap().1.over.kerning, expected, "{attributes}");
+    }
+}
+
+#[test]
+fn cjk_composite_fonts_and_custom_kinsoku_are_document_resources() {
+    let map = DESIGNMAP.replace("</Document>", r#"
+      <KinsokuTable Self="KinsokuTable/Test" Name="Test" CantBeginLineChars="乙" CantEndLineChars="甲" CantBeSeparatedChars="—" HangingPunctuationChars="。"/>
+      <CompositeFont Self="CompositeFont/Mixed" Name="Mixed"><CompositeFontEntry Self="cf1" Name="Base" FontStyle="Regular"><Properties><AppliedFont type="string">Source Serif 4</AppliedFont></Properties></CompositeFontEntry>
+      <CompositeFontEntry Self="cf2" Name="Digits" CustomCharacters="0123456789" FontStyle="Regular" RelativeSize="80" BaselineShift="10"><Properties><AppliedFont type="string">Source Sans 3</AppliedFont></Properties></CompositeFontEntry></CompositeFont>
+    </Document>"#);
+    let story = STORY.replace("<ParagraphStyleRange ", "<ParagraphStyleRange KinsokuSet=\"KinsokuTable/Test\" ");
+    let bytes = zip_files(&[
+        ("designmap.xml", &map),
+        ("Resources/Graphic.xml", GRAPHIC),
+        ("Resources/Styles.xml", STYLES),
+        ("Resources/Preferences.xml", PREFS),
+        ("MasterSpreads/MasterSpread_m1.xml", MASTER),
+        ("Spreads/Spread_sp1.xml", SPREAD),
+        ("Stories/Story_s1.xml", &story),
+    ]);
+    let d = import_idml(&bytes).unwrap();
+    let f = &d.styles.composite_fonts[0];
+    assert_eq!(f.entry('1').unwrap().family, "Source Sans 3");
+    assert_eq!(f.entry('甲').unwrap().family, "Source Serif 4");
+    assert_eq!(f.entry('1').unwrap().relative_size, 0.8);
+    let back = import_idml(&export_idml(&d)).unwrap();
+    assert_eq!(back.styles.composite_fonts, d.styles.composite_fonts);
+    assert!(
+        back.stories.values().flat_map(|s| &s.paras).any(|p| p.para.kinsoku.as_ref().and_then(Option::as_ref).is_some_and(|k| k.no_start == "乙"))
+    );
+}
+
+#[test]
+fn cjk_unsupported_mojikumi_is_preserved_instead_of_silently_dropped() {
+    let map = DESIGNMAP.replace("</Document>", r#"<MojikumiTable Self="MojikumiTable/Spacing" Name="Spacing" BasedOnMojikumiSet="SimpChineseDefault"><Properties><OverrideMojikumiAkiList>
+    <OverrideMojikumiAkiType TargetMojikumiClass="1" SideMojikumiClass="23" SideIsAfterTarget="false" Minimum="-0.1" Desired="0.25" Maximum="0.5" CompressionPriority="3" AkiDoesNotFloat="true"/>
+    </OverrideMojikumiAkiList></Properties></MojikumiTable></Document>"#);
+    let story =
+        STORY.replace("<ParagraphStyleRange ", "<ParagraphStyleRange Mojikumi=\"MojikumiTable/Spacing\" KinsokuType=\"KinsokuPushOutFirst\" ");
+    let bytes = zip_files(&[
+        ("designmap.xml", &map),
+        ("Resources/Graphic.xml", GRAPHIC),
+        ("Resources/Styles.xml", STYLES),
+        ("Resources/Preferences.xml", PREFS),
+        ("MasterSpreads/MasterSpread_m1.xml", MASTER),
+        ("Spreads/Spread_sp1.xml", SPREAD),
+        ("Stories/Story_s1.xml", &story),
+    ]);
+    let d = import_idml(&bytes).unwrap();
+    let t = &d.styles.mojikumi_tables[0];
+    assert_eq!(t.overrides[0].minimum, -0.1);
+    assert!(t.overrides[0].does_not_float);
+    let back = import_idml(&export_idml(&d)).unwrap();
+    assert_eq!(back.styles.mojikumi_tables, d.styles.mojikumi_tables);
+    assert!(back.stories.values().flat_map(|s| &s.paras).any(|p| p.para.mojikumi.as_deref() == Some("MojikumiTable/Spacing")));
+}
+
+#[test]
+fn arabic_controls_import_independent_xml_and_round_trip() {
+    let story = r#"<idPkg:Story xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging"><Story Self="s1">
+    <ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/$ID/[No paragraph style]" ParagraphDirection="RightToLeftDirection" Kashidas="KashidasOff" ParagraphJustification="NaskhJustification" ParagraphKashidaWidth="2">
+    <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]" CharacterDirection="LeftToRightDirection" Kashidas="KashidasOff" DiacriticPosition="OpentypePosition" XOffsetDiacritic="150" YOffsetDiacritic="-100" PositionalForm="Medial"><Properties><DigitsType type="enumeration">FarsiDigits</DigitsType></Properties><Content>بَ123</Content></CharacterStyleRange>
+    </ParagraphStyleRange></Story></idPkg:Story>"#;
+    let d = import_idml(&fixture_with_story(story)).unwrap();
+    let st = d.stories.values().find(|s| s.text.contains('ب')).unwrap();
+    assert_eq!(st.paras[0].para.kashidas, Some(false));
+    assert_eq!(st.paras[0].para.arabic_justification.as_deref(), Some("NaskhJustification"));
+    let a = &st.runs().next().unwrap().1.over;
+    assert_eq!(a.character_direction, Some(designcraft_doc::arabic::CharacterDirection::LeftToRight));
+    assert_eq!(a.allow_kashidas, Some(false));
+    assert_eq!(a.diacritic_x_offset, Some(150.0));
+    assert_eq!(a.diacritic_y_offset, Some(-100.0));
+    assert_eq!(a.digits, Some(designcraft_doc::Digits::Farsi));
+    let back = import_idml(&export_idml(&d)).unwrap();
+    let b = back.stories.values().find(|s| s.text.contains('ب')).unwrap();
+    let attrs = &b.runs().next().unwrap().1.over;
+    assert_eq!(attrs.character_direction, a.character_direction);
+    assert_eq!(attrs.diacritic_x_offset, a.diacritic_x_offset);
+    assert_eq!(attrs.diacritic_y_offset, a.diacritic_y_offset);
+    assert_eq!(attrs.allow_kashidas, a.allow_kashidas);
+    assert_eq!(attrs.positional_form, a.positional_form);
+    assert_eq!(b.paras[0].para.paragraph_kashida_width, Some(Some(2.0)));
+}
+
+#[test]
+fn arabic_story_and_table_directions_survive_idml_export() {
+    let mut d = Document::new(&NewDocument::default());
+    let (_, sid) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(0.0, 0.0, 300.0, 300.0), d.default_layer(), "", ParaFormat::default()).unwrap();
+    let st = d.story_mut(sid).unwrap();
+    st.direction = designcraft_doc::TextDirection::RightToLeft;
+    let mut t = designcraft_doc::Table::new(42, 1, 2, 0, 0, 200.0);
+    t.options.direction = designcraft_doc::TextDirection::RightToLeft;
+    st.insert_table(0, t);
+    let back = import_idml(&export_idml(&d)).unwrap();
+    let st = back.stories.values().find(|st| !st.tables.is_empty()).unwrap();
+    assert_eq!(st.direction, designcraft_doc::TextDirection::RightToLeft);
+    assert_eq!(st.tables.values().next().unwrap().options.direction, designcraft_doc::TextDirection::RightToLeft);
 }
 
 #[test]

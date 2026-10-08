@@ -128,7 +128,7 @@ pub enum TextDirection {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Digits {
-    /// As typed.
+    /// Contextual digits; composition selects the preceding strong script/language.
     #[default]
     Default,
     /// European (0123).
@@ -144,16 +144,31 @@ pub enum Digits {
 impl Digits {
     /// The digit `c` (0–9) is drawn as, for text in `language`.
     pub fn map(self, c: char, language: &str) -> char {
-        let Some(d) = c.to_digit(10) else { return c };
+        let d = match c {
+            '0'..='9' => c as u32 - '0' as u32,
+            '\u{0660}'..='\u{0669}' => c as u32 - 0x0660,
+            '\u{06F0}'..='\u{06F9}' => c as u32 - 0x06F0,
+            _ => return c,
+        };
         let zero = match self {
-            Digits::Default | Digits::Arabic => return c,
+            Digits::Default => return c,
+            Digits::Arabic => 0x0030,
             Digits::Hindi => 0x0660,
             Digits::Farsi => 0x06F0,
             Digits::Native => {
                 let l = language.to_ascii_lowercase();
                 match () {
-                    _ if l.starts_with("arabic") => 0x0660,
-                    _ if l.starts_with("persian") || l.starts_with("farsi") || l.starts_with("urdu") => 0x06F0,
+                    _ if l.starts_with("arabic") || l == "ar" || l.starts_with("ar-") => 0x0660,
+                    _ if l.starts_with("persian")
+                        || l.starts_with("farsi")
+                        || l.starts_with("urdu")
+                        || l == "fa"
+                        || l.starts_with("fa-")
+                        || l == "ur"
+                        || l.starts_with("ur-") =>
+                    {
+                        0x06F0
+                    }
                     _ if l.starts_with("hindi") || l.starts_with("marathi") || l.starts_with("nepali") || l.starts_with("sanskrit") => 0x0966,
                     _ if l.starts_with("bengali") => 0x09E6,
                     _ if l.starts_with("gujarati") => 0x0AE6,
@@ -173,6 +188,133 @@ impl Digits {
         };
         char::from_u32(zero + d).unwrap_or(c)
     }
+}
+
+/// The BCP 47 tag of a language name as InDesign and IDML write it ("English: USA", "Chinese:
+/// Simplified", or a locale code such as "de_DE_2006"), for the shaper's localized forms (`locl`)
+/// and everything that depends on the language (quotes, hyphenation and spelling, line breaking,
+/// fallback fonts). A variant we don't know falls back to its language ("English: Australian" →
+/// `en`); an unknown language (or "[No Language]") has none. Case, punctuation and IDML's `$ID/`
+/// don't matter. Locale codes (`ll`, `ll_CC`, `ll-CC`, with a reform year after them as in
+/// `de_DE_2006`) are their tag (`de-DE`), and Chinese also goes by its other common spellings
+/// ("Simplified Chinese", "Chinese (Traditional)", "zh_CN", "zh-Hant").
+pub fn language_tag(language: &str) -> Option<&'static str> {
+    let language = language.trim();
+    let language = language.strip_prefix("$ID/").unwrap_or(language);
+    let l = language.to_lowercase();
+    let words: Vec<&str> = l.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
+    let first = words.first().copied().unwrap_or("");
+    let has = |any: &[&str]| words.iter().any(|w| any.contains(w));
+    if first == "zh" || has(&["chinese"]) {
+        // The script decides; then the name; then the region.
+        return Some(if has(&["hans"]) {
+            "zh-Hans"
+        } else if has(&["hant"]) {
+            "zh-Hant"
+        } else if has(&["simplified", "cn", "sg"]) {
+            "zh-Hans"
+        } else if has(&["traditional", "tw", "hk", "mo"]) {
+            "zh-Hant"
+        } else {
+            "zh"
+        });
+    }
+    if let Some(tag) = locale_code(&words) {
+        return intern_tag(tag);
+    }
+    let variant = match words.join(" ").as_str() {
+        "english usa" => Some("en-US"),
+        "english uk" => Some("en-GB"),
+        "english canadian" => Some("en-CA"),
+        "german swiss 2006 reform" | "german swiss" => Some("de-CH"),
+        "french swiss" => Some("fr-CH"),
+        "italian swiss" => Some("it-CH"),
+        "spanish castilian" => Some("es-ES"),
+        "french canadian" => Some("fr-CA"),
+        "portuguese brazilian" => Some("pt-BR"),
+        "norwegian bokmål" | "norwegian bokmal" => Some("nb"),
+        "norwegian nynorsk" => Some("nn"),
+        _ => None,
+    };
+    if variant.is_some() {
+        return variant;
+    }
+    Some(match first {
+        "english" => "en",
+        "german" => "de",
+        "french" => "fr",
+        "spanish" => "es",
+        "catalan" => "ca",
+        "italian" => "it",
+        "portuguese" => "pt",
+        "dutch" => "nl",
+        "danish" => "da",
+        "swedish" => "sv",
+        "norwegian" => "no",
+        "finnish" => "fi",
+        "polish" => "pl",
+        "czech" => "cs",
+        "slovak" => "sk",
+        "hungarian" => "hu",
+        "romanian" => "ro",
+        "croatian" => "hr",
+        "lithuanian" => "lt",
+        "greek" => "el",
+        "russian" => "ru",
+        "ukrainian" => "uk",
+        "bulgarian" => "bg",
+        "serbian" => "sr",
+        "macedonian" => "mk",
+        "turkish" => "tr",
+        "japanese" => "ja",
+        "korean" => "ko",
+        "arabic" => "ar",
+        "persian" | "farsi" => "fa",
+        "urdu" => "ur",
+        "hebrew" => "he",
+        _ => return None,
+    })
+}
+
+/// The tag of a locale code split into lowercase `words`: a language (2 or 3 letters), then
+/// optionally a region (2 letters or 3 digits) and a reform year (4 digits) → `ll` or `ll-CC`.
+fn locale_code(words: &[&str]) -> Option<String> {
+    let letters = |w: &str, n: std::ops::RangeInclusive<usize>| n.contains(&w.len()) && w.bytes().all(|b| b.is_ascii_lowercase());
+    let digits = |w: &str, n: usize| w.len() == n && w.bytes().all(|b| b.is_ascii_digit());
+    match *words {
+        [lang] if letters(lang, 2..=3) => Some(lang.to_string()),
+        [lang, region] | [lang, region, _] if letters(lang, 2..=3) && (letters(region, 2..=2) || digits(region, 3)) => {
+            if let [_, _, year] = *words
+                && !digits(year, 4)
+            {
+                return None;
+            }
+            Some(format!("{lang}-{}", region.to_ascii_uppercase()))
+        }
+        _ => None,
+    }
+}
+
+/// `tag` as a `&'static str`: each distinct tag is kept once for the process. Language names come
+/// from documents, so at most [`MAX_TAGS`] are kept; past that a new tag is unknown (`None`).
+fn intern_tag(tag: String) -> Option<&'static str> {
+    const MAX_TAGS: usize = 512;
+    static TAGS: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
+    let mut tags = TAGS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(t) = tags.iter().find(|t| **t == tag) {
+        return Some(t);
+    }
+    if tags.len() >= MAX_TAGS {
+        return None;
+    }
+    let t: &'static str = Box::leak(tag.into_boxed_str());
+    tags.push(t);
+    Some(t)
+}
+
+/// The language subtag of a BCP 47 tag (`de-DE` → `de`, `zh-Hant` → `zh`).
+pub fn language_subtag(tag: &str) -> &str {
+    tag.split('-').next().unwrap_or(tag)
 }
 
 /// A tracked change on text.
@@ -507,6 +649,17 @@ attr_set! {
         kerning: Kerning = Kerning::Metrics,
         /// Tracking in 1/1000 em.
         tracking: f64 = 0.0,
+        /// Explicit CJK aki, in em; None restores automatic spacing.
+        leading_aki: Option<f64> = None,
+        trailing_aki: Option<f64> = None,
+        /// Proportional character compression, 0..1.
+        tsume: f64 = 0.0,
+        /// Target em cells for the contiguous formatted group (0 disables jidori).
+        jidori: u32 = 0,
+        character_alignment: crate::cjk::CharacterAlignment = crate::cjk::CharacterAlignment::Baseline,
+        leading_model: crate::cjk::LeadingModel = crate::cjk::LeadingModel::Roman,
+        /// Explicit emphasis character; empty uses the traditional sesame dot.
+        kenten_character: String = String::new(),
         /// Horizontal / vertical scale, 1.0 = 100%.
         h_scale: f64 = 1.0,
         v_scale: f64 = 1.0,
@@ -533,10 +686,13 @@ attr_set! {
         strikethrough_offset: Option<f64> = None,
         strikethrough_color: String = String::new(),
         strikethrough_tint: f32 = 1.0,
+        glyph_form: String = String::new(),
         ligatures: bool = true,
         no_break: bool = false,
         /// Tate-chu-yoko: in vertical text, the run is set horizontally within one em of the line.
         tate_chu_yoko: bool = false,
+        tate_chu_yoko_x_offset: f64 = 0.0,
+        tate_chu_yoko_y_offset: f64 = 0.0,
         /// Ruby: the reading set small above the text (to its right in vertical text), one group
         /// over each run that has it.
         ruby: String = String::new(),
@@ -544,6 +700,15 @@ attr_set! {
         kenten: bool = false,
         /// Digits (World-Ready): how 0–9 are drawn.
         digits: Digits = Digits::Default,
+        character_direction: crate::arabic::CharacterDirection = crate::arabic::CharacterDirection::Default,
+        /// Character-level permission, additionally gated by paragraph kashidas.
+        allow_kashidas: bool = true,
+        diacritic_position: crate::arabic::DiacriticPosition = crate::arabic::DiacriticPosition::Default,
+        /// Additional mark offsets, in thousandths of an em. Positive y is up.
+        diacritic_x_offset: f64 = 0.0,
+        diacritic_y_offset: f64 = 0.0,
+        /// IDML contextual-form request, separate from general OpenType features.
+        positional_form: String = String::new(),
         language: String = "English: USA".into(),
         /// Additional OpenType features, e.g. `["onum", "ss01"]`.
         otf_features: Vec<String> = Vec::new(),
@@ -614,6 +779,12 @@ attr_set! {
         single_word_justify: Align = Align::FullyJustified,
         /// Insert Kashidas (World-Ready): justified Arabic lines stretch at joins before spaces.
         kashidas: bool = true,
+        /// Preserved vendor policy; non-default policies require a dedicated composer.
+        arabic_justification: String = String::new(),
+        paragraph_kashida_width: Option<f64> = None,
+        /// Korean text breaks between any two syllables (character-based breaking); otherwise
+        /// it breaks at spaces, word by word.
+        korean_char_breaks: bool = false,
         // Keeps
         keep_with_next: u32 = 0,
         keep_lines_together: bool = false,
@@ -637,6 +808,16 @@ attr_set! {
         list_separator: String = "\t".into(),
         balance_ragged: bool = false,
         optical_margin: bool = false,
+        /// None uses the legacy built-in rules; an empty set explicitly disables kinsoku.
+        kinsoku: Option<crate::cjk::Kinsoku> = None,
+        /// Preserved spacing-table reference; compatibility audit reports unsupported composition.
+        mojikumi: String = String::new(),
+        /// Preserved priority policy; the current breaker does not implement these priorities.
+        kinsoku_type: String = String::new(),
+        kinsoku_hang: crate::cjk::KinsokuHang = crate::cjk::KinsokuHang::None,
+        bunri_kinshi: bool = false,
+        rensuuji: bool = true,
+        treat_ideographic_space_as_space: bool = false,
         /// Paragraph shading, and how far it reaches past the text: top, left, bottom, right.
         shading_on: bool = false,
         shading_color: String = "[Black]".into(),
@@ -664,6 +845,104 @@ mod tests {
         assert_eq!(Digits::Native.map('5', "Thai"), '\u{0E55}');
         assert_eq!(Digits::Native.map('5', "English: USA"), '5');
         assert_eq!(Digits::Hindi.map('x', ""), 'x');
+    }
+
+    #[test]
+    fn language_names_map_to_bcp47_tags() {
+        assert_eq!(language_tag("English: USA"), Some("en-US"));
+        assert_eq!(language_tag("English: Australian"), Some("en"));
+        assert_eq!(language_tag("Turkish"), Some("tr"));
+        assert_eq!(language_tag("Japanese"), Some("ja"));
+        assert_eq!(language_tag("Korean"), Some("ko"));
+        assert_eq!(language_tag("Chinese"), Some("zh"));
+        assert_eq!(language_tag("Chinese: Simplified"), Some("zh-Hans"));
+        assert_eq!(language_tag("Chinese: Traditional"), Some("zh-Hant"));
+        assert_eq!(language_tag("Arabic"), Some("ar"));
+        assert_eq!(language_tag("Persian"), Some("fa"));
+        assert_eq!(language_tag("Farsi"), Some("fa"));
+        assert_eq!(language_tag("Urdu"), Some("ur"));
+        assert_eq!(language_tag("Hebrew"), Some("he"));
+        assert_eq!(language_tag("[No Language]"), None);
+        assert_eq!(language_tag("Klingon"), None);
+        assert_eq!(language_tag(""), None);
+    }
+
+    #[test]
+    fn chinese_japanese_and_korean_names_map_in_their_common_spellings() {
+        for (name, tag) in [
+            ("Chinese: Simplified", Some("zh-Hans")),
+            ("Simplified Chinese", Some("zh-Hans")),
+            ("Chinese Simplified", Some("zh-Hans")),
+            ("Chinese (Simplified)", Some("zh-Hans")),
+            ("  chinese:  SIMPLIFIED ", Some("zh-Hans")),
+            ("zh_CN", Some("zh-Hans")),
+            ("zh-CN", Some("zh-Hans")),
+            ("zh-Hans", Some("zh-Hans")),
+            ("zh-Hans-CN", Some("zh-Hans")),
+            ("Chinese: Traditional", Some("zh-Hant")),
+            ("Traditional Chinese", Some("zh-Hant")),
+            ("Chinese Traditional", Some("zh-Hant")),
+            ("Chinese (Traditional)", Some("zh-Hant")),
+            ("zh_TW", Some("zh-Hant")),
+            ("zh-TW", Some("zh-Hant")),
+            ("zh_HK", Some("zh-Hant")),
+            ("zh-HK", Some("zh-Hant")),
+            ("zh-Hant", Some("zh-Hant")),
+            ("Chinese", Some("zh")),
+            ("zh", Some("zh")),
+            ("Japanese", Some("ja")),
+            ("ja", Some("ja")),
+            ("ja_JP", Some("ja-JP")),
+            ("ja-JP", Some("ja-JP")),
+            ("Korean", Some("ko")),
+            ("ko_KR", Some("ko-KR")),
+            ("ko-KR", Some("ko-KR")),
+            ("English: USA", Some("en-US")),
+            ("German: Swiss 2006 Reform", Some("de-CH")),
+            ("Norwegian: Bokmål", Some("nb")),
+            ("[No Language]", None),
+        ] {
+            assert_eq!(language_tag(name), tag, "{name}");
+        }
+    }
+
+    #[test]
+    fn locale_codes_map_to_their_tags() {
+        for (name, tag) in [
+            // As InDesign-exported IDML writes them (AppliedLanguage).
+            ("$ID/de_DE_2006", Some("de-DE")),
+            ("$ID/nl_NL_2005", Some("nl-NL")),
+            ("$ID/English: USA", Some("en-US")),
+            ("$ID/English: UK", Some("en-GB")),
+            ("$ID/Spanish: Castilian", Some("es-ES")),
+            ("$ID/French", Some("fr")),
+            // As IDML import keeps them.
+            ("de_DE_2006", Some("de-DE")),
+            ("nl_NL_2005", Some("nl-NL")),
+            ("Spanish: Castilian", Some("es-ES")),
+            ("French", Some("fr")),
+            // Other locale codes.
+            ("de-DE", Some("de-DE")),
+            ("de_CH_2006", Some("de-CH")),
+            ("pt_BR", Some("pt-BR")),
+            ("en_us", Some("en-US")),
+            ("es_419", Some("es-419")),
+            ("fil_PH", Some("fil-PH")),
+            ("sv", Some("sv")),
+            ("ja", Some("ja")),
+            // Not codes.
+            ("de_DE_2006_x", None),
+            ("d_DE", None),
+            ("de_D", None),
+            ("de_DE_06", None),
+            ("1e_DE", None),
+            ("[No Language]", None),
+        ] {
+            assert_eq!(language_tag(name), tag, "{name}");
+        }
+        assert_eq!(language_subtag("de-DE"), "de");
+        assert_eq!(language_subtag("zh-Hant"), "zh");
+        assert_eq!(language_subtag("ko"), "ko");
     }
 
     #[test]
