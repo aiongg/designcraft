@@ -138,7 +138,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Paragraph Formatting",
             [],
             None,
-            "{attrs: {align?, leftIndent?, firstLineIndent?, spaceBefore?, spaceAfter?, dropCapLines?, hyphenate?, composer?, tabs?, …}}",
+            "{attrs: {align?, leftIndent?, firstLineIndent?, spaceBefore?, spaceAfter?, dropCapLines?, dropCapChars?, dropCapStyle?, dropCapAlignLeft?, dropCapScaleDescenders?, hyphenate?, composer?, tabs?, …}}",
             has_text_or_frames,
             |s, p| format_paras(s, p.get("attrs").unwrap_or(p))
         ),
