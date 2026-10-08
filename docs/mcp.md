@@ -43,6 +43,14 @@ spread the right page starts at x = page width. `inspect_document` lists page bo
 `render_page` / `export_png` are 0-based. `pointer` events in connected mode may use `"space": "screen"` (egui points,
 see `ui_inspect` → `canvasRect`).
 
+## Text offsets
+
+Positions in a story's text are **UTF-8 byte offsets**, not character counts: `anchor` / `focus` of `text.select`,
+`start` / `end` of `story.replaceRange` and of `find.find` matches, the `pos` that `text.placeCaret`, `text.insert`
+and `text.move` return, a story's `length` in `get_story` and `inspect_document`, and its `overset` position in
+`get_story`. A character outside ASCII takes 2 to 4 bytes (é 2, — and は 3), so the story `はただ商店` has length 15
+and its second character starts at 3. An offset inside a character snaps back to the start of that character.
+
 ## Tools
 
 | Tool | What it does |
