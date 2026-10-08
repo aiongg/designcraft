@@ -38,10 +38,51 @@ pub use control::{ControlRequest, ControlResponse};
 pub type ReadFn = Box<dyn Fn(&str) -> Result<Vec<u8>, String>>;
 pub type WriteFn = Box<dyn FnMut(&str, &[u8]) -> Result<(), String>>;
 pub type PickFn = Box<dyn FnMut(&str) -> Option<String>>;
-pub type OpenAsyncFn = Box<dyn FnMut(&str)>;
+pub type OpenAsyncFn = Box<dyn FnMut(FileRequest)>;
 pub type DownloadFn = Box<dyn FnMut(&str, &[u8])>;
-/// Files `(name, bytes)` delivered asynchronously by the host (web file picker, dropped files).
-pub type Inbox = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
+/// Files delivered asynchronously by the host (web file picker, dropped files).
+pub type Inbox = std::sync::Arc<std::sync::Mutex<Vec<InboxFile>>>;
+
+/// Why the host was asked for a file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FilePurpose {
+    /// File › Open: the file opens as a new document.
+    Open,
+    /// File › Place: the file goes into the document Place was chosen in.
+    Place,
+    /// Load Swatches: the ASE file's swatches go into the document it was chosen in.
+    Swatches,
+    /// Dropped on the window: documents open, anything else goes into the active document.
+    Drop,
+}
+
+impl FilePurpose {
+    /// The purpose a picker request names (`open`, `place`, `swatches`); anything else opens.
+    pub fn from_name(name: &str) -> Self {
+        match name {
+            "place" => FilePurpose::Place,
+            "swatches" => FilePurpose::Swatches,
+            _ => FilePurpose::Open,
+        }
+    }
+}
+
+/// A request for a file: why, and the document active when it was made ([`DocState::uid`]).
+///
+/// [`DocState::uid`]: designcraft_engine::DocState::uid
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FileRequest {
+    pub purpose: FilePurpose,
+    pub doc: Option<u64>,
+}
+
+/// A file the host delivered through the [`Inbox`], with the request it answers.
+#[derive(Clone, Debug)]
+pub struct InboxFile {
+    pub request: FileRequest,
+    pub name: String,
+    pub bytes: Vec<u8>,
+}
 
 /// Platform services injected by the host (desktop or web).
 #[derive(Default)]
@@ -52,14 +93,14 @@ pub struct Services {
     pub pick_save: Option<PickFn>,
     pub read: Option<ReadFn>,
     pub write: Option<WriteFn>,
-    /// Asynchronous open dialog for a purpose (`open`, `place`); the chosen file arrives later
-    /// through [`Services::inbox`]. Used when `pick_open` is unset (web).
+    /// Asynchronous open dialog for a request; the chosen file arrives later through
+    /// [`Services::inbox`] with the same request. Used when `pick_open` is unset (web).
     pub open_async: Option<OpenAsyncFn>,
     /// Hand bytes to the user as a named file (browser download). When set, Save uses it
     /// instead of writing to a path.
     pub download: Option<DownloadFn>,
-    /// Files delivered asynchronously, drained every frame: `.designcraft` → `file.openBytes`,
-    /// anything else → `file.place`.
+    /// Files delivered asynchronously, drained every frame and handled as their request asks
+    /// (see [`FilePurpose`]).
     pub inbox: Option<Inbox>,
 }
 
@@ -546,29 +587,68 @@ impl DesignApp {
                 None => Ok(Value::Null),
             };
         }
+        let request = self.file_request(FilePurpose::from_name(purpose));
         if let Some(open) = self.services.open_async.as_mut() {
-            open(purpose);
+            open(request);
         }
         Ok(Value::Null)
     }
 
-    /// Open or place files delivered through the inbox.
+    /// A request for a file, made from the active document.
+    pub fn file_request(&self, purpose: FilePurpose) -> FileRequest {
+        FileRequest { purpose, doc: self.session.active().map(|d| d.uid) }
+    }
+
+    /// Handle the files delivered through the inbox, each as its request asks.
     fn drain_inbox(&mut self) {
         let Some(inbox) = self.services.inbox.clone() else { return };
         let files = std::mem::take(&mut *inbox.lock().unwrap_or_else(|e| e.into_inner()));
-        for (name, bytes) in files {
-            let b64 = designcraft_engine::cmd::base64_encode(&bytes);
-            let lower = name.to_ascii_lowercase();
-            let r = if lower.ends_with(".ase") {
-                self.run("swatch.load", json!({"base64": b64}))
-            } else if lower.ends_with(".designcraft") || lower.ends_with(".idml") {
-                let title = name.rsplit_once('.').map_or(name.as_str(), |(stem, _)| stem);
-                self.run("file.openBytes", json!({"name": title, "base64": b64}))
-            } else {
-                self.run("file.place", json!({"name": name, "base64": b64}))
-            };
-            if let Err(e) = r {
+        for file in files {
+            let name = file.name.clone();
+            if let Err(e) = self.receive(file) {
                 self.status(format!("{name}: {e}"));
+            }
+        }
+    }
+
+    /// Open, place or load a delivered file. Place and Load Swatches go into the document they
+    /// were chosen in (made active again), and change nothing if it has been closed since; a
+    /// dropped file opens when it is a document and goes into the active document otherwise.
+    fn receive(&mut self, file: InboxFile) -> Result<Value, String> {
+        let InboxFile { request, name, bytes } = file;
+        let lower = name.to_ascii_lowercase();
+        let purpose = match request.purpose {
+            FilePurpose::Drop if lower.ends_with(".ase") => FilePurpose::Swatches,
+            FilePurpose::Drop if lower.ends_with(".designcraft") || lower.ends_with(".idml") => FilePurpose::Open,
+            p => p,
+        };
+        if matches!(request.purpose, FilePurpose::Place | FilePurpose::Swatches)
+            && let Some(uid) = request.doc
+        {
+            let Some(index) = self.session.documents().iter().position(|d| d.uid == uid) else {
+                return Err("cancelled: the document it was chosen in has been closed".into());
+            };
+            if self.session.active_index() != Some(index) {
+                self.run("file.activate", json!({"index": index}))?;
+            }
+        }
+        // Image Import Options: a multi-page PDF asks which page.
+        let pdf_pages =
+            if purpose == FilePurpose::Place && lower.ends_with(".pdf") { designcraft_render::pdf_page_count(&bytes).unwrap_or(1) } else { 1 };
+        match purpose {
+            FilePurpose::Open => {
+                let title = name.rsplit_once('.').map_or(name.as_str(), |(stem, _)| stem);
+                self.run("file.openBytes", json!({"name": title, "base64": designcraft_engine::cmd::base64_encode(&bytes)}))
+            }
+            FilePurpose::Swatches => self.run("swatch.load", json!({"base64": designcraft_engine::cmd::base64_encode(&bytes)})),
+            FilePurpose::Place if pdf_pages > 1 => {
+                let mut dialog = dialogs::Dialog::new("pdfImport", json!({"name": name, "page": "1", "pages": pdf_pages}));
+                dialog.bytes = Some(std::sync::Arc::new(bytes));
+                self.ui.dialog = Some(dialog);
+                Ok(Value::Null)
+            }
+            FilePurpose::Place | FilePurpose::Drop => {
+                self.run("file.place", json!({"name": name, "base64": designcraft_engine::cmd::base64_encode(&bytes)}))
             }
         }
     }
@@ -867,6 +947,9 @@ pub fn now_ms() -> f64 {
         0.0
     }
 }
+
+#[cfg(test)]
+mod tests_inbox;
 
 #[cfg(test)]
 mod tests {

@@ -7,7 +7,8 @@
 //! Differences from the desktop app:
 //! - no TCP control channel (browsers can't listen on sockets);
 //! - File → Open / Place use the browser file picker; bytes arrive asynchronously through
-//!   `Services::inbox` (`.designcraft` → `file.openBytes`, images → `file.place`);
+//!   `Services::inbox` with the request that asked for them (Open → `file.openBytes`, Place →
+//!   `file.place` into the document Place was chosen in);
 //! - Save and Export trigger a browser download;
 //! - dropped files are read asynchronously by `web::WebShell` and delivered through the inbox.
 //!
