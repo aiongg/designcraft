@@ -222,7 +222,8 @@ fn main() -> eframe::Result {
     if let (Some(logger), Some(dir)) = (logger, config_dir()) {
         match logger.attach_dir(&dir.join("logs")) {
             Ok(path) => log::info!("DesignCraft {}, log file {}", env!("CARGO_PKG_VERSION"), path.display()),
-            Err(e) => eprintln!("designcraft: no log file: {e}"),
+            // Standard error only by now (`attach_dir` gave up on the file); unlike `eprintln!`, never panics.
+            Err(e) => log::warn!("no log file: {e}"),
         }
     }
     let mut options = eframe::NativeOptions {
