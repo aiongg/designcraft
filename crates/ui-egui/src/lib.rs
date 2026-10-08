@@ -423,6 +423,9 @@ pub struct DesignApp {
     pub last_recovery: f64,
     /// The egui context (set by the first frame): copied text goes to the system clipboard through it.
     egui_ctx: Option<egui::Context>,
+    /// A control-channel request is being handled: commands it runs never read or write the
+    /// user's system clipboard (a control client must not see or replace it).
+    pub(crate) in_control: bool,
 }
 
 impl DesignApp {
@@ -460,6 +463,7 @@ impl DesignApp {
             last_time: 0.0,
             last_recovery: 0.0,
             egui_ctx: None,
+            in_control: false,
         }
     }
 
@@ -503,13 +507,15 @@ impl DesignApp {
         if let Some(r) = menus::run_ui(self, id, &params) {
             return r;
         }
-        let params = self.with_system_clipboard(id, params);
+        // Only user-initiated runs touch the system clipboard, never the control channel's.
+        let system_clipboard = !self.in_control;
+        let params = if system_clipboard { self.with_system_clipboard(id, params) } else { params };
         let r = self.session.execute(id, &params).map_err(|e| e.to_string());
         self.after_engine();
         match &r {
             Err(e) => self.status(e.clone()),
             // Copied text goes to the system clipboard too, whichever way Copy was chosen.
-            Ok(v) if matches!(id, "edit.copy" | "edit.cut") => {
+            Ok(v) if system_clipboard && matches!(id, "edit.copy" | "edit.cut") => {
                 if let (Some(t), Some(ctx)) = (v.get("text").and_then(Value::as_str), &self.egui_ctx) {
                     ctx.copy_text(t.to_string());
                     ctx.request_repaint();

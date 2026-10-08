@@ -810,7 +810,7 @@ pub(crate) fn format_chars(s: &mut Session, attrs: &Value) -> Result<Value> {
         let doc = s.doc()?.uid;
         let mut f = typing_format(s).cloned().unwrap_or(TypingFormat { doc, at, attrs: CharAttrs::default(), cleared: vec![] });
         f.attrs.merge(&a);
-        f.cleared.retain(|k| !attrs.get(k).is_some_and(|v| !v.is_null()) && !cleared.contains(k));
+        f.cleared.retain(|k| attrs.get(k).is_none_or(|v| v.is_null()) && !cleared.contains(k));
         f.cleared.extend(cleared);
         s.typing_format = Some(f);
         return ok();
