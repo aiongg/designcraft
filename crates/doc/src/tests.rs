@@ -135,6 +135,34 @@ fn removing_a_frame_from_its_thread_keeps_the_text_in_the_others() {
 }
 
 #[test]
+fn a_frame_removed_from_a_vertical_thread_stays_vertical() {
+    let mut d = doc();
+    let lid = d.default_layer();
+    let (a, sa) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(10.0, 10.0, 100.0, 100.0), lid, "縦書き", ParaFormat::default()).unwrap();
+    let (b, _) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(110.0, 10.0, 200.0, 100.0), lid, "", ParaFormat::default()).unwrap();
+    d.story_mut(sa).unwrap().vertical = true;
+    d.thread(a, b).unwrap();
+    d.remove_from_thread(b).unwrap();
+    d.check().unwrap();
+    assert!(d.frame_vertical(d.item(a).unwrap()));
+    assert!(d.frame_vertical(d.item(b).unwrap()), "the removed frame keeps the story's direction");
+}
+
+#[test]
+fn a_frame_removed_from_a_right_to_left_thread_keeps_its_column_order() {
+    let mut d = doc();
+    let lid = d.default_layer();
+    let (a, sa) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(10.0, 10.0, 100.0, 100.0), lid, "نص", ParaFormat::default()).unwrap();
+    let (b, _) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(110.0, 10.0, 200.0, 100.0), lid, "", ParaFormat::default()).unwrap();
+    d.story_mut(sa).unwrap().direction = crate::TextDirection::RightToLeft;
+    d.thread(a, b).unwrap();
+    d.remove_from_thread(b).unwrap();
+    d.check().unwrap();
+    let own = d.item(b).unwrap().text_frame().unwrap().story;
+    assert_eq!(d.story(own).unwrap().direction, crate::TextDirection::RightToLeft);
+}
+
+#[test]
 fn frames_keep_their_story_direction_through_threading() {
     let mut d = doc();
     let lid = d.default_layer();
