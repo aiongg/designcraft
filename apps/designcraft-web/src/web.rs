@@ -155,7 +155,7 @@ fn download(path: &str, bytes: &[u8]) -> Result<(), String> {
     let document = window.document().ok_or("no document")?;
     let parts = js_sys::Array::of1(&js_sys::Uint8Array::from(bytes));
     let opts = web_sys::BlobPropertyBag::new();
-    opts.set_type(mime_for(&name));
+    opts.set_type(crate::mime::mime_for(&name));
     let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &opts).map_err(js)?;
     let url = web_sys::Url::create_object_url_with_blob(&blob).map_err(js)?;
     let a: web_sys::HtmlAnchorElement = document.create_element("a").map_err(js)?.dyn_into().map_err(|_| "not an anchor")?;
@@ -172,15 +172,4 @@ fn download(path: &str, bytes: &[u8]) -> Result<(), String> {
     });
     window.set_timeout_with_callback_and_timeout_and_arguments_0(revoke.unchecked_ref(), 10_000).map_err(js)?;
     Ok(())
-}
-
-fn mime_for(name: &str) -> &'static str {
-    match name.rsplit('.').next().map(str::to_ascii_lowercase).as_deref() {
-        Some("png") => "image/png",
-        Some("jpg" | "jpeg") => "image/jpeg",
-        Some("pdf") => "application/pdf",
-        Some("designcraft") => "application/json",
-        Some("idml") => "application/vnd.adobe.indesign-idml-package",
-        _ => "application/octet-stream",
-    }
 }
