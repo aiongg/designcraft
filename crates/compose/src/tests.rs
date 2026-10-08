@@ -2728,3 +2728,29 @@ fn vertical_lines_fit_the_em_box() {
         assert!((l.baseline - col.y0 - ascent).abs() < 1e-9, "{family}: {} {}", l.baseline, col.y0);
     }
 }
+
+/// A drop cap set in one of the document's own fonts measures its side bearing in that font.
+#[test]
+fn drop_cap_in_a_document_font_aligns_its_left_edge() {
+    use designcraft_geom::Shape as _;
+    const FAMILY: &str = "DocFont Drop Cap";
+    let text = format!("Once {LOREM}");
+    let mut chars: Vec<char> = text.chars().collect();
+    chars.sort_unstable();
+    chars.dedup();
+    let folder = std::env::temp_dir().join(format!("dc-compose-dropcap-docfont-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("dropcap.ttf"), designcraft_fonts::testing::font_with_glyph(FAMILY, &chars, 'O').unwrap()).unwrap();
+    let scope = designcraft_fonts::FontDb::global().load_document_fonts(&folder).scope;
+    let para = ParaAttrs { left_indent: Some(10.0), ..drop_cap(2, 1) };
+    let (mut d, sid, _) = doc_with(&text, Rect::new(0.0, 0.0, 300.0, 1000.0), para);
+    d.font_scope = scope;
+    d.story_mut(sid).unwrap().format_chars(0..text.len(), |f| f.over.font_family = Some(FAMILY.into()));
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let dc = &all_lines(&cs)[0].glyphs[0];
+    assert_eq!(dc.face.family, FAMILY);
+    let ink_left = dc.x + designcraft_fonts::FontDb::global().outline(dc.face.get(), dc.gid).bounding_box().x0 * dc.sx;
+    assert!(ink_left - dc.x > 0.5, "the O has a visible side bearing");
+    assert!((ink_left - 10.0).abs() < 1e-6, "ink at {ink_left}");
+    let _ = std::fs::remove_dir_all(&folder);
+}
