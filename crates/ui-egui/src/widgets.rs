@@ -587,6 +587,8 @@ pub fn segmented(ui: &mut Ui, labels: &[&str], active: usize, width: f32) -> Opt
 pub fn overflow_scrolling(ui: &mut Ui) {
     let style = ui.style_mut();
     style.always_scroll_the_only_direction = true;
+    // A caption at the end of a scrolled row gets only what is left of it: extend, don't wrap.
+    style.wrap_mode = Some(egui::TextWrapMode::Extend);
     let s = &mut style.spacing.scroll;
     *s = egui::style::ScrollStyle::floating();
     s.bar_width = 6.0;
