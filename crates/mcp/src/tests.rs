@@ -226,6 +226,26 @@ fn type_tool_gesture_then_typing() {
 }
 
 #[test]
+fn type_text_after_text_select_or_place_caret() {
+    for command in ["text.select", "text.placeCaret"] {
+        let mut s = server();
+        ok(&mut s, "new_document", json!({"preset": "A4", "margins": 36}));
+        // No caret yet: type_text says how to place one.
+        let r = call(&mut s, "type_text", json!({"text": "X"}));
+        assert_eq!(r["isError"], true);
+        assert!(text_of(&r).contains("text.select"), "{r}");
+        let f = ok(&mut s, "execute", json!({"command": "frame.create", "params": {"rect": [36, 36, 559, 200], "content": "text", "text": "Hello"}}));
+        let params = match command {
+            "text.select" => json!({"story": f["story"], "anchor": 5, "focus": 5}),
+            _ => json!({"frame": f["id"], "point": [100, 50]}),
+        };
+        ok(&mut s, "execute", json!({"command": command, "params": params}));
+        ok(&mut s, "type_text", json!({"text": "X"}));
+        assert_eq!(ok(&mut s, "get_story", json!({"story": f["story"]}))["text"], "HelloX", "{command}");
+    }
+}
+
+#[test]
 fn batch_stops_on_first_error() {
     let mut s = server();
     let r = call(

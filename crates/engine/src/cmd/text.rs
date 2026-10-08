@@ -39,6 +39,7 @@ pub fn specs() -> Vec<CommandSpec> {
             let f = floor_char_boundary(text, p.get("focus").and_then(Value::as_u64).map(|v| v as usize).unwrap_or(a));
             st.selection = Selection::text(TextSel { story: sid, anchor: a, focus: f, frame: None, cell: None });
             st.revision += 1;
+            type_at_caret(s);
             ok()
         }),
         cmd!("text.insert", "Type", [], None, "{text, raw?: bool (no typographer's quotes)} — replaces the selected text", has_text, insert),
@@ -318,7 +319,16 @@ fn place(s: &mut Session, p: &Value, extend: bool) -> Result<Value> {
     };
     st.selection = Selection::text(t);
     st.revision += 1;
+    type_at_caret(s);
     Ok(json!({"story": sid.0, "pos": b, "cell": cell}))
+}
+
+/// A caret placed by a command takes the keyboard: the Type tool becomes active unless the
+/// active tool already types into the selected text (the vertical Type tool).
+fn type_at_caret(s: &mut Session) {
+    if s.active().is_some_and(|d| d.selection.text.is_some()) && !s.wants_text() {
+        s.set_tool("type");
+    }
 }
 
 fn release(s: &mut Session, p: &Value) -> Result<Value> {

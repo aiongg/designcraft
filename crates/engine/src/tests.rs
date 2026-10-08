@@ -42,6 +42,22 @@ fn smart_quotes_and_formatting() {
 }
 
 #[test]
+fn a_caret_from_a_command_activates_a_type_tool() {
+    let mut s = session();
+    let r = s.execute("frame.create", &json!({"rect": [36, 36, 300, 200], "content": "text", "text": "Hello"})).unwrap();
+    assert_eq!(s.tool_id(), "selection");
+    s.execute("text.select", &json!({"story": r["story"], "anchor": 5, "focus": 5})).unwrap();
+    assert_eq!(s.tool_id(), "type");
+    s.set_tool("selection");
+    s.execute("text.placeCaret", &json!({"frame": r["id"], "point": [100, 50]})).unwrap();
+    assert_eq!(s.tool_id(), "type");
+    // A tool that already types into the selection stays.
+    s.set_tool("verticalType");
+    s.execute("text.select", &json!({"story": r["story"], "anchor": 0, "focus": 0})).unwrap();
+    assert_eq!(s.tool_id(), "verticalType");
+}
+
+#[test]
 fn tool_gesture_creates_one_undo_step() {
     let mut s = session();
     s.set_tool("rectangle");
