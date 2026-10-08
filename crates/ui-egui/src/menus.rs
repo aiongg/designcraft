@@ -1771,6 +1771,20 @@ pub fn activate(app: &mut DesignApp, id: &str, params: &Value) {
         app.ui.dialog = Some(crate::dialogs::Dialog::new("textFrameOptions", json!({})));
         return;
     }
+    // New Paragraph/Character Style…: the style options for the new style.
+    if params.is_null() && matches!(id, "style.paragraph.create" | "style.character.create") {
+        crate::dialogs::open_new_style(app, id == "style.paragraph.create");
+        return;
+    }
+    // Paragraph/Character Style Options…: those of the selected text's style.
+    if params.is_null() && matches!(id, "style.paragraph.edit" | "style.character.edit") {
+        let para = id == "style.paragraph.edit";
+        let cur = crate::panels::text_attrs(app).and_then(|a| a[if para { "paragraphStyle" } else { "characterStyle" }].as_str().map(str::to_string));
+        if let Some(name) = cur {
+            crate::dialogs::open_style_options(app, para, &name);
+            return;
+        }
+    }
     if params.is_null()
         && ui_label(id).is_none()
         && let Some(c) = designcraft_engine::find_command(id)
