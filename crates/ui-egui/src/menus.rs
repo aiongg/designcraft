@@ -1753,6 +1753,44 @@ pub fn activate(app: &mut DesignApp, id: &str, params: &Value) {
     let _ = app.run(id, p);
 }
 
+/// A native menu bar item was chosen (macOS): like [`activate`], except that the menu bar takes
+/// ⌘A, ⌘C, ⌘X, ⌘V, ⌘Z and ⇧⌘Z before the window sees them, so while a text field has keyboard
+/// focus, Select All, Copy, Cut, Paste, Undo and Redo act on that field, as in any Mac app.
+pub fn activate_native(app: &mut DesignApp, ctx: &egui::Context, id: &str, params: &Value) {
+    if !(ctx.text_edit_focused() && params.is_null() && forward_to_text_field(app, ctx, id)) {
+        activate(app, id, params);
+    }
+}
+
+/// Whether a native menu bar item can be chosen: as in the in-window menus, but the editing
+/// commands a focused text field takes are always available to it.
+pub fn native_menu_enabled(app: &DesignApp, ctx: &egui::Context, id: &str) -> bool {
+    (ctx.text_edit_focused() && TEXT_FIELD_COMMANDS.contains(&id)) || menu_enabled(app, id)
+}
+
+/// The editing commands a focused text field takes from the native menu bar.
+const TEXT_FIELD_COMMANDS: [&str; 6] = ["edit.selectAll", "edit.copy", "edit.cut", "edit.paste", "edit.undo", "edit.redo"];
+
+/// Hand a standard editing command to the focused text field as next frame's input; false when
+/// `id` isn't one of them.
+fn forward_to_text_field(app: &mut DesignApp, ctx: &egui::Context, id: &str) -> bool {
+    let key = |key: egui::Key, modifiers: egui::Modifiers| {
+        [true, false].map(|pressed| egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers })
+    };
+    match id {
+        "edit.selectAll" => app.synthetic.extend(key(egui::Key::A, egui::Modifiers::COMMAND)),
+        "edit.undo" => app.synthetic.extend(key(egui::Key::Z, egui::Modifiers::COMMAND)),
+        "edit.redo" => app.synthetic.extend(key(egui::Key::Z, egui::Modifiers::COMMAND | egui::Modifiers::SHIFT)),
+        "edit.copy" => app.synthetic.push(egui::Event::Copy),
+        "edit.cut" => app.synthetic.push(egui::Event::Cut),
+        // Only the integration reads the system clipboard: it answers with an `Event::Paste`.
+        "edit.paste" => ctx.send_viewport_cmd(egui::ViewportCommand::RequestPaste),
+        _ => return false,
+    }
+    ctx.request_repaint();
+    true
+}
+
 /// The menu bar contents (inside the app bar; macOS uses the native menu instead).
 pub fn menu_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
     let lang = app.ui.language.clone();
@@ -2466,6 +2504,129 @@ mod tests {
         run_ui(&mut app, "window.dockPanel", &json!({"panel": "swatches"})).unwrap().unwrap();
         assert!(app.ui.floating.is_empty());
         assert!(run_ui(&mut app, "window.floatPanel", &json!({"panel": "nope"})).unwrap().is_err());
+    }
+
+    /// One frame as the desktop app runs it: queued synthetic input, then the native menu item
+    /// chosen during the frame (`menu`), then the app's logic and ui.
+    fn native_frame(app: &mut crate::DesignApp, ctx: &egui::Context, events: Vec<egui::Event>, menu: Option<&str>) -> egui::FullOutput {
+        let mut input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))),
+            events,
+            ..Default::default()
+        };
+        app.raw_input_hook(&mut input);
+        let mut menu = menu;
+        let mut out = ctx.run_ui(input, |ui| {
+            let ctx = ui.ctx().clone();
+            if let Some(id) = menu.take() {
+                activate_native(app, &ctx, id, &Value::Null);
+            }
+            app.logic(&ctx);
+            app.ui(ui);
+        });
+        out.textures_delta.clear();
+        out
+    }
+
+    /// A document with two frames, nothing selected, and Quick Apply's search field focused
+    /// holding `text`.
+    fn app_with_focused_field(ctx: &egui::Context, text: &str) -> crate::DesignApp {
+        let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.session.execute("file.new", &json!({})).unwrap();
+        app.session.execute("frame.create", &json!({"rect": [36, 36, 200, 200]})).unwrap();
+        app.session.execute("frame.create", &json!({"rect": [236, 36, 400, 200]})).unwrap();
+        app.session.execute("edit.deselectAll", &json!({})).unwrap();
+        app.ui.palette = Some(text.into());
+        for _ in 0..3 {
+            native_frame(&mut app, ctx, vec![], None);
+        }
+        assert!(ctx.text_edit_focused());
+        app
+    }
+
+    fn field_selection(ctx: &egui::Context) -> Option<(usize, usize)> {
+        let id = ctx.memory(|m| m.focused())?;
+        let r = egui::TextEdit::load_state(ctx, id)?.cursor.char_range()?;
+        Some((r.primary.index.min(r.secondary.index).into(), r.primary.index.max(r.secondary.index).into()))
+    }
+
+    fn document_items(app: &crate::DesignApp) -> (usize, usize) {
+        let d = app.session.active().unwrap();
+        (d.doc.spreads.iter().flat_map(|sp| &sp.items).count(), d.selection.items.len())
+    }
+
+    #[test]
+    fn native_select_all_selects_the_focused_fields_text() {
+        // The Mac menu bar takes ⌘A before the window sees it (#30).
+        let ctx = egui::Context::default();
+        let mut app = app_with_focused_field(&ctx, "frame");
+        native_frame(&mut app, &ctx, vec![], Some("edit.selectAll"));
+        native_frame(&mut app, &ctx, vec![], None);
+        assert_eq!(field_selection(&ctx), Some((0, 5)), "the field's whole text is selected");
+        assert_eq!(document_items(&app), (2, 0), "the document selection is unchanged");
+    }
+
+    #[test]
+    fn native_paste_and_copy_act_on_the_focused_field() {
+        let ctx = egui::Context::default();
+        let mut app = app_with_focused_field(&ctx, "frame");
+        native_frame(&mut app, &ctx, vec![], Some("edit.selectAll"));
+        native_frame(&mut app, &ctx, vec![], None);
+        // Copy puts the field's selected text on the clipboard.
+        native_frame(&mut app, &ctx, vec![], Some("edit.copy"));
+        let out = native_frame(&mut app, &ctx, vec![], None);
+        assert!(out.platform_output.commands.contains(&egui::OutputCommand::CopyText("frame".into())), "{:?}", out.platform_output.commands);
+        // Paste asks the integration for the clipboard, which it hands to the field as a paste.
+        let out = native_frame(&mut app, &ctx, vec![], Some("edit.paste"));
+        let commands = &out.viewport_output[&egui::ViewportId::ROOT].commands;
+        assert!(commands.contains(&egui::ViewportCommand::RequestPaste), "{commands:?}");
+        native_frame(&mut app, &ctx, vec![egui::Event::Paste("text".into())], None);
+        assert_eq!(app.ui.palette.as_deref(), Some("text"));
+        assert_eq!(document_items(&app), (2, 0), "nothing was pasted into the document");
+    }
+
+    #[test]
+    fn native_undo_and_redo_act_on_the_focused_field() {
+        let ctx = egui::Context::default();
+        let mut app = app_with_focused_field(&ctx, "");
+        native_frame(&mut app, &ctx, vec![egui::Event::Text("abc".into())], None);
+        assert_eq!(app.ui.palette.as_deref(), Some("abc"));
+        native_frame(&mut app, &ctx, vec![], Some("edit.undo"));
+        native_frame(&mut app, &ctx, vec![], None);
+        assert_eq!(app.ui.palette.as_deref(), Some(""), "the field's typing is undone");
+        assert_eq!(document_items(&app), (2, 0), "the document's last frame is still there");
+        native_frame(&mut app, &ctx, vec![], Some("edit.redo"));
+        native_frame(&mut app, &ctx, vec![], None);
+        assert_eq!(app.ui.palette.as_deref(), Some("abc"));
+        assert_eq!(document_items(&app), (2, 0));
+    }
+
+    #[test]
+    fn native_editing_items_are_enabled_for_a_focused_field() {
+        let ctx = egui::Context::default();
+        let mut app = app_with_focused_field(&ctx, "frame");
+        // Nothing is selected in the document, so its Copy and Cut are off; the field's are on.
+        assert!(!menu_enabled(&app, "edit.copy") && !menu_enabled(&app, "edit.cut"));
+        for id in ["edit.selectAll", "edit.copy", "edit.cut", "edit.paste", "edit.undo", "edit.redo"] {
+            assert!(native_menu_enabled(&app, &ctx, id), "{id}");
+        }
+        assert!(!native_menu_enabled(&app, &ctx, "edit.duplicate"), "other items follow the document");
+        app.ui.palette = None;
+        native_frame(&mut app, &ctx, vec![], None);
+        native_frame(&mut app, &ctx, vec![], None);
+        assert!(!native_menu_enabled(&app, &ctx, "edit.copy"), "without a focused field, as the document says");
+    }
+
+    #[test]
+    fn native_select_all_without_a_focused_field_selects_the_documents_items() {
+        let ctx = egui::Context::default();
+        let mut app = app_with_focused_field(&ctx, "frame");
+        app.ui.palette = None;
+        native_frame(&mut app, &ctx, vec![], None);
+        native_frame(&mut app, &ctx, vec![], None);
+        assert!(!ctx.text_edit_focused());
+        native_frame(&mut app, &ctx, vec![], Some("edit.selectAll"));
+        assert_eq!(document_items(&app), (2, 2));
     }
 
     #[test]
