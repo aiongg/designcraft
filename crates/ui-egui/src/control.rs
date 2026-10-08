@@ -183,6 +183,7 @@ pub fn handle(app: &mut DesignApp, ctx: &egui::Context, req: &ControlRequest) ->
             let f = |k: &str| p.get(k).and_then(Value::as_f64).unwrap_or(0.0) as f32;
             let button = match s("button") {
                 Some("right") | Some("secondary") => egui::PointerButton::Secondary,
+                Some("middle") => egui::PointerButton::Middle,
                 _ => egui::PointerButton::Primary,
             };
             let b = |n: &str| p.get(n).and_then(Value::as_bool).unwrap_or(false);

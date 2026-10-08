@@ -46,7 +46,7 @@ pub fn save(s: &Session, dir: &Path) -> Result<usize> {
             continue;
         }
         let (doc, meta) = files(dir, d.uid);
-        let bytes = crate::cmd::to_bytes(&d.doc);
+        let bytes = crate::cmd::to_bytes(d.preview_stash.as_deref().unwrap_or(d.doc.as_ref()));
         // Write then rename, so a crash mid-write never leaves a torn file.
         let tmp = doc.with_extension("tmp");
         std::fs::write(&tmp, &bytes).and_then(|_| std::fs::rename(&tmp, &doc)).map_err(|e| EngineError::Other(format!("{}: {e}", doc.display())))?;
@@ -86,12 +86,15 @@ pub fn open(s: &mut Session, dir: &Path) -> Result<Vec<usize>> {
     for (uid, meta) in list(dir) {
         let (doc, _) = files(dir, uid);
         let Ok(bytes) = std::fs::read(&doc) else { continue };
-        let d = match crate::cmd::from_bytes(&bytes) {
+        let mut d = match crate::cmd::from_bytes(&bytes) {
             Ok(d) => d,
             Err(_) => continue,
         };
         let path = meta.get("path").and_then(Value::as_str).map(str::to_string);
+        // Skipped font files are logged; the document opens without them.
+        let fonts = path.as_deref().and_then(|p| crate::cmd::load_document_fonts(&mut d, p).0);
         let mut st = DocState::new(d, path);
+        st.fonts = fonts;
         // Unsaved: the copy on disk (if any) is older than what was recovered.
         st.saved_doc = std::sync::Arc::new((*st.doc).clone());
         st.revision += 1;

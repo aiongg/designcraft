@@ -518,6 +518,7 @@ fn preferences(app: &crate::DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
                 "type" => {
                     crate::rtl::label(ui, egui::RichText::new(crate::i18n::tr(&app.ui.language, "Type Options")).font(semibold(12.0)));
                     check(ui, d, "typographersQuotes", crate::i18n::tr(&app.ui.language, "Use Typographer's Quotes"));
+                    check(ui, d, "showFontNamesInEnglish", crate::i18n::tr(&app.ui.language, "Show Font Names in English"));
                     ui.add_space(6.0);
                     ui.label(crate::rtl::widget(
                         ui,
@@ -536,6 +537,11 @@ fn preferences(app: &crate::DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
                     check(ui, d, "highlightHj", crate::i18n::tr(&app.ui.language, "H&J Violations"));
                     check(ui, d, "highlightCustomTracking", crate::i18n::tr(&app.ui.language, "Custom Tracking/Kerning"));
                     check(ui, d, "highlightSubstitutedFonts", crate::i18n::tr(&app.ui.language, "Substituted Fonts"));
+                    if d.fields.contains_key("glyphFallback") {
+                        ui.add_space(6.0);
+                        crate::rtl::label(ui, egui::RichText::new(crate::i18n::tr(&app.ui.language, "Missing Glyphs")).font(semibold(12.0)));
+                        check(ui, d, "glyphFallback", crate::i18n::tr(&app.ui.language, "Draw Missing Glyphs from Fallback Fonts"));
+                    }
                 }
                 "advancedType" => {
                     ui.label(crate::rtl::widget(
@@ -1524,7 +1530,7 @@ pub fn confirm(app: &mut DesignApp) -> Result<Value, String> {
         "preferences" => {
             app.run(
                 "prefs.set",
-                json!({"scaleStrokes": d.b("scaleStrokes"), "dimensionsIncludeStroke": d.b("dimensionsIncludeStroke"), "transformationsAreTotals": d.b("transformationsAreTotals"), "absolutePageNumbers": d.b("absolutePageNumbers"), "highlightHj": d.b("highlightHj"), "highlightKeeps": d.b("highlightKeeps"), "highlightCustomTracking": d.b("highlightCustomTracking"), "highlightSubstitutedFonts": d.b("highlightSubstitutedFonts"), "richBlackOutput": d.b("richBlackOutput"), "typographersQuotes": d.b("typographersQuotes"), "smartTextReflow": d.b("smartTextReflow"),
+                json!({"scaleStrokes": d.b("scaleStrokes"), "dimensionsIncludeStroke": d.b("dimensionsIncludeStroke"), "transformationsAreTotals": d.b("transformationsAreTotals"), "absolutePageNumbers": d.b("absolutePageNumbers"), "highlightHj": d.b("highlightHj"), "highlightKeeps": d.b("highlightKeeps"), "highlightCustomTracking": d.b("highlightCustomTracking"), "highlightSubstitutedFonts": d.b("highlightSubstitutedFonts"), "richBlackOutput": d.b("richBlackOutput"), "typographersQuotes": d.b("typographersQuotes"), "showFontNamesInEnglish": d.b("showFontNamesInEnglish"), "smartTextReflow": d.b("smartTextReflow"),
                     "autocorrect": d.b("autocorrect"), "showAddedText": d.b("showAddedText"), "showNoteAnchors": d.b("showNoteAnchors"),
                     "recoveryMinutes": d.n("recoveryMinutes").unwrap_or(0.5),
                     "autocorrectList": d.s("autocorrectText").lines().filter_map(|l| {
@@ -1607,6 +1613,7 @@ pub fn confirm(app: &mut DesignApp) -> Result<Value, String> {
             }
             doc["advancedType"] = adv;
             doc["overprintBlack"] = json!(d.b("overprintBlack"));
+            doc["glyphFallback"] = json!(d.b("glyphFallback"));
             app.run("document.preferences", doc)
         }
         "newWorkspace" => app.run("window.newWorkspace", json!({"name": d.s("name")})),
@@ -1980,21 +1987,21 @@ fn paragraph_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
                 }
             }
             "chars" => {
+                let fonts = crate::panels::fonts(app);
+                let menu = crate::panels::font_menu(app);
                 egui::Grid::new("psc").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
                     crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Font Family:"));
                     let fam = cur(d, "c.fontFamily", &cv["fontFamily"]).as_str().unwrap_or("").to_string();
-                    egui::ComboBox::from_id_salt("psfam").selected_text(&fam).width(200.0).show_ui(ui, |ui| {
-                        for f in designcraft_fonts::FontDb::global().families() {
-                            if ui.selectable_label(f == fam, &f).clicked() {
-                                d.fields.insert("c.fontFamily".into(), json!(f));
-                            }
+                    egui::ComboBox::from_id_salt("psfam").selected_text(crate::panels::font_label(app, &menu, &fam)).width(200.0).show_ui(ui, |ui| {
+                        if let Some(f) = crate::panels::font_menu_rows(app, ui, &menu, &fam) {
+                            d.fields.insert("c.fontFamily".into(), json!(f));
                         }
                     });
                     ui.end_row();
                     crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Font Style:"));
                     let sty = cur(d, "c.fontStyle", &cv["fontStyle"]).as_str().unwrap_or("").to_string();
                     egui::ComboBox::from_id_salt("pssty").selected_text(&sty).width(200.0).show_ui(ui, |ui| {
-                        for s in designcraft_fonts::FontDb::global().styles(&fam) {
+                        for s in fonts.styles(&fam) {
                             if ui.selectable_label(s == sty, &s).clicked() {
                                 d.fields.insert("c.fontStyle".into(), json!(s));
                             }
@@ -2103,6 +2110,15 @@ fn paragraph_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
                     let mut k = cur(d, "p.kashidas", &pv["kashidas"]).as_bool().unwrap_or(true);
                     if ui.checkbox(&mut k, crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "In justified Arabic text"))).changed() {
                         d.fields.insert("p.kashidas".into(), json!(k));
+                    }
+                    ui.end_row();
+                    crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Korean Line Breaks:"));
+                    let mut kb = cur(d, "p.koreanCharBreaks", &pv["koreanCharBreaks"]).as_bool().unwrap_or(false);
+                    if ui
+                        .checkbox(&mut kb, crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Between syllables (not only at spaces)")))
+                        .changed()
+                    {
+                        d.fields.insert("p.koreanCharBreaks".into(), json!(kb));
                     }
                     ui.end_row();
                 });
@@ -2397,10 +2413,14 @@ pub fn command_fields(doc: &str) -> Vec<CommandField> {
     let ident = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && !s.starts_with(|c: char| c.is_ascii_digit());
     let mut out = Vec::new();
     for part in parts {
+        // `key`, `key?`, `key: spec` or `key (spec)`: the key is the leading word.
         let part = part.trim();
-        let (k, spec) = match part.split_once(':') {
-            Some((k, v)) => (k.trim(), v.trim()),
-            None => (part, ""),
+        let k_end = part.find(|c: char| c.is_whitespace() || c == ':' || c == '(').unwrap_or(part.len());
+        let (k, rest) = part.split_at(k_end);
+        let rest = rest.trim_start();
+        let spec = match rest.strip_prefix(':') {
+            Some(v) => v.trim(),
+            None => rest.strip_prefix('(').and_then(|r| r.strip_suffix(')')).unwrap_or(rest).trim(),
         };
         let optional = k.ends_with('?');
         let key = k.trim_end_matches('?');
@@ -2625,9 +2645,10 @@ fn find_font(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
     });
     ui.add_space(8.0);
     crate::rtl::label(ui, egui::RichText::new(crate::i18n::tr(&app.ui.language, "Replace With")).font(semibold(12.0)));
-    let db = designcraft_fonts::FontDb::global();
-    let families = db.families();
-    let fam_opts: Vec<(&str, &str)> = families.iter().map(|f| (f.as_str(), f.as_str())).collect();
+    let db = crate::panels::fonts(app);
+    let menu = crate::panels::font_menu(app);
+    let english = app.session.prefs.show_font_names_in_english;
+    let fam_opts: Vec<(&str, &str)> = menu.iter().map(|f| (f.family.as_str(), f.label(english))).collect();
     egui::Grid::new("ff_to").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
         crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Font Family:"));
         combo(ui, d, "toFamily", &fam_opts);
@@ -2660,6 +2681,18 @@ mod tests {
         assert!(f[4].boolean);
         assert!(command_fields("{}").is_empty());
         assert!(command_fields("no params").is_empty());
+        // A parenthetical after the key describes the value.
+        let f = command_fields("{angle (degrees, CCW), ids?}");
+        let keys: Vec<&str> = f.iter().map(|f| f.key.as_str()).collect();
+        assert_eq!(keys, ["angle", "ids"]);
+        assert!(!f[0].optional && f[1].optional);
+        assert_eq!(f[0].hint, "degrees, CCW");
+        let f = command_fields("{scaleX? (%), ref?: 0..8, ids?: parent items (default: all)}");
+        let keys: Vec<&str> = f.iter().map(|f| f.key.as_str()).collect();
+        assert_eq!(keys, ["scaleX", "ref", "ids"]);
+        assert!(f.iter().all(|f| f.optional));
+        assert_eq!(f[0].hint, "%");
+        assert_eq!(f[2].hint, "parent items (default: all)");
         // Every command with a "…" label parses without panicking.
         for c in designcraft_engine::command_specs() {
             let _ = command_fields(c.params);

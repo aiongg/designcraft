@@ -332,9 +332,6 @@ pub struct TextFrameOptions {
     /// Type on a Path: the text runs along the item's path instead of filling it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<PathType>,
-    /// Vertical Type: lines run top to bottom and follow each other right to left.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub vertical: bool,
 }
 
 /// Type on a Path Options.
@@ -380,7 +377,6 @@ impl Default for TextFrameOptions {
             column_rule_color: designcraft_color::swatch::BLACK.into(),
             baseline_grid: None,
             path: None,
-            vertical: false,
         }
     }
 }
@@ -1146,23 +1142,6 @@ impl Item {
     }
 
     /// The frame's text area (inner space) after inset.
-    /// Text space → item inner space (identity except for vertical frames).
-    pub fn text_local(&self) -> Affine {
-        match self.text_frame() {
-            Some(t) if t.options.vertical && t.options.path.is_none() => vertical_text_xf(self.text_area()),
-            _ => Affine::IDENTITY,
-        }
-    }
-
-    /// Text space → spread-parent space for this frame's composed text (the item transform, with
-    /// the quarter turn of a vertical frame).
-    pub fn text_xf(&self) -> Affine {
-        match self.text_frame() {
-            Some(t) if t.options.vertical && t.options.path.is_none() => self.xf * vertical_text_xf(self.text_area()),
-            _ => self.xf,
-        }
-    }
-
     pub fn text_area(&self) -> Rect {
         let r = self.inner_bounds();
         let inset = self.text_frame().map(|t| t.options.inset).unwrap_or([0.0; 4]);

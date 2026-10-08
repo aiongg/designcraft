@@ -116,6 +116,10 @@ pub struct Cell {
     /// Edge strokes: top, left, bottom, right.
     #[serde(default)]
     pub strokes: [CellStroke; 4],
+    /// Explicit cell-edge formatting takes precedence over the table border, in the same
+    /// top, left, bottom, right order as `strokes`. Older documents keep their table border.
+    #[serde(default)]
+    pub border_overrides: [bool; 4],
     /// Applied cell style ("" = [None]).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub style: String,
@@ -137,6 +141,7 @@ impl Default for Cell {
             vj: VerticalJustification::Top,
             rotation: 0.0,
             strokes: Default::default(),
+            border_overrides: [false; 4],
             style: String::new(),
             graphic: None,
         }
@@ -208,6 +213,8 @@ impl AltFills {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct TableOptions {
+    /// Logical column zero is drawn at the right edge for RTL tables.
+    pub direction: crate::TextDirection,
     /// Outer border (overrides the outer cell edges).
     pub border: CellStroke,
     pub space_before: f64,
@@ -224,6 +231,7 @@ pub struct TableOptions {
 impl Default for TableOptions {
     fn default() -> Self {
         TableOptions {
+            direction: crate::TextDirection::LeftToRight,
             border: CellStroke::default(),
             space_before: 4.0,
             space_after: -4.0,
@@ -1101,6 +1109,20 @@ mod tests {
         let old = r#"{"id":1,"text":"a","paras":[{"style":"[Basic Paragraph]"}],"chars":[{"len":1,"style":"[None]"}],"frames":[]}"#;
         let st: Story = serde_json::from_str(old).unwrap();
         assert!(st.tables.is_empty());
+    }
+
+    #[test]
+    fn cell_border_overrides_default_for_old_documents_and_roundtrip() {
+        let cell = Cell::default();
+        let mut old = serde_json::to_value(&cell).unwrap();
+        old.as_object_mut().unwrap().remove("borderOverrides");
+        let back: Cell = serde_json::from_value(old).unwrap();
+        assert_eq!(back.border_overrides, [false; 4]);
+
+        let explicit = Cell { border_overrides: [true, false, true, false], ..cell };
+        let back: Cell = serde_json::from_str(&serde_json::to_string(&explicit).unwrap()).unwrap();
+        assert_eq!(back, explicit);
+        assert_eq!(back.blank_like().border_overrides, explicit.border_overrides);
     }
 }
 

@@ -17,7 +17,9 @@ pub fn specs() -> Vec<CommandSpec> {
             always, file_new),
         cmd!(noundo "file.newSample", "Sample Document", ["Help"], None, "{} — a multi-page magazine sample", always, file_sample),
         cmd!(query "file.presets", "Document Presets", [], None, "{}", always, |_, _| Ok(serde_json::to_value(PRESETS).unwrap_or_default())),
-        cmd!(noundo "file.open", "Open…", ["File"], Some("Cmd+O"), "{path} — .designcraft or .idml", always, file_open),
+        cmd!(noundo "file.open", "Open…", ["File"], Some("Cmd+O"),
+            "{path} — .designcraft or .idml; the fonts in a `Document Fonts` folder beside it load first → {index, documentFonts: faces loaded, warnings: font files skipped}",
+            always, file_open),
         cmd!(noundo "file.openBytes", "Open Bytes", [], None, "{name, base64} — DesignCraft JSON or an IDML package", always, file_open_bytes),
         cmd!(noundo "file.save", "Save", ["File"], Some("Cmd+S"), "{path?}", has_doc, file_save),
         cmd!(noundo "file.saveAs", "Save As…", ["File"], Some("Cmd+Shift+S"), "{path}", has_doc, file_save),
@@ -42,7 +44,10 @@ pub fn specs() -> Vec<CommandSpec> {
             Ok(json!({"opened": crate::recovery::open(s, &dir)?}))
         }),
         cmd!(query "file.serialize", "Serialize", [], None, "{} → {base64, bytes} the .designcraft file", has_doc, |s, _| {
-            let bytes = to_bytes(&s.doc()?.doc);
+            let st = s.doc()?;
+            // Preview fill is session state. Serialize the unfilled template.
+            let doc = st.preview_stash.as_deref().unwrap_or(st.doc.as_ref());
+            let bytes = to_bytes(doc);
             Ok(json!({"base64": base64_encode(&bytes), "bytes": bytes.len()}))
         }),
         cmd!(noundo "file.close", "Close", ["File"], Some("Cmd+W"), "{index?}", has_doc, |s, p| {
@@ -172,14 +177,38 @@ fn file_open(s: &mut Session, p: &Value) -> Result<Value> {
             return super::interchange::open_idml(s, p);
         }
         let bytes = std::fs::read(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-        let d = from_bytes(&bytes)?;
-        let i = s.add_document(DocState::new(d, Some(path.to_string())));
-        Ok(json!({"index": i}))
+        let mut d = from_bytes(&bytes)?;
+        super::datamerge::resolve_sources_on_open(&mut d, Some(std::path::Path::new(path)));
+        let (fonts, faces, warnings) = load_document_fonts(&mut d, path);
+        let mut st = DocState::new(d, Some(path.to_string()));
+        st.fonts = fonts;
+        let i = s.add_document(st);
+        Ok(json!({"index": i, "documentFonts": faces, "warnings": warnings}))
     }
     #[cfg(target_arch = "wasm32")]
     {
         let _ = (s, path);
         Err(EngineError::Other("use file.openBytes on the web".into()))
+    }
+}
+
+/// Load the fonts in the `Document Fonts` folder beside the document file at `path` for `d` alone
+/// (`d.font_scope`) → (the scope, for the document's state to hold; faces; a warning for each
+/// font file skipped). Nothing on the web (no folders).
+pub(crate) fn load_document_fonts(d: &mut Document, path: &str) -> (Option<Arc<crate::FontScope>>, usize, Vec<String>) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use designcraft_fonts::DOCUMENT_FONTS_FOLDER;
+        let Some(folder) = std::path::Path::new(path).parent().map(|d| d.join(DOCUMENT_FONTS_FOLDER)) else { return (None, 0, Vec::new()) };
+        let r = designcraft_fonts::FontDb::global().load_document_fonts(&folder);
+        d.font_scope = r.scope;
+        let scope = (r.scope != 0).then(|| Arc::new(crate::FontScope(r.scope)));
+        (scope, r.faces, r.skipped.into_iter().map(|s| format!("{DOCUMENT_FONTS_FOLDER}: {s}")).collect())
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (d, path);
+        (None, 0, Vec::new())
     }
 }
 
@@ -190,6 +219,7 @@ fn file_open_bytes(s: &mut Session, p: &Value) -> Result<Value> {
         return super::interchange::open_idml(s, p);
     }
     let mut d = from_bytes(&b)?;
+    super::datamerge::resolve_sources_on_open(&mut d, None);
     if let Some(n) = str_param(p, "name") {
         d.title = n.to_string();
     }
@@ -203,6 +233,14 @@ fn file_save(s: &mut Session, p: &Value) -> Result<Value> {
         .map(str::to_string)
         .or_else(|| st.path.clone())
         .ok_or_else(|| bad("file.save", "missing `path` (document has never been saved)"))?;
+    {
+        let mut d = (*st.doc).clone();
+        super::datamerge::refresh_relative_paths(&mut d, std::path::Path::new(&path));
+        if d.data_merge != st.doc.data_merge {
+            st.doc = Arc::new(d);
+            st.revision = st.revision.saturating_add(1);
+        }
+    }
     let bytes = to_bytes(&st.doc);
     #[cfg(not(target_arch = "wasm32"))]
     std::fs::write(&path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
@@ -594,15 +632,18 @@ fn file_revert(s: &mut Session, _: &Value) -> Result<Value> {
     let path = s.doc()?.path.clone().ok_or_else(|| bad("file.revert", "the document has never been saved"))?;
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let d = if path.to_ascii_lowercase().ends_with(".idml") {
+        let mut d = if path.to_ascii_lowercase().ends_with(".idml") {
             let bytes = std::fs::read(&path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
             designcraft_idml::import_idml(&bytes).map_err(|e| EngineError::Other(e.to_string()))?
         } else {
             from_bytes(&std::fs::read(&path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?)?
         };
+        // As opened again: the fonts beside it now (unchanged files are shared, not read again).
+        let (fonts, _, _) = load_document_fonts(&mut d, &path);
         let uid = s.doc()?.uid;
         let st = s.doc_mut()?;
         let mut fresh = DocState::new(d, Some(path.clone()));
+        fresh.fonts = fonts;
         fresh.uid = uid;
         fresh.revision = st.revision + 1;
         *st = fresh;
@@ -706,5 +747,209 @@ mod indd_tests {
             assert!(open.contains("InDesign document"), "{open}");
         }
         assert_eq!(s.documents().len(), 1, "nothing was opened");
+    }
+}
+
+#[cfg(test)]
+mod document_fonts_tests {
+    use std::path::{Path, PathBuf};
+
+    use designcraft_fonts::testing::font_with;
+    use designcraft_fonts::{DOCUMENT_FONTS_FOLDER, FaceRef, FontDb, FontSource};
+    use serde_json::{Value, json};
+
+    use crate::Session;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("dc-open-docfonts-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(DOCUMENT_FONTS_FOLDER)).unwrap();
+        dir
+    }
+
+    /// A new document in `s` with a text frame holding `text` set in `family`.
+    fn new_document(s: &mut Session, family: &str, text: &str) {
+        s.execute("file.new", &json!({})).unwrap();
+        let r = s.execute("frame.create", &json!({"rect": [72, 72, 400, 300], "content": "text", "text": text})).unwrap();
+        s.execute("text.select", &json!({"story": r["story"], "anchor": 0, "focus": text.len()})).unwrap();
+        s.execute("type.char", &json!({"fontFamily": family, "fontStyle": "Regular"})).unwrap();
+    }
+
+    /// A document whose text ("Hello") is set in `family`, written to `path` (`.idml`: as IDML).
+    fn write_document(path: &Path, family: &str) {
+        write_document_with(path, family, "Hello");
+    }
+
+    fn write_document_with(path: &Path, family: &str, text: &str) {
+        let mut s = Session::new();
+        new_document(&mut s, family, text);
+        if path.extension().is_some_and(|e| e == "idml") {
+            std::fs::write(path, designcraft_idml::export_idml(&s.doc().unwrap().doc)).unwrap();
+        } else {
+            s.execute("file.save", &json!({"path": path.to_string_lossy()})).unwrap();
+        }
+    }
+
+    fn font_entry(s: &mut Session, family: &str) -> Value {
+        let l = s.execute("font.list", &json!({})).unwrap();
+        l.as_array().unwrap().iter().find(|f| f["family"] == family).cloned().unwrap_or_else(|| panic!("{family} in {l}"))
+    }
+
+    /// Each character of the active document's text with the face it is drawn in.
+    fn glyph_faces(s: &Session) -> Vec<(char, FaceRef)> {
+        let st = s.doc().unwrap();
+        let mut out = Vec::new();
+        for (sid, story) in &st.doc.stories {
+            let cs = s.cache.get(&st.doc, *sid, None);
+            for g in cs.frames.iter().flat_map(|ft| &ft.lines).flat_map(|l| &l.glyphs).filter(|g| g.visible && g.len > 0) {
+                out.push((story.text[g.byte..].chars().next().unwrap(), g.face));
+            }
+        }
+        out
+    }
+
+    fn open(s: &mut Session, path: &Path) -> Value {
+        s.execute("file.open", &json!({"path": path.to_string_lossy()})).unwrap()
+    }
+
+    #[test]
+    fn opening_a_document_loads_its_document_fonts() {
+        const FAMILY: &str = "DocFont Open Test";
+        let dir = temp_dir("designcraft");
+        let fonts = dir.join(DOCUMENT_FONTS_FOLDER);
+        std::fs::write(fonts.join("open.ttf"), font_with(FAMILY, &['H', 'e', 'l', 'o']).unwrap()).unwrap();
+        std::fs::write(fonts.join("broken.otf"), b"not a font").unwrap();
+        let path = dir.join("Brochure.designcraft");
+        write_document(&path, FAMILY);
+        assert!(!FontDb::global().has_family(FAMILY));
+
+        let mut s = Session::new();
+        let r = s.execute("file.open", &json!({"path": path.to_string_lossy()})).unwrap();
+        assert_eq!(r["documentFonts"], 1, "{r}");
+        assert!(r["warnings"].to_string().contains("broken.otf"), "a damaged font is reported, not fatal: {r}");
+        let f = font_entry(&mut s, FAMILY);
+        assert_eq!((f["missing"].clone(), f["source"].clone()), (json!(false), json!("document")), "{f}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn opening_an_idml_file_loads_its_document_fonts() {
+        const FAMILY: &str = "DocFont IDML Test";
+        let dir = temp_dir("idml");
+        std::fs::write(dir.join(DOCUMENT_FONTS_FOLDER).join("idml.ttf"), font_with(FAMILY, &['H']).unwrap()).unwrap();
+        let path = dir.join("Brochure.idml");
+        write_document(&path, FAMILY);
+
+        let mut s = Session::new();
+        let r = s.execute("file.open", &json!({"path": path.to_string_lossy()})).unwrap();
+        assert_eq!(r["documentFonts"], 1, "{r}");
+        assert_eq!(font_entry(&mut s, FAMILY)["missing"], false);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_document_without_the_folder_opens_as_before() {
+        let dir = std::env::temp_dir().join(format!("dc-open-docfonts-none-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("Plain.designcraft");
+        write_document(&path, designcraft_fonts::DEFAULT_FAMILY);
+        let r = Session::new().execute("file.open", &json!({"path": path.to_string_lossy()})).unwrap();
+        assert_eq!((r["documentFonts"].clone(), r["warnings"].clone()), (json!(0), json!([])), "{r}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    #[test]
+    fn document_fonts_belong_to_their_document() {
+        const FAMILY: &str = "DocFont Scoped";
+        let (a, b) = (temp_dir("scoped-a"), temp_dir("scoped-b"));
+        std::fs::write(a.join(DOCUMENT_FONTS_FOLDER).join("scoped.ttf"), font_with(FAMILY, &['H', 'e', 'l', 'o']).unwrap()).unwrap();
+        write_document(&a.join("A.designcraft"), FAMILY);
+        write_document(&b.join("B.designcraft"), FAMILY);
+
+        let mut s = Session::new();
+        assert_eq!(open(&mut s, &a.join("A.designcraft"))["documentFonts"], 1);
+        assert_eq!(open(&mut s, &b.join("B.designcraft"))["documentFonts"], 0);
+        // B, open at the same time, doesn't have A's font.
+        assert_eq!(font_entry(&mut s, FAMILY)["missing"], true);
+        assert!(glyph_faces(&s).iter().all(|(_, f)| f.family != FAMILY), "{:?}", glyph_faces(&s));
+        s.execute("file.activate", &json!({"index": 0})).unwrap();
+        assert_eq!(font_entry(&mut s, FAMILY)["source"], "document");
+        assert!(glyph_faces(&s).iter().all(|(_, f)| f.family == FAMILY), "{:?}", glyph_faces(&s));
+        let _ = std::fs::remove_dir_all(&a);
+        let _ = std::fs::remove_dir_all(&b);
+    }
+
+    #[test]
+    fn each_document_sets_its_own_font_of_a_name() {
+        const FAMILY: &str = "DocFont Same";
+        let (a, b) = (temp_dir("same-a"), temp_dir("same-b"));
+        let (a_font, b_font) = (a.join(DOCUMENT_FONTS_FOLDER).join("same.ttf"), b.join(DOCUMENT_FONTS_FOLDER).join("same.ttf"));
+        // A's font has both letters, B's only `b`.
+        std::fs::write(&a_font, font_with(FAMILY, &['a', 'b']).unwrap()).unwrap();
+        std::fs::write(&b_font, font_with(FAMILY, &['b']).unwrap()).unwrap();
+        // The same words in both: the word cache must not hand one document's shaping to the other.
+        write_document_with(&a.join("A.designcraft"), FAMILY, "ab ab ab");
+        write_document_with(&b.join("B.designcraft"), FAMILY, "ab ab ab");
+
+        let mut s = Session::new();
+        open(&mut s, &a.join("A.designcraft"));
+        open(&mut s, &b.join("B.designcraft"));
+        // Fallback fonts for the `a` B's font lacks: never A's font.
+        s.execute("document.preferences", &json!({"glyphFallback": true})).unwrap();
+        let in_b = glyph_faces(&s);
+        s.execute("file.activate", &json!({"index": 0})).unwrap();
+        let in_a = glyph_faces(&s);
+        assert_eq!((in_a.len(), in_b.len()), (8, 8), "{in_a:?} {in_b:?}");
+        for (c, f) in &in_a {
+            assert_eq!(f.source, FontSource::Document(a_font.clone()), "`{c}` in A");
+        }
+        for (c, f) in &in_b {
+            match c {
+                'a' => assert!(f.family != FAMILY, "B's font lacks `a`, and A's isn't B's: {f:?}"),
+                _ => assert_eq!(f.source, FontSource::Document(b_font.clone()), "`{c}` in B"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&a);
+        let _ = std::fs::remove_dir_all(&b);
+    }
+
+    #[test]
+    fn closing_a_document_forgets_its_fonts_and_reopening_reuses_them() {
+        const FAMILY: &str = "DocFont Closed";
+        let dir = temp_dir("closed");
+        std::fs::write(dir.join(DOCUMENT_FONTS_FOLDER).join("closed.ttf"), font_with(FAMILY, &['H', 'e', 'l', 'o']).unwrap()).unwrap();
+        let path = dir.join("Closed.designcraft");
+        write_document(&path, FAMILY);
+
+        let mut s = Session::new();
+        open(&mut s, &path);
+        let first = glyph_faces(&s)[0].1;
+        assert_eq!(first.family, FAMILY);
+        s.execute("file.close", &json!({})).unwrap();
+        // A new document can't use the closed document's font.
+        new_document(&mut s, FAMILY, "Hello");
+        assert_eq!(font_entry(&mut s, FAMILY)["missing"], true);
+        assert!(glyph_faces(&s).iter().all(|(_, f)| f.family != FAMILY));
+        // Reopened, the document has its font again: the face loaded the first time.
+        assert_eq!(open(&mut s, &path)["documentFonts"], 1);
+        assert!(glyph_faces(&s).iter().all(|(_, f)| *f == first), "{:?}", glyph_faces(&s));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_reverted_document_keeps_its_fonts() {
+        const FAMILY: &str = "DocFont Reverted";
+        let dir = temp_dir("revert");
+        std::fs::write(dir.join(DOCUMENT_FONTS_FOLDER).join("revert.ttf"), font_with(FAMILY, &['H', 'e', 'l', 'o']).unwrap()).unwrap();
+        let path = dir.join("Revert.designcraft");
+        write_document(&path, FAMILY);
+
+        let mut s = Session::new();
+        open(&mut s, &path);
+        s.execute("frame.create", &json!({"rect": [72, 400, 200, 500], "content": "text", "text": "x"})).unwrap();
+        s.execute("file.revert", &json!({})).unwrap();
+        assert_eq!(font_entry(&mut s, FAMILY)["source"], "document");
+        assert!(glyph_faces(&s).iter().all(|(_, f)| f.family == FAMILY));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

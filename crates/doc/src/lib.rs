@@ -10,9 +10,12 @@
 #![forbid(unsafe_code)]
 
 pub mod anchored;
+pub mod arabic;
 pub mod arrow;
 pub mod attrs;
 pub mod build;
+pub mod cjk;
+pub mod datamerge;
 mod edit;
 pub mod endnotes;
 pub mod ids;
@@ -34,6 +37,10 @@ use std::sync::Arc;
 
 pub use anchored::{AnchorPosition, AnchoredObject, OBJECT_MARK};
 pub use attrs::*;
+pub use datamerge::{
+    DataField, DataFieldKind, DataMerge, DataSource, Delimiter, Fingerprint, MergeOptions, Placeholder, PlaceholderAnchor, PlaceholderRole,
+    SourceStatus,
+};
 pub use designcraft_color as color;
 pub use designcraft_geom as geom;
 pub use edit::{ItemLoc, ItemPath, SpreadRef, item_hit as edit_hit};
@@ -338,6 +345,12 @@ pub struct DocSettings {
     pub overprint_black: bool,
     /// Type › Track Changes: edits are recorded as inserted / deleted text.
     pub track_changes: bool,
+    /// Preferences › Composition › Draw Missing Glyphs from Fallback Fonts: characters the
+    /// applied font lacks are drawn from other fonts. Off (InDesign's behaviour, and new
+    /// documents'), they are drawn as the font's missing-glyph box and Preflight lists them.
+    /// Documents saved before the setting existed read as on, the way they were drawn.
+    #[serde(default = "yes")]
+    pub glyph_fallback: bool,
 }
 
 impl Default for DocSettings {
@@ -369,6 +382,7 @@ impl Default for DocSettings {
             blend_space: BlendSpace::Cmyk,
             overprint_black: true,
             track_changes: false,
+            glyph_fallback: false,
         }
     }
 }
@@ -482,6 +496,9 @@ pub struct Document {
     /// Hyperlinks (Window → Interactive → Hyperlinks).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hyperlinks: Vec<Hyperlink>,
+    /// Data merge: the linked table, placeholders, and the last merge options.
+    #[serde(default, skip_serializing_if = "DataMerge::is_empty")]
+    pub data_merge: DataMerge,
     /// PDF bookmarks (Window → Interactive → Bookmarks).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bookmarks: Vec<Bookmark>,
@@ -513,6 +530,11 @@ pub struct Document {
     #[serde(default)]
     pub modified: i64,
     pub next_id: u64,
+    /// While the document is open, the font scope of the fonts it brought (its `Document Fonts`
+    /// folder): composition, export and the font menus look its fonts up there. 0: none. Not
+    /// saved.
+    #[serde(skip)]
+    pub font_scope: u32,
 }
 
 /// What a hyperlink is attached to.
@@ -675,6 +697,18 @@ impl Document {
 
     /// Validate structural invariants (ids unique, threads consistent, stories well-formed).
     pub fn check(&self) -> Result<()> {
+        for f in &self.styles.composite_fonts {
+            if f.entries.iter().any(|e| {
+                ![e.relative_size, e.horizontal_scale, e.vertical_scale].iter().all(|v| v.is_finite() && *v > 0.0) || !e.baseline_shift.is_finite()
+            }) {
+                return Err(DocError::Invalid(format!("invalid composite font metrics: {}", f.name)));
+            }
+        }
+        for t in &self.styles.mojikumi_tables {
+            if t.overrides.iter().any(|r| ![r.minimum, r.desired, r.maximum].iter().all(|v| v.is_finite())) {
+                return Err(DocError::Invalid(format!("non-finite mojikumi spacing: {}", t.name)));
+            }
+        }
         let mut ids = std::collections::HashSet::new();
         for sp in self.spreads.iter().chain(self.parents.iter()) {
             for it in &sp.items {
