@@ -1360,9 +1360,6 @@ impl<'a> Ex<'a> {
         if let Some(v) = a.single_word_justify {
             el.set("SingleWordJustification", names::align_out(v));
         }
-        if let Some(v) = a.kashidas {
-            el.set("Kashidas", names::kashidas_out(v));
-        }
         n!(keep_with_next, "KeepWithNext");
         b!(keep_lines_together, "KeepLinesTogether");
         b!(keep_all_lines, "KeepAllLinesTogether");
