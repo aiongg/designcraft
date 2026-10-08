@@ -112,7 +112,21 @@ pub fn to_bytes(d: &Document) -> Vec<u8> {
 }
 
 pub fn from_bytes(b: &[u8]) -> Result<Document> {
+    if is_indd(b) {
+        return Err(EngineError::Other(INDD_UNREADABLE.into()));
+    }
     designcraft_format::load(b).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+/// InDesign documents and templates (.indd, .indt) begin with this 16-byte class id.
+const INDD_SIGNATURE: [u8; 16] = [0x06, 0x06, 0xED, 0xF5, 0xD8, 0x1D, 0x46, 0xE5, 0xBD, 0x31, 0xEF, 0xE7, 0xFE, 0x74, 0xB7, 0x1D];
+
+const INDD_UNREADABLE: &str = "This is an InDesign document (.indd). Its format is closed and can't be read: in InDesign, \
+    choose File › Export… › InDesign Markup (IDML), then open the .idml file here.";
+
+/// An InDesign document or template, recognised by its signature.
+pub fn is_indd(b: &[u8]) -> bool {
+    b.starts_with(&INDD_SIGNATURE)
 }
 
 fn file_new(s: &mut Session, p: &Value) -> Result<Value> {
@@ -255,6 +269,9 @@ fn file_place(s: &mut Session, p: &Value) -> Result<Value> {
         s.ui_requests.push(crate::UiRequest::Pick { purpose: "place".into(), params: json!({}) });
         return ok();
     };
+    if is_indd(&bytes) {
+        return Err(EngineError::Other(INDD_UNREADABLE.into()));
+    }
     // A page of another layout (IDML or DesignCraft): its objects, as one group.
     let lname = name.to_lowercase();
     if lname.ends_with(".idml") || lname.ends_with(".designcraft") {
@@ -919,5 +936,40 @@ mod document_fonts_tests {
         let r = s.execute("type.italic", &json!({"on": false})).unwrap();
         assert_eq!(r["fontStyle"], "Regular", "{r}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod indd_tests {
+    use serde_json::json;
+
+    use crate::Session;
+
+    /// The start of an InDesign document: its signature, then the `DOCUMENT` class name.
+    fn indd() -> Vec<u8> {
+        let mut b = super::INDD_SIGNATURE.to_vec();
+        b.extend_from_slice(b"DOCUMENT");
+        b.resize(4096, 0);
+        b
+    }
+
+    #[test]
+    fn indd_files_say_to_export_idml() {
+        let b64 = super::base64_encode(&indd());
+        let mut s = Session::new();
+        let open = s.execute("file.openBytes", &json!({"base64": b64, "name": "Brochure"})).unwrap_err().to_string();
+        assert!(open.contains("InDesign document") && open.contains("IDML"), "{open}");
+        s.execute("file.new", &json!({})).unwrap();
+        let place = s.execute("file.place", &json!({"base64": b64, "name": "Brochure.indd"})).unwrap_err().to_string();
+        assert!(place.contains("InDesign document") && place.contains("IDML"), "{place}");
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let path = std::env::temp_dir().join(format!("designcraft-indd-{}.indd", std::process::id()));
+            std::fs::write(&path, indd()).unwrap();
+            let open = s.execute("file.open", &json!({"path": path.to_string_lossy()})).unwrap_err().to_string();
+            let _ = std::fs::remove_file(&path);
+            assert!(open.contains("InDesign document"), "{open}");
+        }
+        assert_eq!(s.documents().len(), 1, "nothing was opened");
     }
 }

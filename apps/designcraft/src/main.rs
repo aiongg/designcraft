@@ -146,9 +146,10 @@ fn open_filters(purpose: &str) -> &'static [OpenFilter] {
             OpenFilter { name: "Video and sound", extensions: &["mp4", "m4v", "mov", "webm", "mp3", "m4a", "wav", "ogg"] },
         ],
         _ => &[
-            OpenFilter { name: "DesignCraft or IDML", extensions: &["designcraft", "idml"] },
+            OpenFilter { name: "DesignCraft, IDML or InDesign", extensions: &["designcraft", "idml", "indd", "indt"] },
             OpenFilter { name: "DesignCraft", extensions: &["designcraft"] },
             OpenFilter { name: "InDesign Markup (IDML)", extensions: &["idml"] },
+            OpenFilter { name: "InDesign Document or Template (INDD, INDT)", extensions: &["indd", "indt"] },
         ],
     }
 }
@@ -246,7 +247,7 @@ fn main() -> eframe::Result {
                 let _ = app.run("file.newSample", serde_json::json!({}));
             }
             for f in files {
-                if let Err(e) = app.run("file.open", serde_json::json!({"path": f})) {
+                if let Err(e) = app.open_file("file.open", serde_json::json!({"path": f})) {
                     eprintln!("designcraft: {f}: {e}");
                 }
             }

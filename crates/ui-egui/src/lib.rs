@@ -59,8 +59,8 @@ pub struct Services {
     /// Hand bytes to the user as a named file (browser download). When set, Save uses it
     /// instead of writing to a path.
     pub download: Option<DownloadFn>,
-    /// Files delivered asynchronously, drained every frame: `.designcraft` → `file.openBytes`,
-    /// anything else → `file.place`.
+    /// Files delivered asynchronously, drained every frame: documents ([`opens_as_document`]) →
+    /// `file.openBytes`, `.ase` → `swatch.load`, anything else → `file.place`.
     pub inbox: Option<Inbox>,
     /// The system clipboard's text, for Paste chosen from a menu (egui only delivers it with the
     /// paste keys, which a native menu bar takes first).
@@ -579,10 +579,10 @@ impl DesignApp {
                         self.ui.dialog = Some(dialogs::Dialog::new("pdfImport", json!({"path": path, "page": "1", "pages": pages})));
                         Ok(Value::Null)
                     } else {
-                        self.run(cmd, json!({"path": path}))
+                        self.open_file(cmd, json!({"path": path}))
                     }
                 }
-                Some(path) => self.run(cmd, json!({"path": path})),
+                Some(path) => self.open_file(cmd, json!({"path": path})),
                 None => Ok(Value::Null),
             };
         }
@@ -601,11 +601,11 @@ impl DesignApp {
             let lower = name.to_ascii_lowercase();
             let r = if lower.ends_with(".ase") {
                 self.run("swatch.load", json!({"base64": b64}))
-            } else if lower.ends_with(".designcraft") || lower.ends_with(".idml") {
+            } else if opens_as_document(&name) {
                 let title = name.rsplit_once('.').map_or(name.as_str(), |(stem, _)| stem);
-                self.run("file.openBytes", json!({"name": title, "base64": b64}))
+                self.open_file("file.openBytes", json!({"name": title, "base64": b64}))
             } else {
-                self.run("file.place", json!({"name": name, "base64": b64}))
+                self.open_file("file.place", json!({"name": name, "base64": b64}))
             };
             if let Err(e) = r {
                 self.status(format!("{name}: {e}"));
@@ -679,16 +679,32 @@ impl DesignApp {
         }
         #[cfg(not(target_arch = "wasm32"))]
         for f in ctx.input(|i| i.raw.dropped_files.clone()) {
-            {
-                let p = f.path().to_string_lossy().to_string();
-                if p.is_empty() {
-                    continue;
-                }
-                let lp = p.to_ascii_lowercase();
-                let cmd = if lp.ends_with(".designcraft") || lp.ends_with(".idml") { "file.open" } else { "file.place" };
-                let _ = self.run(cmd, json!({"path": p}));
+            let p = f.path().to_string_lossy().to_string();
+            if !p.is_empty() {
+                let _ = self.open_dropped(&p);
             }
         }
+    }
+
+    /// A file dropped on the window: documents open, anything else is placed.
+    pub fn open_dropped(&mut self, path: &str) -> Result<Value, String> {
+        let cmd = if opens_as_document(path) { "file.open" } else { "file.place" };
+        self.open_file(cmd, json!({"path": path}))
+    }
+
+    /// Open (`file.open`, `file.openBytes`) or place (`file.place`) a file the user chose. A file
+    /// that can't be opened or placed gets an alert with the reason, as well as the status line.
+    pub fn open_file(&mut self, cmd: &str, params: Value) -> Result<Value, String> {
+        let file = match params.get("path").and_then(Value::as_str) {
+            Some(path) => std::path::Path::new(path).file_name().map_or_else(|| path.to_string(), |n| n.to_string_lossy().to_string()),
+            None => params.get("name").and_then(Value::as_str).unwrap_or_default().to_string(),
+        };
+        let r = self.run(cmd, params);
+        if let Err(e) = &r {
+            let title = if cmd == "file.place" { "Can't Place the File" } else { "Can't Open the File" };
+            self.ui.dialog = Some(dialogs::Dialog::new("alert", json!({"title": title, "file": file, "message": e})));
+        }
+        r
     }
 
     /// Inject synthetic events (one pointer event per frame).
@@ -899,6 +915,13 @@ impl DesignApp {
     }
 }
 
+/// Files that open as documents (when dropped or picked) rather than being placed: DesignCraft,
+/// IDML, and InDesign documents and templates (which explain how to export IDML).
+pub fn opens_as_document(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    [".designcraft", ".idml", ".indd", ".indt"].iter().any(|ext| n.ends_with(ext))
+}
+
 pub fn now_ms() -> f64 {
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -925,5 +948,76 @@ mod tests {
         ui.snap_zone = 0.0;
         assert!(!ui.snap_view().snap_to_guides);
         assert_eq!(ui.snap_view().zone_px, 0.0);
+    }
+
+    /// A temporary file that starts like an InDesign document (its 16-byte signature).
+    fn indd_file(tag: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("designcraft-ui-{tag}-{}.indd", std::process::id()));
+        let mut b = vec![0x06, 0x06, 0xED, 0xF5, 0xD8, 0x1D, 0x46, 0xE5, 0xBD, 0x31, 0xEF, 0xE7, 0xFE, 0x74, 0xB7, 0x1D];
+        b.resize(4096, 0);
+        std::fs::write(&path, b).unwrap();
+        path
+    }
+
+    /// The open alert dialog: (title, message).
+    fn alert(app: &DesignApp) -> (String, String) {
+        let d = app.ui.dialog.as_ref().expect("an alert is open");
+        assert_eq!(d.id, "alert");
+        (d.fields["title"].as_str().unwrap().to_string(), d.fields["message"].as_str().unwrap().to_string())
+    }
+
+    #[test]
+    fn dropped_documents_open_and_the_rest_is_placed() {
+        for name in ["a.designcraft", "B.IDML", "c.indd", "D.INDT"] {
+            assert!(opens_as_document(name), "{name}");
+        }
+        for name in ["a.png", "b.pdf", "indd.txt", "c.indd.zip"] {
+            assert!(!opens_as_document(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn dropping_an_indesign_document_opens_it_and_alerts() {
+        let path = indd_file("drop");
+        let mut app = DesignApp::new(Session::new(), Services::default());
+        let r = app.open_dropped(&path.to_string_lossy());
+        let _ = std::fs::remove_file(&path);
+        assert!(r.is_err());
+        let (title, message) = alert(&app);
+        assert_eq!(title, "Can't Open the File", "an .indd opens, it isn't placed");
+        assert!(message.contains("InDesign document") && message.contains("IDML"), "{message}");
+        assert!(app.ui.status.contains("InDesign document"), "the status line says it too");
+        assert!(app.session.documents().is_empty());
+        dialogs::confirm(&mut app).unwrap();
+        assert!(app.ui.dialog.is_none(), "OK closes the alert");
+    }
+
+    #[test]
+    fn file_open_failures_show_an_alert() {
+        let path = indd_file("open");
+        let picked = path.to_string_lossy().to_string();
+        let services = Services { pick_open: Some(Box::new(move |_| Some(picked.clone()))), ..Default::default() };
+        let mut app = DesignApp::new(Session::new(), services);
+        let r = app.run("app.openDialog", json!({}));
+        assert!(r.is_err());
+        let (title, message) = alert(&app);
+        assert_eq!(title, "Can't Open the File");
+        assert!(message.contains("InDesign document"), "{message}");
+        // Placing one says so too.
+        app.ui.dialog = None;
+        app.run("file.new", json!({})).unwrap();
+        assert!(app.run("app.placeDialog", json!({})).is_err());
+        let _ = std::fs::remove_file(&path);
+        let (title, message) = alert(&app);
+        assert_eq!(title, "Can't Place the File");
+        assert!(message.contains("InDesign document"), "{message}");
+    }
+
+    #[test]
+    fn other_command_errors_stay_in_the_status_line() {
+        let mut app = DesignApp::new(Session::new(), Services::default());
+        assert!(app.run("file.open", json!({"path": "/nonexistent/x.designcraft"})).is_err());
+        assert!(app.ui.dialog.is_none(), "a scripted file.open doesn't raise an alert");
+        assert!(!app.ui.status.is_empty());
     }
 }
