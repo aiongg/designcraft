@@ -142,7 +142,7 @@ pub fn control_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
             egui::Frame::NONE.fill(t.panel).inner_margin(egui::Margin { left: 8, right: 8, top: 5, bottom: 3 }).stroke(Stroke::new(1.0, t.divider)),
         )
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
+            ui.horizontal_top(|ui| {
                 let text_mode =
                     matches!(app.session.tool_id(), "type" | "verticalType") || app.session.active().is_some_and(|d| d.selection.text.is_some());
                 if text_mode {
