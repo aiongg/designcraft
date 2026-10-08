@@ -3,6 +3,16 @@
 Start the app with `--control <port>` (or `DESIGNCRAFT_CONTROL_PORT`). The server listens on
 `127.0.0.1` only and speaks JSON lines: one request object per line, one reply per line.
 
+**Only requests are read.** Every line must be a JSON object with a string `method` (`id` and `params`
+are optional; blank lines are skipped). Anything else gets one error reply
+(`{"ok": false, "error": "… closing the connection"}`) and the server **closes the connection**, so
+nothing sent after it on that connection runs. That covers text that isn't JSON, a JSON array or number,
+an object without `method`, invalid UTF-8, and a line longer than 4 MiB. An HTTP request (for example a
+web page's cross-origin `fetch` to `127.0.0.1:<port>`) therefore can't smuggle a command in its body:
+its request line is rejected first. At most 16 connections are served at once; further ones get an error
+line and are closed. Clients that get an error reply should reconnect. The port has no authentication,
+so only enable it while you use it. Transport: `apps/designcraft/src/control_server.rs`.
+
 ```json
 {"id": 1, "method": "engine.execute", "params": {"command": "frame.create", "params": {"rect": [36, 36, 300, 200], "content": "text"}}}
 {"id": 1, "ok": true, "result": {"id": 10, "story": 11}}
@@ -18,7 +28,7 @@ Start the app with `--control <port>` (or `DESIGNCRAFT_CONTROL_PORT`). The serve
 | `ui.tool.select` | `{tool}` | Select a tool (`selection`, `type`, `rectangleFrame`, …) |
 | `ui.pointer` | `{events:[{kind: down\|drag\|up\|move\|doubleclick, x, y, space?: "screen"\|"canvas"}], mods?}` | Drive the active tool through the same code path as the mouse |
 | `ui.key` / `ui.text` | `{key, shift?, alt?, cmd?}` / `{text}` | Synthetic keyboard input (typing into a text frame) |
-| `ui.move` / `ui.click` / `ui.drag` | screen points | Real egui pointer input — reaches every widget, menu and panel |
+| `ui.move` / `ui.click` / `ui.drag` | screen points, `button?: left\|right\|middle` | Real egui pointer input — reaches every widget, menu and panel |
 | `ui.set` | `{brightness?, panel?, rulers?, guides?, frameEdges?, baselineGrid?, textThreads?, screenMode?, zoom?, page?, fit?}` | UI state |
 | `ui.dialog.open` | `{id, fields?}` | Open a dialog by id (e.g. `paragraphStyleOptions` with `{name, section}`) |
 | `ui.dialog.set` / `ui.dialog.confirm` / `ui.dialog.cancel` | `{field, value}` | Fill and confirm the open dialog |

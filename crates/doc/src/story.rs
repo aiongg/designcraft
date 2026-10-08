@@ -92,6 +92,13 @@ pub struct Story {
     pub chars: Vec<CharRun>,
     /// Text frames in thread order.
     pub frames: Vec<ItemId>,
+    /// Column progression, independent of paragraph bidi direction and frame threading.
+    #[serde(default)]
+    pub direction: crate::TextDirection,
+    /// Story direction: vertical stories set their lines top to bottom, following each other
+    /// right to left, in every frame of the thread.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub vertical: bool,
     /// Bumped on every edit (composition cache key).
     #[serde(default)]
     pub rev: u64,
@@ -132,6 +139,8 @@ impl Story {
             paras: vec![ParaFormat::default()],
             chars: vec![CharRun { len: 0, format: CharFormat::default() }],
             frames: vec![],
+            direction: crate::TextDirection::LeftToRight,
+            vertical: false,
             rev: 0,
             tables: BTreeMap::new(),
             notes: Vec::new(),

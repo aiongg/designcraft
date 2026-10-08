@@ -103,18 +103,25 @@ fn guide_ref(p: &Value, cmd: &str) -> Result<(SpreadRef, usize, usize)> {
     Ok((spread_param(p, "spread"), pi, i))
 }
 
+/// Commands must use the same guide/layer protection as pointer editing.
+fn check_editable(d: &Document, r: SpreadRef, pi: usize, i: usize, command: &str) -> Result<()> {
+    let g = d.spread(r).and_then(|sp| sp.pages.get(pi)).and_then(|pg| pg.guides.get(i)).ok_or_else(|| bad(command, "no such guide"))?;
+    if !g.editable_in(d) {
+        return Err(bad(command, "the guide or its layer is locked or hidden"));
+    }
+    Ok(())
+}
+
 fn move_guide(s: &mut Session, p: &Value) -> Result<Value> {
     let (r, pi, i) = guide_ref(p, "guide.move")?;
     let pos = p.get("position").and_then(Value::as_f64).ok_or_else(|| bad("guide.move", "missing position"))?;
     s.edit(|d, _| {
+        check_editable(d, r, pi, i, "guide.move")?;
         let g = d
             .spread_mut(r)
             .and_then(|sp| sp.pages.get_mut(pi))
             .and_then(|pg| pg.guides.get_mut(i))
             .ok_or_else(|| bad("guide.move", "no such guide"))?;
-        if g.locked {
-            return Err(bad("guide.move", "the guide is locked"));
-        }
         g.position = pos;
         Ok(Value::Null)
     })
@@ -123,6 +130,7 @@ fn move_guide(s: &mut Session, p: &Value) -> Result<Value> {
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     let (r, pi, i) = guide_ref(p, "guide.delete")?;
     s.edit(|d, _| {
+        check_editable(d, r, pi, i, "guide.delete")?;
         let pg = d.spread_mut(r).and_then(|sp| sp.pages.get_mut(pi)).ok_or_else(|| bad("guide.delete", "no such page"))?;
         if i >= pg.guides.len() {
             return Err(bad("guide.delete", "no such guide"));
@@ -237,6 +245,26 @@ mod layer_tests {
     use serde_json::json;
 
     use crate::Session;
+
+    #[test]
+    fn guide_commands_respect_layer_locks() {
+        let mut s = Session::new();
+        s.execute("file.new", &json!({})).unwrap();
+        let layer = s.execute("layer.new", &json!({"name": "Grid"})).unwrap()["id"].as_u64().unwrap();
+        s.execute("layer.activate", &json!({"id": layer})).unwrap();
+        s.execute("guide.add", &json!({"orientation": "vertical", "position": 100})).unwrap();
+        s.execute("layer.set", &json!({"id": layer, "locked": true})).unwrap();
+        for command in ["guide.move", "guide.delete"] {
+            assert!(s.execute(command, &json!({"page": 0, "index": 0, "position": 200})).is_err(), "{command} changed a locked layer");
+            assert_eq!(s.execute("guide.list", &json!({})).unwrap()[0]["position"], 100.0);
+        }
+        s.execute("layer.set", &json!({"id": layer, "locked": false})).unwrap();
+        s.execute("guide.move", &json!({"page": 0, "index": 0, "position": 200})).unwrap();
+        s.execute("guide.delete", &json!({"page": 0, "index": 0})).unwrap();
+        assert_eq!(s.execute("guide.list", &json!({})).unwrap(), json!([]));
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(s.execute("guide.list", &json!({})).unwrap()[0]["position"], 200.0);
+    }
 
     #[test]
     fn guides_follow_their_layer() {
