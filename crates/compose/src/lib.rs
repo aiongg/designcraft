@@ -650,7 +650,7 @@ pub fn compose(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &Compo
         let spacing = spacing_for(&pp, base_size);
         // An empty paragraph takes its height from its paragraph mark's character format.
         let mark_chars = if glyphs.is_empty() {
-            std::borrow::Cow::Owned(doc.styles.resolve_char(&base_chars, story.char_format_at(prange.start)))
+            std::borrow::Cow::Owned(doc.styles.resolve_char(&base_chars, story.char_format_of(prange.start)))
         } else {
             std::borrow::Cow::Borrowed(&base_chars)
         };

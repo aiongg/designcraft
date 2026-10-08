@@ -1044,3 +1044,22 @@ fn empty_paragraph_takes_its_marks_format() {
     assert!((lines[1].baseline - lines[0].baseline - 8.0).abs() < 1e-6, "{} {}", lines[0].baseline, lines[1].baseline);
     assert!((lines[2].baseline - lines[1].baseline - 8.0).abs() < 1e-6, "{} {}", lines[1].baseline, lines[2].baseline);
 }
+
+#[test]
+fn empty_paragraph_uses_its_own_mark_not_the_previous_one() {
+    // "One\n" is 20 pt; the empty paragraph's mark (byte 4) and "Two" are 6 pt with 8 pt leading.
+    // The format run boundary sits exactly at the empty paragraph's start: its line must take the
+    // 8 pt leading of its own mark, not the previous paragraph's 20 pt (auto 24) mark.
+    let text = "One\n\nTwo";
+    let (mut d, sid, _) = doc_with(text, Rect::new(0.0, 0.0, 200.0, 200.0), ParaAttrs::default());
+    let st = d.story_mut(sid).unwrap();
+    st.format_chars(0..4, |f| f.over.size = Some(20.0));
+    st.format_chars(4..text.len(), |f| {
+        f.over.size = Some(6.0);
+        f.over.leading = Some(designcraft_doc::Leading::Points(8.0));
+    });
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let lines = all_lines(&cs);
+    assert_eq!(lines.len(), 3);
+    assert!((lines[1].baseline - lines[0].baseline - 8.0).abs() < 1e-6, "{} {}", lines[0].baseline, lines[1].baseline);
+}
