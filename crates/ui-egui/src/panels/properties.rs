@@ -1178,7 +1178,7 @@ fn text_frame_section(app: &mut DesignApp, ui: &mut Ui) {
 }
 
 /// Languages offered for text (InDesign-style names).
-const LANGUAGES: &[&str] = &[
+pub(crate) const LANGUAGES: &[&str] = &[
     "[No Language]",
     "English: USA",
     "English: UK",
