@@ -491,7 +491,7 @@ pub fn doc_tabs(app: &mut DesignApp, ui: &mut egui::Ui) {
         x += w;
     }
     if let Some(i) = close {
-        let _ = app.run("file.close", json!({"index": i}));
+        crate::menus::close_document(app, Some(i));
     } else if let Some(i) = activate {
         let _ = app.run("file.activate", json!({"index": i}));
     }

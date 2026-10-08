@@ -1717,7 +1717,26 @@ pub fn menu_enabled(app: &DesignApp, id: &str) -> bool {
 
 /// A menu item was chosen. An engine command whose label ends in "…" and that takes parameters
 /// opens a dialog built from its parameter documentation (see [`crate::dialogs::command_fields`]).
+/// Close document `index` (the active one when `None`) the way the user asks for it: with the
+/// tab's ×, File ▸ Close or its shortcut. A document with unsaved changes asks first, because
+/// closing also discards its recovery data. Scripts and agents use `file.close`, which never asks.
+pub fn close_document(app: &mut DesignApp, index: Option<usize>) {
+    let Some(i) = index.or(app.session.active_index()) else { return };
+    match app.session.documents().get(i) {
+        Some(d) if d.is_dirty() => {
+            app.ui.dialog = Some(crate::dialogs::Dialog::new("closeDocument", json!({"uid": d.uid, "title": d.title(), "discard": false})));
+        }
+        _ => {
+            let _ = app.run("file.close", json!({"index": i}));
+        }
+    }
+}
+
 pub fn activate(app: &mut DesignApp, id: &str, params: &Value) {
+    if params.is_null() && id == "file.close" {
+        close_document(app, None);
+        return;
+    }
     if params.is_null() && id == "layout.documentSetup" {
         crate::dialogs::open_document_setup(app);
         return;
