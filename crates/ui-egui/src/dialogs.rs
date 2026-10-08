@@ -813,6 +813,7 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
         "documentSetup" => crate::i18n::tr(&app.ui.language, "Document Setup"),
         "findChange" => crate::i18n::tr(&app.ui.language, "Find/Change"),
         "paragraphStyleOptions" => crate::i18n::tr(&app.ui.language, "Paragraph Style Options"),
+        "deleteParagraphStyle" => crate::i18n::tr(&app.ui.language, "Delete Paragraph Style"),
         "footnoteOptions" => crate::i18n::tr(&app.ui.language, "Footnote Options"),
         "insertXref" => crate::i18n::tr(&app.ui.language, "New Cross-Reference"),
         "findFont" => crate::i18n::tr(&app.ui.language, "Find/Replace Font"),
@@ -1053,6 +1054,7 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
                 }
             }
             "paragraphStyleOptions" => paragraph_style_options(app, ui, &mut d),
+            "deleteParagraphStyle" => delete_paragraph_style(app, ui, &mut d),
             "footnoteOptions" => footnote_options(app, ui, &mut d),
             "insertXref" => insert_xref(app, ui, &mut d),
             "findFont" => find_font(app, ui, &mut d),
@@ -1481,6 +1483,14 @@ pub fn confirm(app: &mut DesignApp) -> Result<Value, String> {
                 app.run("style.exportTag", json!({"style": style, "tag": tag, "class": d.s("x.class")}))?;
             }
             Ok(r)
+        }
+        "deleteParagraphStyle" => {
+            let name = d.s("name");
+            let replace = d.s("replaceWith");
+            app.run(
+                "style.paragraph.delete",
+                json!({"name": name, "replaceWith": if replace.is_empty() { json!(designcraft_doc::BASIC_PARAGRAPH) } else { json!(replace) }}),
+            )
         }
         "colorPicker" => {
             let hex = d.s("hex");
@@ -2170,6 +2180,51 @@ fn paragraph_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
     });
 }
 
+fn delete_paragraph_style(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
+    let name = d.s("name");
+    ui.set_min_width(380.0);
+    crate::rtl::label(
+        ui,
+        egui::RichText::new(
+            crate::i18n::tr(&app.ui.language, "Delete the paragraph style \"{name}\"?")
+                .replace("{name}", crate::i18n::style_name(&app.ui.language, &name)),
+        )
+        .size(12.5),
+    );
+    ui.add_space(8.0);
+    let Some(st) = app.session.active() else { return };
+    let in_use = st.doc.stories.values().any(|s| s.paras.iter().any(|f| f.style == name));
+    let names: Vec<String> = st.doc.styles.paragraph.iter().map(|p| p.name.clone()).filter(|n| *n != name).collect();
+    if in_use {
+        crate::rtl::label(
+            ui,
+            egui::RichText::new(crate::i18n::tr(&app.ui.language, "This style is in use. Text using it will be reassigned to:"))
+                .size(11.0)
+                .color(crate::theme::Tokens::get(ui.ctx()).text_dim),
+        );
+    } else {
+        crate::rtl::label(
+            ui,
+            egui::RichText::new(crate::i18n::tr(&app.ui.language, "Replace with:")).size(11.0).color(crate::theme::Tokens::get(ui.ctx()).text_dim),
+        );
+    }
+    ui.add_space(4.0);
+    if !d.fields.contains_key("replaceWith") {
+        d.fields.insert("replaceWith".into(), json!(designcraft_doc::BASIC_PARAGRAPH));
+    }
+    let replace = d.s("replaceWith");
+    egui::ComboBox::from_id_salt("del_para_replace")
+        .selected_text(crate::rtl::widget(ui, crate::i18n::style_name(&app.ui.language, &replace)))
+        .width(260.0)
+        .show_ui(ui, |ui| {
+            for n in &names {
+                if ui.selectable_label(*n == replace, crate::rtl::widget(ui, crate::i18n::style_name(&app.ui.language, n))).clicked() {
+                    d.fields.insert("replaceWith".into(), json!(n));
+                }
+            }
+        });
+}
+
 fn combo(ui: &mut egui::Ui, d: &mut Dialog, key: &str, opts: &[(&str, &str)]) {
     let cur = d.s(key);
     let shown = opts.iter().find(|o| o.0 == cur).map_or(cur.as_str(), |o| o.1).to_string();
@@ -2680,5 +2735,48 @@ mod tests {
         for c in designcraft_engine::command_specs() {
             let _ = command_fields(c.params);
         }
+    }
+
+    fn test_app() -> crate::DesignApp {
+        let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.session.execute("file.new", &json!({"pages": 1})).unwrap();
+        app
+    }
+
+    #[test]
+    fn paragraph_style_options_dialog_saves_edits() {
+        let mut app = test_app();
+        let name = app.session.execute("style.paragraph.create", &json!({"name": "Body Copy"})).unwrap()["name"].as_str().unwrap().to_string();
+        app.ui.dialog = Some(Dialog::new("paragraphStyleOptions", json!({"name": name, "p.align": "center"})));
+        confirm(&mut app).expect("OK saves the style edit");
+        let st = app.session.active().unwrap();
+        assert_eq!(st.doc.styles.para(&name).unwrap().para.align, Some(designcraft_doc::Align::Center));
+    }
+
+    #[test]
+    fn delete_paragraph_style_dialog_removes_the_style_and_reassigns_text() {
+        let mut app = test_app();
+        let name = app.session.execute("style.paragraph.create", &json!({"name": "Caption"})).unwrap()["name"].as_str().unwrap().to_string();
+        let sid = app.session.execute("frame.create", &json!({"rect": [36, 36, 300, 200], "content": "text"})).unwrap()["story"].as_u64().unwrap();
+        app.session.execute("text.insert", &json!({"text": "Hello"})).unwrap();
+        app.session.execute("text.select", &json!({"story": sid, "anchor": 0, "focus": 0})).unwrap();
+        app.session.execute("style.paragraph.apply", &json!({"name": name})).unwrap();
+        app.ui.dialog = Some(Dialog::new("deleteParagraphStyle", json!({"name": name, "replaceWith": designcraft_doc::BASIC_PARAGRAPH})));
+        confirm(&mut app).expect("OK deletes the style");
+        let st = app.session.active().unwrap();
+        assert!(st.doc.styles.para(&name).is_none(), "style removed");
+        let story = st.doc.stories.get(&designcraft_doc::StoryId(sid)).unwrap();
+        assert_eq!(story.paras[0].style, designcraft_doc::BASIC_PARAGRAPH, "text reassigned to the replacement style");
+    }
+
+    #[test]
+    fn delete_paragraph_style_dialog_defaults_replacement_to_basic_paragraph() {
+        let mut app = test_app();
+        let name = app.session.execute("style.paragraph.create", &json!({"name": "Caption"})).unwrap()["name"].as_str().unwrap().to_string();
+        // No `replaceWith` set — the dialog's default field.
+        app.ui.dialog = Some(Dialog::new("deleteParagraphStyle", json!({"name": name})));
+        confirm(&mut app).expect("OK deletes the style with the default replacement");
+        let st = app.session.active().unwrap();
+        assert!(st.doc.styles.para(&name).is_none());
     }
 }

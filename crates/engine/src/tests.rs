@@ -537,3 +537,57 @@ fn commands_take_non_object_params_without_panicking() {
         assert!(r.is_ok(), "{p}: {r:?}");
     }
 }
+
+#[test]
+fn paragraph_style_edit_persists_attrs_and_rename() {
+    let mut s = session();
+    let name =
+        s.execute("style.paragraph.create", &json!({"name": "Body Copy", "para": {"align": "left"}})).unwrap()["name"].as_str().unwrap().to_string();
+    s.execute("style.paragraph.edit", &json!({"name": name, "para": {"align": "center"}})).unwrap();
+    {
+        let st = s.doc().unwrap();
+        let style = st.doc.styles.para(&name).expect("style still exists");
+        assert_eq!(style.para.align, Some(designcraft_doc::Align::Center), "edited attribute persisted");
+    }
+    // Renaming updates the style definition itself, and every place it's referenced.
+    s.execute("style.paragraph.edit", &json!({"name": name, "rename": "Body Text"})).unwrap();
+    let st = s.doc().unwrap();
+    assert!(st.doc.styles.para("Body Text").is_some(), "renamed style exists under the new name");
+    assert!(st.doc.styles.para(&name).is_none(), "old name is gone");
+}
+
+#[test]
+fn paragraph_style_edit_rejects_based_on_cycle() {
+    let mut s = session();
+    let a = s.execute("style.paragraph.create", &json!({"name": "A"})).unwrap()["name"].as_str().unwrap().to_string();
+    let b = s.execute("style.paragraph.create", &json!({"name": "B", "basedOn": a})).unwrap()["name"].as_str().unwrap().to_string();
+    let r = s.execute("style.paragraph.edit", &json!({"name": a, "basedOn": b}));
+    assert!(r.is_err(), "A based on B based on A must be rejected");
+}
+
+#[test]
+fn paragraph_style_delete_reassigns_affected_text() {
+    let mut s = session();
+    let name = s.execute("style.paragraph.create", &json!({"name": "Caption"})).unwrap()["name"].as_str().unwrap().to_string();
+    let sid = s.execute("frame.create", &json!({"rect": [36, 36, 300, 200], "content": "text"})).unwrap()["story"].as_u64().unwrap();
+    s.execute("text.insert", &json!({"text": "Hello, world"})).unwrap();
+    s.execute("text.select", &json!({"story": sid, "anchor": 0, "focus": 0})).unwrap();
+    s.execute("style.paragraph.apply", &json!({"name": name})).unwrap();
+    {
+        let st = s.doc().unwrap();
+        let story = st.doc.stories.get(&designcraft_doc::StoryId(sid)).expect("story exists");
+        assert_eq!(story.paras[0].style, name, "style applied before delete");
+    }
+    s.execute("style.paragraph.delete", &json!({"name": name, "replaceWith": designcraft_doc::BASIC_PARAGRAPH})).unwrap();
+    let st = s.doc().unwrap();
+    assert!(st.doc.styles.para(&name).is_none(), "deleted style is gone");
+    let story = st.doc.stories.get(&designcraft_doc::StoryId(sid)).expect("story exists");
+    assert_eq!(story.paras[0].style, designcraft_doc::BASIC_PARAGRAPH, "affected paragraph reassigned to the replacement style");
+}
+
+#[test]
+fn paragraph_style_delete_rejects_builtin_styles() {
+    let mut s = session();
+    let r = s.execute("style.paragraph.delete", &json!({"name": designcraft_doc::BASIC_PARAGRAPH}));
+    assert!(r.is_err(), "built-in styles can't be deleted");
+}
