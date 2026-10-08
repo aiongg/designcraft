@@ -26,6 +26,15 @@ fn create_frame_type_and_undo() {
 }
 
 #[test]
+fn story_get_of_a_missing_story_is_an_error() {
+    let mut s = session();
+    for sid in [0, 999] {
+        let e = s.execute("story.get", &json!({"story": sid})).unwrap_err();
+        assert_eq!(e.to_string(), format!("no such story s{sid}"));
+    }
+}
+
+#[test]
 fn smart_quotes_and_formatting() {
     let mut s = session();
     s.execute("frame.create", &json!({"rect": [36, 36, 300, 200], "content": "text"})).unwrap();

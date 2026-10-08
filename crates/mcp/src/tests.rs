@@ -246,6 +246,14 @@ fn type_text_after_text_select_or_place_caret() {
 }
 
 #[test]
+fn get_story_of_a_missing_story_is_an_error() {
+    let mut s = server();
+    let r = call(&mut s, "get_story", json!({"story": 999}));
+    assert_eq!(r["isError"], true);
+    assert_eq!(text_of(&r), "get_story: no such story s999");
+}
+
+#[test]
 fn batch_stops_on_first_error() {
     let mut s = server();
     let r = call(

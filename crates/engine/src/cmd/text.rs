@@ -115,8 +115,8 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(query "story.get", "Get Story", [], None, "{story? | frame?} → text, frames, paragraphs, vertical, overset", has_doc, |s, p| {
             let st = s.doc()?;
             let sid = story_of(s, p).ok_or_else(|| bad("story.get", "no story"))?;
+            let mut v = st.doc.story_summary(sid).ok_or(designcraft_doc::DocError::NoStory(sid))?;
             let cs = s.cache.get(&st.doc, sid, None);
-            let mut v = st.doc.story_summary(sid).unwrap_or_default();
             v["overset"] = json!(cs.overset_at);
             v["lines"] = json!(cs.line_count());
             Ok(v)
