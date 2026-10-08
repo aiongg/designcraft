@@ -1112,6 +1112,30 @@ mod browser_import_tests {
     }
 
     #[test]
+    fn pdf_options_reject_oversized_page_without_editing() {
+        let mut app = app();
+        for page in [0_u64, 4, 4_294_967_296, 4_294_967_297, u64::MAX] {
+            let request = app.import_request("place");
+            deliver(&mut app, request, "three.pdf", pdf());
+            app.ui.dialog.as_mut().unwrap().fields.insert("page".into(), json!(page.to_string()));
+            // The native dialog clamps zero to one; positive invalid pages must fail.
+            if page == 0 {
+                assert!(app.confirm_pdf_import(page, "crop".into()).is_err());
+            } else {
+                assert!(dialogs::confirm(&mut app).is_err());
+            }
+            app.ui.dialog = None;
+            assert!(app.session.doc().unwrap().doc.assets.is_empty());
+            assert!(app.pending_pdf.is_none());
+        }
+        let request = app.import_request("place");
+        deliver(&mut app, request, "three.pdf", pdf());
+        app.ui.dialog.as_mut().unwrap().fields.insert("page".into(), json!("2"));
+        dialogs::confirm(&mut app).unwrap();
+        assert_eq!(app.session.doc().unwrap().doc.assets.values().next().unwrap().page, 1);
+    }
+
+    #[test]
     fn drop_routing_and_nonlayout_open_remain_compatible() {
         let mut app = app();
         let native = designcraft_engine::cmd::to_bytes(&app.session.doc().unwrap().doc);
