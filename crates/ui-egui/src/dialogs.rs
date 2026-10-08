@@ -1686,6 +1686,10 @@ pub fn confirm(app: &mut DesignApp) -> Result<Value, String> {
                     Some(Value::Bool(b)) => {
                         p.insert(f.key, json!(b));
                     }
+                    // Set through the control channel or MCP: already JSON.
+                    Some(v @ (Value::Number(_) | Value::Array(_) | Value::Object(_))) => {
+                        p.insert(f.key, v.clone());
+                    }
                     _ => {}
                 }
             }
@@ -2680,5 +2684,25 @@ mod tests {
         for c in designcraft_engine::command_specs() {
             let _ = command_fields(c.params);
         }
+    }
+
+    #[test]
+    fn command_dialogs_pass_json_values_through() {
+        let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        let ctx = egui::Context::default();
+        let control = |app: &mut DesignApp, method: &str, params: Value| {
+            let (req, _) = crate::control::ControlRequest::new(method, params);
+            let crate::control::Outcome::Done(v) = crate::control::handle(app, &ctx, &req) else { panic!("no reply") };
+            assert_eq!(v["ok"], true, "{method}: {v}");
+        };
+        control(&mut app, "ui.menu.invoke", json!({"command": "file.new"}));
+        assert_eq!(app.ui.dialog.as_ref().map(|d| d.id.as_str()), Some("cmd:file.new"));
+        control(&mut app, "ui.dialog.set", json!({"field": "preset", "value": "A4"}));
+        control(&mut app, "ui.dialog.set", json!({"field": "pages", "value": 2}));
+        control(&mut app, "ui.dialog.set", json!({"field": "margins", "value": {"top": 10, "bottom": 20, "inside": 30, "outside": 40}}));
+        control(&mut app, "ui.dialog.confirm", json!({}));
+        let doc = &app.session.doc().unwrap().doc;
+        assert_eq!(doc.page_count(), 2);
+        assert_eq!(doc.page(0).unwrap().margins.top, 10.0);
     }
 }
