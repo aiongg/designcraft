@@ -28,7 +28,8 @@ pub struct Glyph {
     /// Baseline shift (positive = up), including super/subscript.
     pub shift: f64,
     pub ascent: f64,
-    /// The font's typographic ascender, scaled like `ascent`: the Ascent first baseline offset.
+    /// The font's typographic ascender at the point size (vertical scale doesn't apply): the Ascent
+    /// first baseline offset.
     pub typo_ascent: f64,
     pub descent: f64,
     /// The leading this character asks for (absolute, or auto = size × auto %).
@@ -780,7 +781,7 @@ fn control_glyph(face: &Arc<FontFace>, p: &CharProps, auto_leading: TypeEnv, sty
         sy: k * p.v_scale,
         shift,
         ascent,
-        typo_ascent: face.typo_ascent * k * p.v_scale,
+        typo_ascent: face.typo_ascent * k,
         descent,
         leading,
         cap,
@@ -899,7 +900,7 @@ fn shape_segment(
             sy: k * p.v_scale,
             shift,
             ascent,
-            typo_ascent: face.typo_ascent * k * p.v_scale,
+            typo_ascent: face.typo_ascent * k,
             descent,
             leading,
             cap,

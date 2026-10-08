@@ -1395,18 +1395,6 @@ fn ascent_first_baseline_uses_the_typographic_ascender() {
     assert!(close(at(FirstBaseline::XHeight, 0.0), top + 0.486 * 20.0));
     assert!(close(at(FirstBaseline::Leading, 0.0), top + 24.0));
     assert!(close(at(FirstBaseline::Fixed, 0.0), top));
-    // Vertical scale scales it like the ascent.
-    let (mut d, sid, fid) = doc_with("Hxg", Rect::new(36.0, 36.0, 300.0, 300.0), ParaAttrs::default());
-    d.story_mut(sid).unwrap().format_chars(0..3, |f| {
-        f.over.font_family = Some("TypoAscent 07".into());
-        f.over.size = Some(20.0);
-        f.over.v_scale = Some(1.5);
-    });
-    d.item_mut(fid).unwrap().text_frame_mut().unwrap().options.inset = [4.0, 0.0, 0.0, 0.0];
-    let l = &compose_story(&d, sid, &ComposeOptions::default()).frames[0].lines[0];
-    assert!(close(l.baseline, top + 21.0), "{}", l.baseline);
-    // The line box keeps the font's ascent.
-    assert!(close(l.ascent, 30.0), "{}", l.ascent);
     // A mixed first line takes its tallest typographic ascender: 0.7 × 20 pt beats 1 em × 10 pt …
     let (mut d, sid, fid) = doc_with("Hxg Hxg", Rect::new(36.0, 36.0, 300.0, 300.0), ParaAttrs::default());
     let st = d.story_mut(sid).unwrap();
@@ -1449,6 +1437,29 @@ fn vertical_frames_keep_the_ascent_first_baseline() {
     });
     // Composed in the turned box (no inset): the hhea ascent, 1 em of 20 pt.
     assert!((b - 20.0).abs() < 0.01, "{b}");
+}
+
+#[test]
+fn vertical_scale_does_not_move_the_ascent_first_baseline() {
+    let db = designcraft_fonts::FontDb::global();
+    db.add_font(typo_test_font("TypoAscentVSc", Some(700)));
+    let line = |v_scale: f64| {
+        let (mut d, sid, fid) = doc_with("Hxg", Rect::new(36.0, 36.0, 300.0, 300.0), ParaAttrs::default());
+        d.story_mut(sid).unwrap().format_chars(0..3, |f| {
+            f.over.font_family = Some("TypoAscentVSc".into());
+            f.over.size = Some(20.0);
+            f.over.v_scale = Some(v_scale);
+        });
+        d.item_mut(fid).unwrap().text_frame_mut().unwrap().options.inset = [4.0, 0.0, 0.0, 0.0];
+        let l = &compose_story(&d, sid, &ComposeOptions::default()).frames[0].lines[0];
+        (l.baseline, l.ascent)
+    };
+    let ((b100, a100), (b200, a200)) = (line(1.0), line(2.0));
+    // The typo ascender of the nominal size (0.7 × 20 pt) at 100 % and at 200 %.
+    assert!((b100 - (36.0 + 4.0 + 14.0)).abs() < 0.01, "{b100}");
+    assert!((b200 - b100).abs() < 0.01, "{b200} vs {b100}");
+    // The line box keeps the scaled ascent.
+    assert!((a100 - 20.0).abs() < 0.01 && (a200 - 40.0).abs() < 0.01, "{a100} {a200}");
 }
 
 #[test]
