@@ -915,11 +915,11 @@ impl DesignApp {
     }
 }
 
-/// Files that open as documents (when dropped or picked) rather than being placed: DesignCraft,
-/// IDML, and InDesign documents and templates (which explain how to export IDML).
+/// Files that open as documents (when dropped or picked) rather than being placed: DesignCraft
+/// and IDML.
 pub fn opens_as_document(name: &str) -> bool {
     let n = name.to_ascii_lowercase();
-    [".designcraft", ".idml", ".indd", ".indt"].iter().any(|ext| n.ends_with(ext))
+    [".designcraft", ".idml"].iter().any(|ext| n.ends_with(ext))
 }
 
 pub fn now_ms() -> f64 {
@@ -950,12 +950,10 @@ mod tests {
         assert_eq!(ui.snap_view().zone_px, 0.0);
     }
 
-    /// A temporary file that starts like an InDesign document (its 16-byte signature).
-    fn indd_file(tag: &str) -> std::path::PathBuf {
-        let path = std::env::temp_dir().join(format!("designcraft-ui-{tag}-{}.indd", std::process::id()));
-        let mut b = vec![0x06, 0x06, 0xED, 0xF5, 0xD8, 0x1D, 0x46, 0xE5, 0xBD, 0x31, 0xEF, 0xE7, 0xFE, 0x74, 0xB7, 0x1D];
-        b.resize(4096, 0);
-        std::fs::write(&path, b).unwrap();
+    /// A temporary file named `name` whose bytes aren't a document or a graphic.
+    fn unreadable_file(name: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("designcraft-ui-{}-{name}", std::process::id()));
+        std::fs::write(&path, b"neither a document nor a graphic").unwrap();
         path
     }
 
@@ -968,49 +966,52 @@ mod tests {
 
     #[test]
     fn dropped_documents_open_and_the_rest_is_placed() {
-        for name in ["a.designcraft", "B.IDML", "c.indd", "D.INDT"] {
+        for name in ["a.designcraft", "B.IDML"] {
             assert!(opens_as_document(name), "{name}");
         }
-        for name in ["a.png", "b.pdf", "indd.txt", "c.indd.zip"] {
+        for name in ["a.png", "b.pdf", "idml.txt", "c.idml.zip"] {
             assert!(!opens_as_document(name), "{name}");
         }
     }
 
     #[test]
-    fn dropping_an_indesign_document_opens_it_and_alerts() {
-        let path = indd_file("drop");
+    fn dropping_an_unreadable_file_alerts() {
+        // A document opens, so it says it can't be opened.
+        let path = unreadable_file("broken.designcraft");
         let mut app = DesignApp::new(Session::new(), Services::default());
         let r = app.open_dropped(&path.to_string_lossy());
         let _ = std::fs::remove_file(&path);
-        assert!(r.is_err());
+        let e = r.unwrap_err();
         let (title, message) = alert(&app);
-        assert_eq!(title, "Can't Open the File", "an .indd opens, it isn't placed");
-        assert!(message.contains("InDesign document") && message.contains("IDML"), "{message}");
-        assert!(app.ui.status.contains("InDesign document"), "the status line says it too");
+        assert_eq!(title, "Can't Open the File", "a document opens, it isn't placed");
+        assert_eq!(message, e);
+        assert!(app.ui.status.contains(&e), "the status line says it too");
         assert!(app.session.documents().is_empty());
         dialogs::confirm(&mut app).unwrap();
         assert!(app.ui.dialog.is_none(), "OK closes the alert");
+        // Anything else is placed, so it says it can't be placed.
+        app.run("file.new", json!({})).unwrap();
+        let path = unreadable_file("notes.xyz");
+        let r = app.open_dropped(&path.to_string_lossy());
+        let _ = std::fs::remove_file(&path);
+        let e = r.unwrap_err();
+        assert_eq!(alert(&app), ("Can't Place the File".to_string(), e));
     }
 
     #[test]
     fn file_open_failures_show_an_alert() {
-        let path = indd_file("open");
+        let path = unreadable_file("open.designcraft");
         let picked = path.to_string_lossy().to_string();
         let services = Services { pick_open: Some(Box::new(move |_| Some(picked.clone()))), ..Default::default() };
         let mut app = DesignApp::new(Session::new(), services);
-        let r = app.run("app.openDialog", json!({}));
-        assert!(r.is_err());
-        let (title, message) = alert(&app);
-        assert_eq!(title, "Can't Open the File");
-        assert!(message.contains("InDesign document"), "{message}");
-        // Placing one says so too.
+        let e = app.run("app.openDialog", json!({})).unwrap_err();
+        assert_eq!(alert(&app), ("Can't Open the File".to_string(), e));
+        // Placing it says so too.
         app.ui.dialog = None;
         app.run("file.new", json!({})).unwrap();
-        assert!(app.run("app.placeDialog", json!({})).is_err());
+        let e = app.run("app.placeDialog", json!({})).unwrap_err();
         let _ = std::fs::remove_file(&path);
-        let (title, message) = alert(&app);
-        assert_eq!(title, "Can't Place the File");
-        assert!(message.contains("InDesign document"), "{message}");
+        assert_eq!(alert(&app), ("Can't Place the File".to_string(), e));
     }
 
     #[test]
