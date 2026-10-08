@@ -1395,18 +1395,6 @@ fn ascent_first_baseline_uses_the_typographic_ascender() {
     assert!(close(at(FirstBaseline::XHeight, 0.0), top + 0.486 * 20.0));
     assert!(close(at(FirstBaseline::Leading, 0.0), top + 24.0));
     assert!(close(at(FirstBaseline::Fixed, 0.0), top));
-    // Vertical scale scales it like the ascent.
-    let (mut d, sid, fid) = doc_with("Hxg", Rect::new(36.0, 36.0, 300.0, 300.0), ParaAttrs::default());
-    d.story_mut(sid).unwrap().format_chars(0..3, |f| {
-        f.over.font_family = Some("TypoAscent 07".into());
-        f.over.size = Some(20.0);
-        f.over.v_scale = Some(1.5);
-    });
-    d.item_mut(fid).unwrap().text_frame_mut().unwrap().options.inset = [4.0, 0.0, 0.0, 0.0];
-    let l = &compose_story(&d, sid, &ComposeOptions::default()).frames[0].lines[0];
-    assert!(close(l.baseline, top + 21.0), "{}", l.baseline);
-    // The line box keeps the font's ascent.
-    assert!(close(l.ascent, 30.0), "{}", l.ascent);
     // A mixed first line takes its tallest typographic ascender: 0.7 × 20 pt beats 1 em × 10 pt …
     let (mut d, sid, fid) = doc_with("Hxg Hxg", Rect::new(36.0, 36.0, 300.0, 300.0), ParaAttrs::default());
     let st = d.story_mut(sid).unwrap();
@@ -1449,6 +1437,102 @@ fn vertical_frames_keep_the_ascent_first_baseline() {
     });
     // Composed in the turned box (no inset): the hhea ascent, 1 em of 20 pt.
     assert!((b - 20.0).abs() < 0.01, "{b}");
+}
+
+#[test]
+fn a_visible_frame_stroke_insets_the_text() {
+    use designcraft_doc::{Stroke, StrokeAlign};
+    let line = |stroke: Option<(StrokeAlign, &str)>| {
+        let (mut d, sid, fid) = doc_with("Hxg", Rect::new(36.0, 36.0, 300.0, 300.0), ParaAttrs::default());
+        let it = d.item_mut(fid).unwrap();
+        if let Some((align, swatch)) = stroke {
+            it.stroke = Stroke { weight: 4.0, align, swatch: swatch.into(), ..Stroke::default() };
+        }
+        it.text_frame_mut().unwrap().options.inset = [4.0; 4];
+        let l = &compose_story(&d, sid, &ComposeOptions::default()).frames[0].lines[0];
+        (l.baseline, l.x0, l.x1)
+    };
+    let black = designcraft_color::swatch::BLACK;
+    let (b, x0, x1) = line(None);
+    // The part of the 4 pt stroke inside the frame: half of it centred, all of it inside, none
+    // outside or without a colour; on the left and right as on the top.
+    for (stroke, d) in [
+        ((StrokeAlign::Center, black), 2.0),
+        ((StrokeAlign::Inside, black), 4.0),
+        ((StrokeAlign::Outside, black), 0.0),
+        ((StrokeAlign::Inside, designcraft_color::swatch::NONE), 0.0),
+    ] {
+        let (sb, sx0, sx1) = line(Some(stroke));
+        assert!((sb - (b + d)).abs() < 1e-6, "{stroke:?}: baseline {sb} vs {b}");
+        assert!((sx0 - (x0 + d)).abs() < 1e-6 && (sx1 - (x1 - d)).abs() < 1e-6, "{stroke:?}: {sx0}..{sx1} vs {x0}..{x1}");
+    }
+}
+
+#[test]
+fn list_labels_do_not_raise_the_ascent_first_baseline() {
+    use designcraft_doc::{CharAttrs, ListType};
+    // The paragraph's own character size (the label's) is 40 pt; its text is 10 pt (Source Sans 3:
+    // typo ascender 1 em).
+    let line = |text: &str, list: ListType| {
+        let (mut d, sid, _) = doc_with(text, Rect::new(36.0, 36.0, 300.0, 300.0), ParaAttrs { list_type: Some(list), ..Default::default() });
+        let st = d.story_mut(sid).unwrap();
+        for p in &mut st.paras {
+            p.chars = CharAttrs { font_family: Some("Source Sans 3".into()), size: Some(40.0), ..Default::default() };
+        }
+        st.format_chars(0..text.len(), |f| f.over.size = Some(10.0));
+        let l = compose_story(&d, sid, &ComposeOptions::default()).frames[0].lines[0].clone();
+        (l.baseline, l.ascent, l.leading)
+    };
+    let (b, asc, lead) = line("Hxg Hxg", ListType::None);
+    // 1 em of the 10 pt text below the frame top.
+    assert!((b - 46.0).abs() < 0.01, "{b}");
+    for list in [ListType::Bullets, ListType::Numbers] {
+        let (lb, lasc, llead) = line("Hxg Hxg", list);
+        assert!((lb - b).abs() < 1e-6, "{list:?}: {lb} vs {b}");
+        // The 40 pt label still sets the line's ascent and leading.
+        assert!(lasc > asc + 20.0 && (llead - 48.0).abs() < 1e-6 && (lead - 12.0).abs() < 1e-6, "{list:?}: {lasc} {asc} {llead} {lead}");
+    }
+    // An empty bulleted paragraph sits like an empty paragraph.
+    let (eb, _, _) = line("", ListType::None);
+    let (ebl, _, _) = line("", ListType::Bullets);
+    assert!((ebl - eb).abs() < 1e-6, "{ebl} vs {eb}");
+}
+
+#[test]
+fn spaces_count_toward_the_ascent_first_baseline() {
+    // 10 pt text with a 40 pt space between its words (Source Sans 3: typo ascender 1 em).
+    let (mut d, sid, _) = doc_with("Hxg Hxg", Rect::new(36.0, 36.0, 300.0, 300.0), ParaAttrs::default());
+    let st = d.story_mut(sid).unwrap();
+    st.format_chars(0..7, |f| {
+        f.over.font_family = Some("Source Sans 3".into());
+        f.over.size = Some(10.0);
+    });
+    st.format_chars(3..4, |f| f.over.size = Some(40.0));
+    let l = &compose_story(&d, sid, &ComposeOptions::default()).frames[0].lines[0];
+    assert!((l.baseline - (36.0 + 40.0)).abs() < 0.01, "{}", l.baseline);
+}
+
+#[test]
+fn vertical_scale_does_not_move_the_ascent_first_baseline() {
+    let db = designcraft_fonts::FontDb::global();
+    db.add_font(typo_test_font("TypoAscentVSc", Some(700)));
+    let line = |v_scale: f64| {
+        let (mut d, sid, fid) = doc_with("Hxg", Rect::new(36.0, 36.0, 300.0, 300.0), ParaAttrs::default());
+        d.story_mut(sid).unwrap().format_chars(0..3, |f| {
+            f.over.font_family = Some("TypoAscentVSc".into());
+            f.over.size = Some(20.0);
+            f.over.v_scale = Some(v_scale);
+        });
+        d.item_mut(fid).unwrap().text_frame_mut().unwrap().options.inset = [4.0, 0.0, 0.0, 0.0];
+        let l = &compose_story(&d, sid, &ComposeOptions::default()).frames[0].lines[0];
+        (l.baseline, l.ascent)
+    };
+    let ((b100, a100), (b200, a200)) = (line(1.0), line(2.0));
+    // The typo ascender of the nominal size (0.7 × 20 pt) at 100 % and at 200 %.
+    assert!((b100 - (36.0 + 4.0 + 14.0)).abs() < 0.01, "{b100}");
+    assert!((b200 - b100).abs() < 0.01, "{b200} vs {b100}");
+    // The line box keeps the scaled ascent.
+    assert!((a100 - 20.0).abs() < 0.01 && (a200 - 40.0).abs() < 0.01, "{a100} {a200}");
 }
 
 #[test]
@@ -2757,4 +2841,30 @@ fn vertical_lines_fit_the_em_box() {
         assert!((l.ascent - ascent).abs() < 1e-9 && (l.descent - descent).abs() < 1e-9, "{family}: {} {}", l.ascent, l.descent);
         assert!((l.baseline - col.y0 - ascent).abs() < 1e-9, "{family}: {} {}", l.baseline, col.y0);
     }
+}
+
+/// A drop cap set in one of the document's own fonts measures its side bearing in that font.
+#[test]
+fn drop_cap_in_a_document_font_aligns_its_left_edge() {
+    use designcraft_geom::Shape as _;
+    const FAMILY: &str = "DocFont Drop Cap";
+    let text = format!("Once {LOREM}");
+    let mut chars: Vec<char> = text.chars().collect();
+    chars.sort_unstable();
+    chars.dedup();
+    let folder = std::env::temp_dir().join(format!("dc-compose-dropcap-docfont-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("dropcap.ttf"), designcraft_fonts::testing::font_with_glyph(FAMILY, &chars, 'O').unwrap()).unwrap();
+    let scope = designcraft_fonts::FontDb::global().load_document_fonts(&folder).scope;
+    let para = ParaAttrs { left_indent: Some(10.0), ..drop_cap(2, 1) };
+    let (mut d, sid, _) = doc_with(&text, Rect::new(0.0, 0.0, 300.0, 1000.0), para);
+    d.font_scope = scope;
+    d.story_mut(sid).unwrap().format_chars(0..text.len(), |f| f.over.font_family = Some(FAMILY.into()));
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let dc = &all_lines(&cs)[0].glyphs[0];
+    assert_eq!(dc.face.family, FAMILY);
+    let ink_left = dc.x + designcraft_fonts::FontDb::global().outline(dc.face.get(), dc.gid).bounding_box().x0 * dc.sx;
+    assert!(ink_left - dc.x > 0.5, "the O has a visible side bearing");
+    assert!((ink_left - 10.0).abs() < 1e-6, "ink at {ink_left}");
+    let _ = std::fs::remove_dir_all(&folder);
 }

@@ -1286,7 +1286,6 @@ impl<'r> Importer<'r> {
         a.glyph_scale_max = frac("MaximumGlyphScaling");
         a.auto_leading = frac("AutoLeading");
         a.single_word_justify = e.prop("SingleWordJustification").and_then(|v| names::align_in(v.trim()));
-        a.kashidas = e.prop("Kashidas").and_then(|v| names::kashidas_in(v.trim()));
         a.keep_with_next = u("KeepWithNext");
         a.keep_lines_together = e.boolean("KeepLinesTogether");
         a.keep_all_lines = e.boolean("KeepAllLinesTogether");
