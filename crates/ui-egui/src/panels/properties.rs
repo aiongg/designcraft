@@ -1289,8 +1289,7 @@ pub fn character_panel(app: &mut DesignApp, ui: &mut egui::Ui) {
     });
     ui.horizontal(|ui| {
         // Bold and Italic pick the family's own styles (style linking).
-        let (weight, italic) =
-            designcraft_fonts::FontDb::global().traits_of(c["fontFamily"].as_str().unwrap_or_default(), c["fontStyle"].as_str().unwrap_or_default());
+        let (weight, italic) = super::fonts(app).traits_of(c["fontFamily"].as_str().unwrap_or_default(), c["fontStyle"].as_str().unwrap_or_default());
         let tip = |app: &DesignApp, name: &str, id: &str| {
             let name = crate::i18n::tr(&app.ui.language, name);
             match crate::menus::shortcut_of(app, id) {
