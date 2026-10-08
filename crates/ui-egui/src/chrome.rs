@@ -807,4 +807,18 @@ mod tests {
         let after = [rect(&h, FIRST_CONTROL), rect(&h, LAST_CONTROL), rect(&h, "Help"), rect(&h, "Share")];
         assert_eq!(after, before);
     }
+
+    #[test]
+    fn a_scrolled_bar_keeps_its_captions_on_one_line() {
+        let mut app = app();
+        app.run("file.new", serde_json::json!({})).unwrap();
+        let f = app.run("frame.create", serde_json::json!({"rect": [72, 72, 300, 200], "content": "text", "text": "Hello"})).unwrap();
+        app.run("selection.set", serde_json::json!({"ids": [f["id"]]})).unwrap();
+        let mut h = test_window::open(app, vec2(700.0, 600.0));
+        let bar = test_window::panel_rect(&h, "control_bar").center();
+        wheel(&mut h, bar, vec2(0.0, -3000.0));
+        // The text frame's last group: its caption gets only what is left of the row.
+        let columns = h.get_by_label("Columns").rect();
+        assert!(columns.height() < 20.0 && columns.width() > columns.height(), "Columns wraps: {columns:?}");
+    }
 }
