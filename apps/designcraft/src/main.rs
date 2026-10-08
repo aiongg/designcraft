@@ -25,7 +25,7 @@ impl eframe::App for App {
                 self.1 = Some(native_menu::NativeMenu::install(&mut self.0));
             }
             if let Some(m) = &mut self.1 {
-                m.poll(&mut self.0);
+                m.poll(&mut self.0, ctx);
             }
         }
         self.0.logic(ctx);
