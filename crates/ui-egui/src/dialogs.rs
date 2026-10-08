@@ -12,6 +12,10 @@ use crate::theme::semibold;
 pub struct Dialog {
     pub id: String,
     pub fields: Map<String, Value>,
+    /// The file the dialog acts on when it has no path (Place PDF in the browser), shared
+    /// rather than copied each frame.
+    #[serde(skip)]
+    pub bytes: Option<std::sync::Arc<Vec<u8>>>,
 }
 
 impl Dialog {
@@ -60,7 +64,7 @@ impl Dialog {
                 }
             }
         }
-        Dialog { id: id.into(), fields }
+        Dialog { id: id.into(), fields, bytes: None }
     }
     fn s(&self, k: &str) -> String {
         match self.fields.get(k) {
@@ -1066,7 +1070,7 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
             "preferences" => preferences(app, ui, &mut d),
             "print" => print_dialog(app, ui, &mut d),
             "pdfImport" => {
-                ui.label(egui::RichText::new(d.s("path")).size(11.0));
+                ui.label(egui::RichText::new(if d.bytes.is_some() { d.s("name") } else { d.s("path") }).size(11.0));
                 ui.horizontal(|ui| {
                     crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Page (1–{count}):").replace("{count}", &d.n("pages").unwrap_or(1.0).to_string()));
                     text_field(ui, &mut d, "page", 60.0);
@@ -1514,7 +1518,15 @@ pub fn confirm(app: &mut DesignApp) -> Result<Value, String> {
         }
         "pdfImport" => {
             let crop = d.s("crop");
-            app.open_file("file.place", json!({"path": d.s("path"), "pdfPage": d.n("page").unwrap_or(1.0).max(1.0) as u64, "pdfCrop": if crop.is_empty() { "crop".to_string() } else { crop }}))
+            let crop = if crop.is_empty() { "crop".to_string() } else { crop };
+            let page = d.n("page").unwrap_or(1.0).max(1.0) as u64;
+            match &d.bytes {
+                Some(b) => app.open_file(
+                    "file.place",
+                    json!({"base64": designcraft_engine::cmd::base64_encode(b), "name": d.s("name"), "pdfPage": page, "pdfCrop": crop}),
+                ),
+                None => app.open_file("file.place", json!({"path": d.s("path"), "pdfPage": page, "pdfCrop": crop})),
+            }
         }
         "print" => {
             let pages = if d.s("range") == "all" { Value::Null } else { json!(d.s("pages")) };
