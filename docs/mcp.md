@@ -31,7 +31,7 @@ Other MCP clients use the same command line, e.g. in a JSON config:
 | Engine | In-process `designcraft_engine::Session`, starts with an empty Letter document (`--sample` opens the sample magazine) | The app's session, through its loopback control channel ([control-protocol.md](control-protocol.md)) |
 | Rendering | `designcraft-render` (CPU) | The app's renderer |
 | Window tools (`screenshot`, `click`, `drag`, `menu_list`, `ui_inspect`, `ui_set`, `dialog_*`) | Return an error explaining how to connect | Work |
-| UI-only commands (`view.*`, `window.*`, `app.*`) via `execute` | Error | Work |
+| UI-only commands via `execute` (`view.*`, `window.*`, `help.*`, `edit.dynamicSpelling`, and `app.*` except `app.links`) | Error | Work |
 
 In connected mode every tool maps to a control-channel method (`engine.execute`, `ui.render`, `ui.pointer`, …), so
 what the agent does shows up live in the window. The connection is re-established once if the app restarts.
