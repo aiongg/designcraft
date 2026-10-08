@@ -41,6 +41,20 @@ The result is JSON: `{"completed": n, "results": [...]}`, plus `failedIndex` / `
 fails (the exit status is non-zero; `--keep-going` records errors and continues). `run --cmd ID=JSON` accepts the
 same references, and MCP's `batch` tool takes `commands` or `script` text with them.
 
+## Data merge
+
+`data.source.select {path, sheet?}` links a CSV/TSV/`.xlsx` file to the document (`data.source.update` re-reads it,
+`data.source.remove` drops it); `data.fields` lists its fields. `data.placeholder.add {field, role?, story?, at?, end?, item?}`
+marks text or a frame as a field (`role`: text, image, qr, hyperlink); `data.options` sets records, tiling and image
+fitting; `data.preview {record}` / `data.preview.stop` show one record without saving it.
+
+`data.merge` now **creates a new document** and leaves the template unchanged (the old `spread` parameter, which
+appended pages to the template, is an error). It uses the linked source, or inline `csv` / `rows` / `path` / `bytes`:
+
+```sh
+echo 'data.merge {"path": "people.csv", "records": "range", "range": "1-20"}' | designcraft-cli script - --in template.designcraft --save merged.designcraft
+```
+
 ## The running app
 
 ```sh
