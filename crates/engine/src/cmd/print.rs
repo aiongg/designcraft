@@ -2,8 +2,12 @@
 
 use serde_json::{Value, json};
 
-use super::{CommandSpec, bad, cmd, has_doc, str_param};
-use crate::{EngineError, Result, Session};
+#[cfg(not(target_arch = "wasm32"))]
+use super::str_param;
+use super::{CommandSpec, bad, cmd, has_doc};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::EngineError;
+use crate::{Result, Session};
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -36,6 +40,14 @@ fn printers() -> Value {
     json!({"printers": [], "default": null})
 }
 
+/// The browser has no print spooler and no files: Print points to the PDF instead, before any
+/// work is done.
+#[cfg(target_arch = "wasm32")]
+fn print(_: &mut Session, _: &Value) -> Result<Value> {
+    Err(bad("file.print", "printing isn't available in the browser: choose File › Export PDF… and print the PDF"))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn print(s: &mut Session, p: &Value) -> Result<Value> {
     let d = &s.doc()?.doc;
     let opts = super::export::options(p, d.page_count())?;
@@ -57,20 +69,12 @@ fn print(s: &mut Session, p: &Value) -> Result<Value> {
     if dry {
         return Ok(out);
     }
-    #[cfg(target_arch = "wasm32")]
-    {
-        let _ = pdf;
-        Err(bad("file.print", "printing isn't available on the web: export a PDF and print it"))
+    std::fs::write(&file, &pdf).map_err(|e| EngineError::Other(format!("{}: {e}", file.display())))?;
+    let st = std::process::Command::new(&cmd[0]).args(&cmd[1..]).output().map_err(|e| bad("file.print", format!("lpr: {e}")))?;
+    if !st.status.success() {
+        return Err(bad("file.print", String::from_utf8_lossy(&st.stderr).trim().to_string()));
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        std::fs::write(&file, &pdf).map_err(|e| EngineError::Other(format!("{}: {e}", file.display())))?;
-        let st = std::process::Command::new(&cmd[0]).args(&cmd[1..]).output().map_err(|e| bad("file.print", format!("lpr: {e}")))?;
-        if !st.status.success() {
-            return Err(bad("file.print", String::from_utf8_lossy(&st.stderr).trim().to_string()));
-        }
-        Ok(out)
-    }
+    Ok(out)
 }
 
 #[cfg(test)]
