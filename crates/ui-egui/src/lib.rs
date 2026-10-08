@@ -1021,3 +1021,54 @@ mod tests {
         assert!(!app.ui.status.is_empty());
     }
 }
+
+/// The whole window in a headless test harness, at a chosen window size.
+#[cfg(test)]
+pub(crate) mod test_window {
+    use egui_kittest::Harness;
+
+    pub struct Window {
+        pub app: crate::DesignApp,
+        ready: bool,
+    }
+
+    /// The window at `size` with a new document open.
+    pub fn open(mut app: crate::DesignApp, size: egui::Vec2) -> Harness<'static, Window> {
+        if app.session.active().is_none() {
+            app.run("file.new", serde_json::json!({})).unwrap();
+        }
+        let mut h = Harness::builder().with_size(size).with_max_steps(1000).build_ui_state(
+            |ui, w: &mut Window| {
+                // The builder runs a frame before the texture size can be raised: skip it.
+                if !w.ready {
+                    return;
+                }
+                let ctx = ui.ctx().clone();
+                w.app.logic(&ctx);
+                w.app.ui(ui);
+            },
+            Window { app, ready: false },
+        );
+        h.input_mut().max_texture_side = Some(8192);
+        h.state_mut().ready = true;
+        h.run_steps(6);
+        h
+    }
+
+    /// The mouse wheel turned over `pos`: positive `delta` moves the content right and down.
+    pub fn wheel(h: &mut Harness<'static, Window>, pos: egui::Pos2, delta: egui::Vec2) {
+        h.hover_at(pos);
+        h.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta,
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::NONE,
+        });
+        h.run_steps(10);
+    }
+
+    /// The outer rect of a side or top panel, from egui's memory.
+    pub fn panel_rect(h: &Harness<'static, Window>, id: &str) -> egui::Rect {
+        egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new(id)).map(|s| s.outer_rect).unwrap()
+    }
+}
