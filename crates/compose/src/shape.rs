@@ -127,6 +127,7 @@ fn shaping_key(p: &CharProps) -> CharProps {
         strikethrough_tint: d.strikethrough_tint,
         ruby: d.ruby,
         kenten: d.kenten,
+        kenten_character: d.kenten_character,
         conditions: d.conditions,
         change: d.change,
         xml_tag: d.xml_tag,
