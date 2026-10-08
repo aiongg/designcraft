@@ -1060,7 +1060,7 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
             "preferences" => preferences(app, ui, &mut d),
             "print" => print_dialog(app, ui, &mut d),
             "pdfImport" => {
-                ui.label(egui::RichText::new(d.s("path")).size(11.0));
+                ui.label(egui::RichText::new(if d.b("async") { d.s("name") } else { d.s("path") }).size(11.0));
                 ui.horizontal(|ui| {
                     crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Page (1–{count}):").replace("{count}", &d.n("pages").unwrap_or(1.0).to_string()));
                     text_field(ui, &mut d, "page", 60.0);
@@ -1392,7 +1392,10 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
         Some(true) => {
             let _ = confirm(app);
         }
-        Some(false) => app.ui.dialog = None,
+        Some(false) => {
+            app.ui.dialog = None;
+            app.cancel_pdf_import();
+        }
         None => {}
     }
 }
@@ -1400,6 +1403,9 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
 /// Apply the open dialog.
 pub fn confirm(app: &mut DesignApp) -> Result<Value, String> {
     let Some(d) = app.ui.dialog.take() else { return Err("no dialog open".into()) };
+    if d.id != "pdfImport" || !d.b("async") {
+        app.cancel_pdf_import();
+    }
     match d.id.as_str() {
         "newDocument" => {
             let margins = json!({"top": d.m("marginTop").unwrap_or(36.0), "bottom": d.m("marginBottom").unwrap_or(36.0), "inside": d.m("marginInside").unwrap_or(36.0), "outside": d.m("marginOutside").unwrap_or(36.0)});
@@ -1498,6 +1504,12 @@ pub fn confirm(app: &mut DesignApp) -> Result<Value, String> {
         }
         "pdfImport" => {
             let crop = d.s("crop");
+            if d.b("async") {
+                return app.confirm_pdf_import(d.n("page").unwrap_or(1.0).max(1.0) as u64, if crop.is_empty() { "crop".into() } else { crop });
+            }
+            if let Some(target) = d.fields.get("target").and_then(Value::as_u64) {
+                app.activate_import_target(&crate::ImportRequest { purpose: "place".into(), target: Some(target) })?;
+            }
             app.run("file.place", json!({"path": d.s("path"), "pdfPage": d.n("page").unwrap_or(1.0).max(1.0) as u64, "pdfCrop": if crop.is_empty() { "crop".to_string() } else { crop }}))
         }
         "print" => {
