@@ -191,7 +191,7 @@ impl Headless {
 
     fn render(&mut self, p: &Value) -> Result<Value, String> {
         let st = self.session.active().ok_or("no document open")?;
-        let page = p.get("page").and_then(Value::as_u64).unwrap_or(0) as usize;
+        let page = designcraft_engine::cmd::page_param(p)?.unwrap_or(0);
         let scale = p.get("scale").and_then(Value::as_f64).unwrap_or(1.0).clamp(0.05, 16.0);
         let bleed = p.get("bleed").and_then(Value::as_bool).unwrap_or(false);
         let img = self
@@ -213,7 +213,7 @@ impl Headless {
     fn export(&mut self, p: &Value) -> Result<Value, String> {
         let path = s(p, "path").ok_or("missing `path`")?;
         let st = self.session.active().ok_or("no document open")?;
-        let page = p.get("page").and_then(Value::as_u64).unwrap_or(0) as usize;
+        let page = designcraft_engine::cmd::page_param(p)?.unwrap_or(0);
         let scale = p.get("scale").and_then(Value::as_f64).unwrap_or(2.0).clamp(0.05, 16.0);
         let img = self
             .renderer

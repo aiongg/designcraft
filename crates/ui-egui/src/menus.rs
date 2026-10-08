@@ -1393,7 +1393,7 @@ fn download_document(app: &mut DesignApp) -> Result<Value, String> {
 
 fn export_png(app: &mut DesignApp, p: &Value) -> Result<Value, String> {
     let st = app.session.active().ok_or("no document")?;
-    let page = p.get("page").and_then(Value::as_u64).map(|v| v as usize).or_else(|| crate::canvas::current_page(app)).unwrap_or(0);
+    let page = designcraft_engine::cmd::page_param(p)?.or_else(|| crate::canvas::current_page(app)).unwrap_or(0);
     let scale = p.get("scale").and_then(Value::as_f64).unwrap_or(2.0);
     let mut r = designcraft_render::Renderer::new();
     let img = r
@@ -2026,6 +2026,24 @@ mod tests {
             let dialog = app.ui.dialog.as_ref().map(|d| d.id.clone());
             assert_eq!(dialog.as_deref(), Some(format!("cmd:{id}").as_str()), "{id} opens its dialog");
         }
+    }
+
+    #[test]
+    fn page_must_be_a_page_index() {
+        let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.session.execute("file.new", &json!({})).unwrap();
+        let ctx = egui::Context::default();
+        for page in [json!(-1), json!(0.5), json!("1")] {
+            let e = run_ui(&mut app, "app.exportPng", &json!({"page": page, "path": "unused.png"})).unwrap().unwrap_err();
+            assert!(e.contains("`page`"), "{e}");
+            let (req, _) = crate::control::ControlRequest::new("ui.render", json!({"page": page}));
+            let crate::control::Outcome::Done(v) = crate::control::handle(&mut app, &ctx, &req) else { panic!("no reply") };
+            assert_eq!(v["ok"], false, "{page}");
+            assert!(v["error"].as_str().unwrap().contains("`page`"), "{v}");
+        }
+        let (req, _) = crate::control::ControlRequest::new("ui.render", json!({}));
+        let crate::control::Outcome::Done(v) = crate::control::handle(&mut app, &ctx, &req) else { panic!("no reply") };
+        assert_eq!(v["ok"], true);
     }
 
     #[test]

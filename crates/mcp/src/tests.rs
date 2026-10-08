@@ -344,6 +344,23 @@ fn files_place_and_export() {
 }
 
 #[test]
+fn page_must_be_a_page_index() {
+    let mut s = server();
+    let out = tmp("bad-page.png");
+    for page in [json!(-1), json!(-2), json!(0.5), json!("1"), json!(true)] {
+        for (tool, args) in [("render_page", json!({"page": page})), ("export_png", json!({"page": page, "path": out}))] {
+            let r = call(&mut s, tool, args);
+            assert_eq!(r["isError"], true, "{tool} page {page}: {r}");
+            assert!(text_of(&r).contains("`page`"), "{tool}: {}", text_of(&r));
+        }
+    }
+    assert!(!out.exists(), "nothing is exported");
+    // Without `page`, the first page.
+    assert_eq!(call(&mut s, "render_page", json!({}))["isError"], false);
+    assert_eq!(call(&mut s, "render_page", json!({"page": 0}))["isError"], false);
+}
+
+#[test]
 fn list_commands_filters() {
     let mut s = server();
     let all = ok(&mut s, "list_commands", json!({}));
