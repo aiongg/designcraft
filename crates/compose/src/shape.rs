@@ -28,9 +28,13 @@ pub struct Glyph {
     /// Baseline shift (positive = up), including super/subscript.
     pub shift: f64,
     pub ascent: f64,
+    /// The font's typographic ascender, scaled like `ascent`: the Ascent first baseline offset.
+    pub typo_ascent: f64,
     pub descent: f64,
     /// The leading this character asks for (absolute, or auto = size × auto %).
     pub leading: f64,
+    /// Cap height and x height, scaled like `ascent`: the Cap Height and x Height first baseline
+    /// offsets.
     pub cap: f64,
     pub xh: f64,
     pub size: f64,
@@ -89,6 +93,8 @@ struct Piece {
     range: std::ops::Range<usize>,
     props: CharProps,
     style: u32,
+    /// Shaping settings for the style (a missing font turns glyph fallback on).
+    env: TypeEnv,
     /// Hidden conditional text or tracked deletions: laid out as zero-width place-holders.
     hidden: bool,
 }
@@ -229,7 +235,8 @@ impl StyleTable<'_> {
     }
 }
 
-/// Resolve and shape one paragraph.
+/// Resolve and shape one paragraph. Its drop cap ends at byte `drop.0` (`range.start` without
+/// one) and takes the character style `drop.1` ("" = none).
 pub(crate) fn shape_para(
     db: &ScopedFonts<'_>,
     styles: &Styles,
@@ -243,13 +250,18 @@ pub(crate) fn shape_para(
     nested: &[designcraft_doc::NestedStyle],
     grep: &[designcraft_doc::GrepStyle],
     lines: &[(std::ops::Range<usize>, String)],
+    drop: (usize, &str),
 ) -> ShapedPara {
     let _ = pi;
     let mut glyphs = Vec::with_capacity(range.len());
-    // Nested line styles lie under nested and GREP styles (later overlays win).
+    // Nested line styles lie under nested and GREP styles, and the drop cap's style over them all
+    // (later overlays win).
     let mut overlays: Vec<(std::ops::Range<usize>, String)> = lines.to_vec();
     if !nested.is_empty() || !grep.is_empty() {
-        overlays.extend(crate::overlay::overlays(&story.text, range.clone(), nested, grep));
+        overlays.extend(crate::overlay::overlays(&story.text, range.clone(), nested, grep, drop.0));
+    }
+    if drop.0 > range.start && !drop.1.is_empty() && drop.1 != designcraft_doc::NO_CHAR_STYLE {
+        overlays.push((range.start..drop.0, drop.1.to_string()));
     }
     // Each run, cut where nested / GREP styles start and end.
     let mut segments: Vec<(usize, usize, Option<&str>, &designcraft_doc::CharFormat)> = Vec::new();
@@ -307,14 +319,16 @@ pub(crate) fn shape_para(
     let mut pieces: Vec<Piece> = Vec::with_capacity(resolved.len());
     for (a, b, props, fmt, resolved_base) in resolved {
         let style = table.intern(db, &props);
+        // A missing font's substitute stands in for the whole font: fallback fonts help it.
+        let auto_leading = table.env_for(auto_leading, style);
         let deleted = props.change == designcraft_doc::ChangeMark::Deleted;
         if deleted || (!props.conditions.is_empty() && props.conditions.iter().all(|c| sub.hidden_conditions.contains(c))) {
-            pieces.push(Piece { range: a..b, props, style, hidden: true });
+            pieces.push(Piece { range: a..b, props, style, env: auto_leading, hidden: true });
             continue;
         }
         let is_ref = |c: char| c == designcraft_doc::FOOTNOTE_REF || c == designcraft_doc::ENDNOTE_REF;
         if !story.text[a..b].contains(is_ref) {
-            pieces.push(Piece { range: a..b, props, style, hidden: false });
+            pieces.push(Piece { range: a..b, props, style, env: auto_leading, hidden: false });
             continue;
         }
         // Footnote references take the reference position / character style; endnote references
@@ -326,26 +340,28 @@ pub(crate) fn shape_para(
         rf.over.position = Some(sub.note_position);
         let rprops = styles.resolve_char(&resolved_base, &rf);
         let rstyle = table.intern(db, &rprops);
+        let renv = table.env_for(auto_leading, rstyle);
         let mut ef = fmt.clone();
         ef.over.position = Some(designcraft_doc::Position::Superscript);
         let eprops = styles.resolve_char(&resolved_base, &ef);
         let estyle = table.intern(db, &eprops);
+        let eenv = table.env_for(auto_leading, estyle);
         let mut k = a;
         for (i, m) in story.text[a..b].match_indices(is_ref) {
             let i = a + i;
             if k < i {
-                pieces.push(Piece { range: k..i, props: props.clone(), style, hidden: false });
+                pieces.push(Piece { range: k..i, props: props.clone(), style, env: auto_leading, hidden: false });
             }
             let e = i + m.len();
             if m.starts_with(designcraft_doc::ENDNOTE_REF) {
-                pieces.push(Piece { range: i..e, props: eprops.clone(), style: estyle, hidden: false });
+                pieces.push(Piece { range: i..e, props: eprops.clone(), style: estyle, env: eenv, hidden: false });
             } else {
-                pieces.push(Piece { range: i..e, props: rprops.clone(), style: rstyle, hidden: false });
+                pieces.push(Piece { range: i..e, props: rprops.clone(), style: rstyle, env: renv, hidden: false });
             }
             k = e;
         }
         if k < b {
-            pieces.push(Piece { range: k..b, props, style, hidden: false });
+            pieces.push(Piece { range: k..b, props, style, env: auto_leading, hidden: false });
         }
     }
     let mut i = 0;
@@ -359,9 +375,9 @@ pub(crate) fn shape_para(
                 if c == '\n' {
                     continue;
                 }
-                let mut g = control_glyph(&face, &first.props, auto_leading, first.style, first.range.start + k, c);
+                let mut g = control_glyph(&face, &first.props, first.env, first.style, first.range.start + k, c);
                 g.ch = HIDDEN;
-                (g.ascent, g.descent, g.leading, g.cap, g.xh) = (0.0, 0.0, 0.0, 0.0, 0.0);
+                (g.ascent, g.typo_ascent, g.descent, g.leading, g.cap, g.xh) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
                 glyphs.push(g);
             }
             i += 1;
@@ -369,24 +385,28 @@ pub(crate) fn shape_para(
         }
         let key = shaping_key(&first.props);
         let mut j = i + 1;
-        while j < pieces.len() && !pieces[j].hidden && pieces[j].range.start == pieces[j - 1].range.end && shaping_key(&pieces[j].props) == key {
+        // Jidori fits its own run into whole ems: such pieces stay apart.
+        while j < pieces.len()
+            && first.props.jidori == 0
+            && !pieces[j].hidden
+            && pieces[j].range.start == pieces[j - 1].range.end
+            && pieces[j].env.glyph_fallback == first.env.glyph_fallback
+            && shaping_key(&pieces[j].props) == key
+        {
             j += 1;
         }
         let group = &pieces[i..j];
         let range = group[0].range.start..group[j - i - 1].range.end;
         let runs: Vec<(usize, u32)> = group.iter().map(|p| (p.range.start, p.style)).collect();
         let start = glyphs.len();
-        // A missing font's substitute stands in for the whole font: fallback fonts help it.
-        // Pieces shaped together share their font, so the first one's says for all.
-        shape_run(db, &story.text, range, &first.props, table.env_for(auto_leading, first.style), &StyleRuns(&runs), sub, &mut glyphs);
+        shape_run(db, &story.text, range, &first.props, first.env, &StyleRuns(&runs), sub, &mut glyphs);
         // A cluster (a ligature, a letter with its marks) that spans two styles would paint one
         // of them in the other's colour: shape those pieces apart instead.
         let spans_cut = |g: &Glyph| runs[1..].iter().any(|&(cut, _)| g.byte < cut && cut < g.byte + g.len);
         if group.len() > 1 && glyphs[start..].iter().any(spans_cut) {
             glyphs.truncate(start);
             for p in group {
-                let env = table.env_for(auto_leading, p.style);
-                shape_run(db, &story.text, p.range.clone(), &p.props, env, &StyleRuns(&[(p.range.start, p.style)]), sub, &mut glyphs);
+                shape_run(db, &story.text, p.range.clone(), &p.props, p.env, &StyleRuns(&[(p.range.start, p.style)]), sub, &mut glyphs);
             }
         }
         i = j;
@@ -670,10 +690,18 @@ fn shape_run_raw(
                             Some(y) => {
                                 g.adv = o.w;
                                 g.ascent = g.ascent.max(o.h + y);
+                                g.typo_ascent = g.typo_ascent.max(o.h + y);
+                                g.cap = g.cap.max(o.h + y);
+                                g.xh = g.xh.max(o.h + y);
                                 g.descent = g.descent.max(-y);
                             }
                             // Pushes its line down by its height and spacing.
-                            None => g.ascent += o.h + o.space,
+                            None => {
+                                g.ascent += o.h + o.space;
+                                g.typo_ascent += o.h + o.space;
+                                g.cap += o.h + o.space;
+                                g.xh += o.h + o.space;
+                            }
                         }
                         if auto || o.y_offset.is_none() {
                             g.leading = g.leading.max(g.ascent + g.descent);
@@ -844,6 +872,7 @@ fn control_glyph(face: &Arc<FontFace>, p: &CharProps, auto_leading: TypeEnv, sty
         sy: k * p.v_scale,
         shift,
         ascent,
+        typo_ascent: face.typo_ascent * k * p.v_scale,
         descent,
         leading,
         cap,
@@ -962,6 +991,7 @@ fn shape_segment(
             sy: k * p.v_scale,
             shift,
             ascent,
+            typo_ascent: face.typo_ascent * k * p.v_scale,
             descent,
             leading,
             cap,

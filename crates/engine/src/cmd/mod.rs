@@ -50,6 +50,7 @@ mod strokes;
 mod style;
 pub mod table;
 pub mod text;
+mod thread;
 mod toc;
 mod transitions;
 mod variables;
@@ -184,6 +185,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(package::specs());
         v.extend(print::specs());
         v.extend(text::specs());
+        v.extend(thread::specs());
         v.extend(style::specs());
         v.extend(table::specs());
         v.extend(layout::specs());
@@ -297,6 +299,7 @@ pub fn file_bytes(d: &designcraft_doc::Document) -> Vec<u8> {
 pub fn file_from(b: &[u8]) -> Result<designcraft_doc::Document> {
     file::from_bytes(b)
 }
+pub(crate) use datamerge::sync_placeholders;
 pub(crate) use file::load_document_fonts;
 pub use file::{base64_decode, base64_encode, from_bytes, to_bytes};
 pub(crate) use place_text::autoflow as place_text_autoflow;
