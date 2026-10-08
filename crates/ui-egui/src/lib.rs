@@ -126,6 +126,7 @@ pub struct SavedWorkspace {
     pub name: String,
     pub control_bar: bool,
     pub task_bar: bool,
+    pub task_bar_pin: Option<[f32; 2]>,
     pub tools_double_column: bool,
     pub dock_tab: String,
     pub dock_expanded: bool,
@@ -237,6 +238,12 @@ pub struct UiState {
     pub formatting_affects_text: bool,
     /// Window > Contextual Task Bar.
     pub task_bar: bool,
+    /// Where the Contextual Task Bar is pinned: its top-left, in points from the canvas's top-left
+    /// (`None`: it follows the selection).
+    pub task_bar_pin: Option<[f32; 2]>,
+    /// Where the Contextual Task Bar was last shown, like [`Self::task_bar_pin`].
+    #[serde(skip)]
+    pub task_bar_at: Option<[f32; 2]>,
     /// Help › About DesignCraft is open.
     pub about: bool,
     /// The About window's tab: 0 About, 1 Contributors, 2 Models (`about::ABOUT_TABS`).
@@ -313,6 +320,8 @@ impl Default for UiState {
             snap_zone: 4.0,
             formatting_affects_text: false,
             task_bar: true,
+            task_bar_pin: None,
+            task_bar_at: None,
             about: false,
             about_tab: 0,
             pending_urls: Vec::new(),
@@ -1149,6 +1158,14 @@ pub(crate) mod test_window {
             modifiers: egui::Modifiers::NONE,
         });
         h.run_steps(10);
+    }
+
+    /// A primary click at `pos`, then a few frames.
+    pub fn click_at(h: &mut Harness<'static, Window>, pos: egui::Pos2) {
+        h.hover_at(pos);
+        h.drag_at(pos);
+        h.drop_at(pos);
+        h.run_steps(4);
     }
 
     /// The outer rect of a side or top panel, from egui's memory.

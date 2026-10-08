@@ -1747,14 +1747,14 @@ fn regex_ok(p: &str) -> Result<(), ()> {
 
 fn paragraph_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
     let name = d.s("name");
-    let Some(st) = app.session.active() else { return };
-    let Some(style) = st.doc.styles.para(&name).cloned() else {
+    let Some(doc) = app.session.active().map(|s| s.doc.clone()) else { return };
+    let Some(style) = doc.styles.para(&name).cloned() else {
         ui.label(format!("No style named {name}"));
         return;
     };
-    let names: Vec<String> = st.doc.styles.paragraph.iter().map(|p| p.name.clone()).filter(|n| *n != name).collect();
-    let (pp, cp) = st.doc.styles.resolve_para_style(&name);
-    let units = st.doc.settings.horizontal_units;
+    let names: Vec<String> = doc.styles.paragraph.iter().map(|p| p.name.clone()).filter(|n| *n != name).collect();
+    let (pp, cp) = doc.styles.resolve_para_style(&name);
+    let units = doc.settings.horizontal_units;
     let pv = serde_json::to_value(&pp).unwrap_or_default();
     let cv = serde_json::to_value(&cp).unwrap_or_default();
     let cur = |d: &Dialog, k: &str, base: &Value| d.fields.get(k).cloned().unwrap_or_else(|| base.clone());
@@ -2049,15 +2049,12 @@ fn paragraph_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
             }
             "chars" => {
                 let fonts = crate::panels::fonts(app);
-                let menu = crate::panels::font_menu(app);
                 egui::Grid::new("psc").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
                     crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Font Family:"));
                     let fam = cur(d, "c.fontFamily", &cv["fontFamily"]).as_str().unwrap_or("").to_string();
-                    egui::ComboBox::from_id_salt("psfam").selected_text(crate::panels::font_label(app, &menu, &fam)).width(200.0).show_ui(ui, |ui| {
-                        if let Some(f) = crate::panels::font_menu_rows(app, ui, &menu, &fam) {
-                            d.fields.insert("c.fontFamily".into(), json!(f));
-                        }
-                    });
+                    if let Some(f) = crate::panels::font_combo(app, ui, "psfam", &fam, 200.0) {
+                        d.fields.insert("c.fontFamily".into(), json!(f));
+                    }
                     ui.end_row();
                     crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Font Style:"));
                     let sty = cur(d, "c.fontStyle", &cv["fontStyle"]).as_str().unwrap_or("").to_string();
@@ -2186,10 +2183,10 @@ fn paragraph_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
             }
             "color" => {
                 let cur_fill = cur(d, "c.fill", &cv["fill"]).as_str().unwrap_or("").to_string();
-                let swatches: Vec<String> = st.doc.swatches.iter().map(|s| s.name.clone()).collect();
+                let swatches: Vec<String> = doc.swatches.iter().map(|s| s.name.clone()).collect();
                 egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
                     for sw in swatches {
-                        let (c, g) = crate::widgets::swatch_colors(&st.doc, &sw, 1.0);
+                        let (c, g) = crate::widgets::swatch_colors(&doc, &sw, 1.0);
                         ui.horizontal(|ui| {
                             let (r, _) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
                             crate::widgets::paint_chip(ui.painter(), r, c, g);
@@ -2707,12 +2704,11 @@ fn find_font(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
     ui.add_space(8.0);
     crate::rtl::label(ui, egui::RichText::new(crate::i18n::tr(&app.ui.language, "Replace With")).font(semibold(12.0)));
     let db = crate::panels::fonts(app);
-    let menu = crate::panels::font_menu(app);
-    let english = app.session.prefs.show_font_names_in_english;
-    let fam_opts: Vec<(&str, &str)> = menu.iter().map(|f| (f.family.as_str(), f.label(english))).collect();
     egui::Grid::new("ff_to").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
         crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Font Family:"));
-        combo(ui, d, "toFamily", &fam_opts);
+        if let Some(f) = crate::panels::font_combo(app, ui, "toFamily", &d.s("toFamily"), 170.0) {
+            d.fields.insert("toFamily".into(), json!(f));
+        }
         ui.end_row();
         let styles = db.styles(&d.s("toFamily"));
         let st_opts: Vec<(&str, &str)> = styles.iter().map(|s| (s.as_str(), s.as_str())).collect();
