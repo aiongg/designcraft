@@ -69,6 +69,9 @@ pub struct Glyph {
     /// Upright in a vertical frame: shaped top to bottom (`adv` is its vertical advance) and hung
     /// from its vertical origin on the line's centre (see [`crate::PlacedGlyph::vertical_xf`]).
     pub upright: bool,
+    /// Part of the bullet or number the paragraph's list adds: not the line's own text, so it
+    /// doesn't raise the Ascent first baseline.
+    pub list_label: bool,
 }
 
 impl Glyph {
@@ -807,6 +810,7 @@ fn control_glyph(face: &Arc<FontFace>, p: &CharProps, auto_leading: TypeEnv, sty
         shaping_rtl: false,
         lang: designcraft_doc::language_tag(&p.language),
         upright: false,
+        list_label: false,
     }
 }
 
@@ -930,6 +934,7 @@ fn shape_segment(
             shaping_rtl: sg.rtl,
             lang,
             upright: up,
+            list_label: false,
         });
     }
 }

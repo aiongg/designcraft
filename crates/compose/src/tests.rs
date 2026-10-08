@@ -1469,6 +1469,50 @@ fn a_visible_frame_stroke_insets_the_text() {
 }
 
 #[test]
+fn list_labels_do_not_raise_the_ascent_first_baseline() {
+    use designcraft_doc::{CharAttrs, ListType};
+    // The paragraph's own character size (the label's) is 40 pt; its text is 10 pt (Source Sans 3:
+    // typo ascender 1 em).
+    let line = |text: &str, list: ListType| {
+        let (mut d, sid, _) = doc_with(text, Rect::new(36.0, 36.0, 300.0, 300.0), ParaAttrs { list_type: Some(list), ..Default::default() });
+        let st = d.story_mut(sid).unwrap();
+        for p in &mut st.paras {
+            p.chars = CharAttrs { font_family: Some("Source Sans 3".into()), size: Some(40.0), ..Default::default() };
+        }
+        st.format_chars(0..text.len(), |f| f.over.size = Some(10.0));
+        let l = compose_story(&d, sid, &ComposeOptions::default()).frames[0].lines[0].clone();
+        (l.baseline, l.ascent, l.leading)
+    };
+    let (b, asc, lead) = line("Hxg Hxg", ListType::None);
+    // 1 em of the 10 pt text below the frame top.
+    assert!((b - 46.0).abs() < 0.01, "{b}");
+    for list in [ListType::Bullets, ListType::Numbers] {
+        let (lb, lasc, llead) = line("Hxg Hxg", list);
+        assert!((lb - b).abs() < 1e-6, "{list:?}: {lb} vs {b}");
+        // The 40 pt label still sets the line's ascent and leading.
+        assert!(lasc > asc + 20.0 && (llead - 48.0).abs() < 1e-6 && (lead - 12.0).abs() < 1e-6, "{list:?}: {lasc} {asc} {llead} {lead}");
+    }
+    // An empty bulleted paragraph sits like an empty paragraph.
+    let (eb, _, _) = line("", ListType::None);
+    let (ebl, _, _) = line("", ListType::Bullets);
+    assert!((ebl - eb).abs() < 1e-6, "{ebl} vs {eb}");
+}
+
+#[test]
+fn spaces_count_toward_the_ascent_first_baseline() {
+    // 10 pt text with a 40 pt space between its words (Source Sans 3: typo ascender 1 em).
+    let (mut d, sid, _) = doc_with("Hxg Hxg", Rect::new(36.0, 36.0, 300.0, 300.0), ParaAttrs::default());
+    let st = d.story_mut(sid).unwrap();
+    st.format_chars(0..7, |f| {
+        f.over.font_family = Some("Source Sans 3".into());
+        f.over.size = Some(10.0);
+    });
+    st.format_chars(3..4, |f| f.over.size = Some(40.0));
+    let l = &compose_story(&d, sid, &ComposeOptions::default()).frames[0].lines[0];
+    assert!((l.baseline - (36.0 + 40.0)).abs() < 0.01, "{}", l.baseline);
+}
+
+#[test]
 fn vertical_scale_does_not_move_the_ascent_first_baseline() {
     let db = designcraft_fonts::FontDb::global();
     db.add_font(typo_test_font("TypoAscentVSc", Some(700)));
