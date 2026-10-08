@@ -41,7 +41,7 @@ pub fn start() {
             return;
         };
         let mut options = eframe::WebOptions::default();
-        if query().contains("webgl")
+        if crate::query::has_flag(&query(), "webgl")
             && let eframe::egui_wgpu::WgpuSetup::CreateNew(create) = &mut options.wgpu_options.wgpu_setup
         {
             create.instance_descriptor.backends = eframe::wgpu::Backends::GL;
@@ -56,7 +56,7 @@ pub fn start() {
                     }
                     let inbox: Inbox = Inbox::default();
                     let mut app = DesignApp::new(Session::new(), services(inbox.clone(), cc.egui_ctx.clone()));
-                    if query().contains("sample") {
+                    if crate::query::has_flag(&query(), "sample") {
                         let _ = app.run("file.newSample", serde_json::json!({}));
                     }
                     Ok(Box::new(WebShell { app, inbox }))

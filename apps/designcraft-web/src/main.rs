@@ -15,6 +15,9 @@
 //! sample magazine on start.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+// The pure helpers compile (and are tested) on every target; only the browser shell uses them.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+mod query;
 #[cfg(target_arch = "wasm32")]
 mod web;
 
