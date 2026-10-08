@@ -1440,6 +1440,35 @@ fn vertical_frames_keep_the_ascent_first_baseline() {
 }
 
 #[test]
+fn a_visible_frame_stroke_insets_the_text() {
+    use designcraft_doc::{Stroke, StrokeAlign};
+    let line = |stroke: Option<(StrokeAlign, &str)>| {
+        let (mut d, sid, fid) = doc_with("Hxg", Rect::new(36.0, 36.0, 300.0, 300.0), ParaAttrs::default());
+        let it = d.item_mut(fid).unwrap();
+        if let Some((align, swatch)) = stroke {
+            it.stroke = Stroke { weight: 4.0, align, swatch: swatch.into(), ..Stroke::default() };
+        }
+        it.text_frame_mut().unwrap().options.inset = [4.0; 4];
+        let l = &compose_story(&d, sid, &ComposeOptions::default()).frames[0].lines[0];
+        (l.baseline, l.x0, l.x1)
+    };
+    let black = designcraft_color::swatch::BLACK;
+    let (b, x0, x1) = line(None);
+    // The part of the 4 pt stroke inside the frame: half of it centred, all of it inside, none
+    // outside or without a colour; on the left and right as on the top.
+    for (stroke, d) in [
+        ((StrokeAlign::Center, black), 2.0),
+        ((StrokeAlign::Inside, black), 4.0),
+        ((StrokeAlign::Outside, black), 0.0),
+        ((StrokeAlign::Inside, designcraft_color::swatch::NONE), 0.0),
+    ] {
+        let (sb, sx0, sx1) = line(Some(stroke));
+        assert!((sb - (b + d)).abs() < 1e-6, "{stroke:?}: baseline {sb} vs {b}");
+        assert!((sx0 - (x0 + d)).abs() < 1e-6 && (sx1 - (x1 - d)).abs() < 1e-6, "{stroke:?}: {sx0}..{sx1} vs {x0}..{x1}");
+    }
+}
+
+#[test]
 fn vertical_scale_does_not_move_the_ascent_first_baseline() {
     let db = designcraft_fonts::FontDb::global();
     db.add_font(typo_test_font("TypoAscentVSc", Some(700)));
