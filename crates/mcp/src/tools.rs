@@ -106,7 +106,8 @@ pub fn tool_definitions() -> Vec<Value> {
             "Run any DesignCraft command by id with JSON params (ids and params from list_commands). Examples: \
              {\"command\":\"frame.create\",\"params\":{\"rect\":[36,36,576,300],\"content\":\"text\",\"text\":\"Hello\"}} → {id, story}; \
              {\"command\":\"type.char\",\"params\":{\"size\":24}}; {\"command\":\"edit.undo\"}. Coordinates are points in spread space. \
-             In the desktop app UI-only commands (view.*, window.*, app.*) work too.",
+             In the desktop app the UI-only commands (view.*, window.*, help.*, edit.dynamicSpelling, and app.* except app.links, \
+             which works everywhere) work too.",
             obj(json!({"command": string("Command id, e.g. frame.create"), "params": params_schema()}), &["command"]),
             false,
         ),
