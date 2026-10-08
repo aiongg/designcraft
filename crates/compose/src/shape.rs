@@ -28,7 +28,8 @@ pub struct Glyph {
     /// Baseline shift (positive = up), including super/subscript.
     pub shift: f64,
     pub ascent: f64,
-    /// The font's typographic ascender, scaled like `ascent`: the Ascent first baseline offset.
+    /// The font's typographic ascender at the point size (vertical scale doesn't apply): the Ascent
+    /// first baseline offset.
     pub typo_ascent: f64,
     pub descent: f64,
     /// The leading this character asks for (absolute, or auto = size × auto %).
@@ -68,6 +69,9 @@ pub struct Glyph {
     /// Upright in a vertical frame: shaped top to bottom (`adv` is its vertical advance) and hung
     /// from its vertical origin on the line's centre (see [`crate::PlacedGlyph::vertical_xf`]).
     pub upright: bool,
+    /// Part of the bullet or number the paragraph's list adds: not the line's own text, so it
+    /// doesn't raise the Ascent first baseline.
+    pub list_label: bool,
 }
 
 impl Glyph {
@@ -780,7 +784,7 @@ fn control_glyph(face: &Arc<FontFace>, p: &CharProps, auto_leading: TypeEnv, sty
         sy: k * p.v_scale,
         shift,
         ascent,
-        typo_ascent: face.typo_ascent * k * p.v_scale,
+        typo_ascent: face.typo_ascent * k,
         descent,
         leading,
         cap,
@@ -806,6 +810,7 @@ fn control_glyph(face: &Arc<FontFace>, p: &CharProps, auto_leading: TypeEnv, sty
         shaping_rtl: false,
         lang: designcraft_doc::language_tag(&p.language),
         upright: false,
+        list_label: false,
     }
 }
 
@@ -899,7 +904,7 @@ fn shape_segment(
             sy: k * p.v_scale,
             shift,
             ascent,
-            typo_ascent: face.typo_ascent * k * p.v_scale,
+            typo_ascent: face.typo_ascent * k,
             descent,
             leading,
             cap,
@@ -929,6 +934,7 @@ fn shape_segment(
             shaping_rtl: sg.rtl,
             lang,
             upright: up,
+            list_label: false,
         });
     }
 }

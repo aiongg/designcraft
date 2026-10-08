@@ -704,23 +704,27 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
         let drop_cap = split_drop_cap(db, &mut sp.glyphs, drop_end, pp.drop_cap_lines, base_leading, base_cap, drop_grid, drop_align);
         // List labels take the default super/subscript settings.
         let label_env = shape::TypeEnv { adv: Default::default(), ..env };
-        match pp.list_type {
+        let list_label = match pp.list_type {
             designcraft_doc::ListType::Numbers if !pp.list_name.is_empty() => {
                 // A named list: carries on past other paragraphs (and from earlier stories).
                 let n = named_numbers.get(pi).copied().flatten().unwrap_or(1);
-                let label = format!("{}.{}", pp.number_style.format(n), pp.list_separator);
-                prepend_label(db, &mut sp.glyphs, &label, prange.start, &base_chars, label_env, &mut table);
+                Some(format!("{}.{}", pp.number_style.format(n), pp.list_separator))
             }
             designcraft_doc::ListType::Numbers => {
                 list_counter = pp.start_at.map_or(list_counter + 1, |s| s.max(1));
-                let label = format!("{}.{}", pp.number_style.format(list_counter), pp.list_separator);
-                prepend_label(db, &mut sp.glyphs, &label, prange.start, &base_chars, label_env, &mut table);
+                Some(format!("{}.{}", pp.number_style.format(list_counter), pp.list_separator))
             }
-            designcraft_doc::ListType::Bullets => {
-                let label = format!("{}{}", pp.bullet_char, pp.list_separator);
-                prepend_label(db, &mut sp.glyphs, &label, prange.start, &base_chars, label_env, &mut table);
+            designcraft_doc::ListType::Bullets => Some(format!("{}{}", pp.bullet_char, pp.list_separator)),
+            designcraft_doc::ListType::None => {
+                list_counter = 0;
+                None
             }
-            designcraft_doc::ListType::None => list_counter = 0,
+        };
+        if let Some(label) = list_label {
+            let n = prepend_label(db, &mut sp.glyphs, &label, prange.start, &base_chars, label_env, &mut table);
+            for g in sp.glyphs.iter_mut().take(n) {
+                g.list_label = true;
+            }
         }
         if pi == 0
             && let Some(label) = &opts.label
@@ -1564,8 +1568,9 @@ fn line_metrics(
     base: &designcraft_doc::CharProps,
 ) -> (f64, Tops, f64, f64) {
     let src: &[Glyph] = if line.is_empty() { all.get(s..(s + 1).min(all.len())).unwrap_or(&[]) } else { line };
+    let face = || db.face(&base.font_family, &base.font_style);
     if src.is_empty() {
-        let face = db.face(&base.font_family, &base.font_style);
+        let face = face();
         let k = base_size / face.upem;
         let tops = Tops { typo_ascent: face.typo_ascent * k, cap: face.cap_height * k, xh: face.x_height * k };
         return (face.ascent * k, tops, face.descent * k, base_leading);
@@ -1575,15 +1580,25 @@ fn line_metrics(
     let mut desc: f64 = 0.0;
     let mut lead: f64 = 0.0;
     let reference = src.iter().max_by(|a, b| a.size.total_cmp(&b.size));
+    let mut own_text = false;
     for g in src {
         let shift = g.shift + reference.map_or(0.0, |r| cjk_alignment_shift(g, r));
         let up = shift.max(0.0);
         asc = asc.max(g.ascent + up);
-        tops.typo_ascent = tops.typo_ascent.max(g.typo_ascent + up);
+        // A list's bullet or number doesn't raise the Ascent offset: only the line's own text does.
+        if !g.list_label {
+            own_text = true;
+            tops.typo_ascent = tops.typo_ascent.max(g.typo_ascent + up);
+        }
         tops.cap = tops.cap.max(g.cap + up);
         tops.xh = tops.xh.max(g.xh + up);
         desc = desc.max(g.descent - shift.min(0.0));
         lead = lead.max(g.leading);
+    }
+    if !own_text {
+        // Only a label (an empty list paragraph): as an empty paragraph.
+        let face = face();
+        tops.typo_ascent = face.typo_ascent * base_size / face.upem;
     }
     (asc, tops, desc, lead)
 }
@@ -2307,6 +2322,7 @@ fn place_drop_cap(dc: &DropCap, at: f64, rtl: bool) -> Vec<PlacedGlyph> {
     out
 }
 
+/// Put generated `label` text before the paragraph's glyphs; returns how many glyphs it added.
 fn prepend_label(
     db: &ScopedFonts<'_>,
     glyphs: &mut Vec<Glyph>,
@@ -2315,7 +2331,7 @@ fn prepend_label(
     base: &designcraft_doc::CharProps,
     env: shape::TypeEnv,
     table: &mut StyleTable<'_>,
-) {
+) -> usize {
     // Shape the label as a tiny standalone story so it uses the paragraph's base character style.
     let mut tmp = Story::new(StoryId(0));
     tmp.insert(0, label);
@@ -2330,8 +2346,10 @@ fn prepend_label(
             g
         })
         .collect();
+    let n = pre.len();
     pre.append(glyphs);
     *glyphs = pre;
+    n
 }
 
 type LimitsKey = (usize, usize, usize, bool);
