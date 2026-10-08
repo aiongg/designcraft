@@ -20,6 +20,7 @@ const DOC_KEYS: &[&str] = &[
     "slugColor",
     "advancedType",
     "overprintBlack",
+    "glyphFallback",
 ];
 
 pub fn specs() -> Vec<CommandSpec> {
@@ -47,7 +48,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Preferences",
             [],
             None,
-            "{showHiddenCharacters?, typographersQuotes?, polygonSides?, starInset?, scaleStrokes?, dimensionsIncludeStroke?, transformationsAreTotals?, absolutePageNumbers?, highlightHj?, highlightKeeps?, highlightCustomTracking?, highlightSubstitutedFonts?, richBlackOutput?, favoriteFonts?: [family]} → all application preferences",
+            "{showHiddenCharacters?, typographersQuotes?, polygonSides?, starInset?, scaleStrokes?, dimensionsIncludeStroke?, transformationsAreTotals?, absolutePageNumbers?, highlightHj?, highlightKeeps?, highlightCustomTracking?, highlightSubstitutedFonts?, richBlackOutput?, favoriteFonts?: [family], showFontNamesInEnglish?} → all application preferences",
             super::always,
             |s, p| {
                 let cur = serde_json::to_value(&s.prefs).map_err(|e| bad("prefs.set", e.to_string()))?;
@@ -61,7 +62,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Document Preferences",
             [],
             None,
-            "{horizontalUnits?, verticalUnits?: points|picas|inches|millimeters|…, keyboardIncrement? (pt), baselineGrid?: {start, increment, relativeTo, color, viewThreshold}, grid?: {horizontal, vertical, subdivisions, color, inBack}, pasteboard?: [h, v], marginColor?, columnColor?, bleedColor?, slugColor?: [r, g, b], advancedType?: {superscriptSize, superscriptPosition, subscriptSize, subscriptPosition} (%)} → those settings",
+            "{horizontalUnits?, verticalUnits?: points|picas|inches|millimeters|…, keyboardIncrement? (pt), baselineGrid?: {start, increment, relativeTo, color, viewThreshold}, grid?: {horizontal, vertical, subdivisions, color, inBack}, pasteboard?: [h, v], marginColor?, columnColor?, bleedColor?, slugColor?: [r, g, b], advancedType?: {superscriptSize, superscriptPosition, subscriptSize, subscriptPosition} (%), overprintBlack?, glyphFallback? (draw characters the font lacks from fallback fonts; off: as the font's missing-glyph box)} → those settings",
             has_doc,
             |s, p| {
                 let cur = serde_json::to_value(&s.doc()?.doc.settings).map_err(|e| bad("document.preferences", e.to_string()))?;
@@ -119,6 +120,9 @@ mod tests {
         let r = s.execute("prefs.set", &json!({"scaleStrokes": false})).unwrap();
         assert_eq!(r["scaleStrokes"], false);
         assert!(!s.prefs.scale_strokes);
+        assert_eq!(r["showFontNamesInEnglish"], false, "native CJK font names by default");
+        s.execute("prefs.set", &json!({"showFontNamesInEnglish": true})).unwrap();
+        assert!(s.prefs.show_font_names_in_english);
         assert!(s.execute("prefs.set", &json!({"nope": 1})).is_err());
         s.execute("file.new", &json!({})).unwrap();
         let r = s
@@ -262,5 +266,39 @@ mod blend_space_tests {
         let back = designcraft_idml::import_idml(&designcraft_idml::export_idml(&s.doc().unwrap().doc)).unwrap();
         assert_eq!(back.settings.blend_space, designcraft_doc::BlendSpace::Rgb);
         assert!(s.execute("edit.transparencyBlendSpace", &json!({"space": "lab"})).is_err());
+    }
+}
+
+#[cfg(test)]
+mod glyph_fallback_tests {
+    use serde_json::json;
+
+    use crate::Session;
+
+    #[test]
+    fn glyph_fallback_is_an_undoable_document_preference() {
+        let mut s = Session::new();
+        s.execute("file.new", &json!({})).unwrap();
+        assert_eq!(s.execute("document.preferences", &json!({})).unwrap()["glyphFallback"], false, "new documents: off");
+        let r = s.execute("frame.create", &json!({"rect": [72, 72, 400, 300], "content": "text", "text": "語"})).unwrap();
+        let sid = designcraft_doc::StoryId(r["story"].as_u64().unwrap());
+        let gid = |s: &Session| s.cache.get(&s.doc().unwrap().doc, sid, None).frames[0].lines[0].glyphs[0].gid;
+        assert_eq!(gid(&s), 0);
+        designcraft_fonts::FontDb::global().add_font(designcraft_fonts::testing::font_with("DC Test Prefs Helper", &['語']).unwrap());
+        assert_eq!(s.execute("document.preferences", &json!({"glyphFallback": true})).unwrap()["glyphFallback"], true);
+        assert!(s.doc().unwrap().doc.settings.glyph_fallback);
+        assert_ne!(gid(&s), 0, "drawn from a fallback font");
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(!s.doc().unwrap().doc.settings.glyph_fallback);
+        assert_eq!(gid(&s), 0);
+    }
+
+    #[test]
+    fn idml_imports_draw_missing_glyphs_as_boxes() {
+        let mut s = Session::new();
+        s.execute("file.new", &json!({})).unwrap();
+        s.execute("document.preferences", &json!({"glyphFallback": true})).unwrap();
+        let back = designcraft_idml::import_idml(&designcraft_idml::export_idml(&s.doc().unwrap().doc)).unwrap();
+        assert!(!back.settings.glyph_fallback, "as InDesign draws them");
     }
 }

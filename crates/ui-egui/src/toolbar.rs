@@ -3,7 +3,7 @@
 
 use designcraft_tools::TOOL_GROUPS;
 use egui::{Color32, Sense, Stroke, StrokeKind, vec2};
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::theme::Tokens;
 use crate::{DesignApp, icons};
@@ -90,6 +90,12 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
                                 if resp.double_clicked() && matches!(shown.id, "polygon" | "polygonFrame") {
                                     let cur = app.session.execute("tool.polygonSettings", &json!({})).unwrap_or_default();
                                     app.ui.dialog = Some(crate::dialogs::Dialog::new("polygonSettings", cur));
+                                }
+                                // Double-click a transform tool: its Object › Transform dialog.
+                                if resp.double_clicked()
+                                    && let Some(cmd) = transform_dialog_of(shown.id)
+                                {
+                                    crate::menus::activate(app, cmd, &Value::Null);
                                 }
                                 if g.len() > 1
                                     && (resp.secondary_clicked()
@@ -341,6 +347,17 @@ fn fill_stroke_proxy(app: &mut DesignApp, ui: &mut egui::Ui, width: f32) {
             }
         }
     });
+}
+
+/// The Object › Transform command a double-clicked tool opens (the Selection tool opens Move).
+fn transform_dialog_of(tool: &str) -> Option<&'static str> {
+    match tool {
+        "selection" => Some("transform.move"),
+        "rotate" => Some("transform.rotate"),
+        "scale" => Some("transform.scale"),
+        "shear" => Some("transform.shear"),
+        _ => None,
+    }
 }
 
 fn flyout_triangle(p: &egui::Painter, r: egui::Rect, c: Color32) {

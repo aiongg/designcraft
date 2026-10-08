@@ -99,6 +99,7 @@ impl Notes {
             id: ItemId(0),
             area: Rect::new(0.0, 0.0, w.max(1.0), 1.0e6),
             opts: TextFrameOptions { first_baseline: o.first_baseline, first_baseline_min: o.first_baseline_min, ..Default::default() },
+            vertical: false,
             exclusions: vec![],
             page_name: f.page_name.clone(),
             page: f.page,

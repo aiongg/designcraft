@@ -27,3 +27,5 @@ hayro-syntax = "0.7.2"
 hayro-interpret = { version = "0.7.0", default-features = false, features = ["embed-fonts"] }
 hayro-cmap = "0.1"
 kurbo = { workspace = true }
+tiff = { workspace = true }
+designcraft-fonts = { workspace = true, features = ["testing"] }

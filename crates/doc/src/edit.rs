@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use designcraft_geom::{Point, Rect, shapes};
+use designcraft_geom::{Affine, Point, Rect, shapes};
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{ItemId, LayerId, StoryId};
@@ -252,6 +252,8 @@ impl Document {
                 let nid = StoryId(self.alloc());
                 let mut ns = Story::new(nid);
                 ns.frames = before.clone();
+                ns.vertical = other.vertical;
+                ns.direction = other.direction;
                 for f in &before {
                     if let Some(t) = self.item_mut(*f).and_then(Item::text_frame_mut) {
                         t.story = nid;
@@ -276,12 +278,12 @@ impl Document {
     /// stays with the first part and may become overset).
     pub fn unthread_after(&mut self, frame: ItemId) -> Result<()> {
         let sid = self.item(frame).and_then(|i| i.text_frame()).map(|t| t.story).ok_or(DocError::NoItem(frame))?;
-        let tail = {
+        let (tail, vertical, direction) = {
             let st = self.story_mut(sid).ok_or(DocError::NoStory(sid))?;
             let p = st.frames.iter().position(|f| *f == frame).ok_or(DocError::NoItem(frame))?;
             let tail = st.frames.split_off(p + 1);
             st.rev += 1;
-            tail
+            (tail, st.vertical, st.direction)
         };
         if tail.is_empty() {
             return Ok(());
@@ -289,6 +291,8 @@ impl Document {
         let nid = StoryId(self.alloc());
         let mut ns = Story::new(nid);
         ns.frames = tail.clone();
+        ns.vertical = vertical;
+        ns.direction = direction;
         self.stories.insert(nid, Arc::new(ns));
         for f in tail {
             if let Some(t) = self.item_mut(f).and_then(Item::text_frame_mut) {
@@ -308,6 +312,24 @@ impl Document {
         let st = self.story(self.item(frame)?.text_frame()?.story)?;
         let p = st.frames.iter().position(|f| *f == frame)?;
         p.checked_sub(1).map(|i| st.frames[i])
+    }
+
+    /// Does this text frame set its text vertically (its story is vertical; type on a path stays
+    /// along the path)?
+    pub fn frame_vertical(&self, item: &Item) -> bool {
+        item.text_frame().is_some_and(|t| t.options.path.is_none() && self.story(t.story).is_some_and(|s| s.vertical))
+    }
+
+    /// Text space → item inner space for a frame's composed text (identity except for vertical
+    /// frames).
+    pub fn text_local(&self, item: &Item) -> Affine {
+        if self.frame_vertical(item) { crate::item::vertical_text_xf(item.text_area()) } else { Affine::IDENTITY }
+    }
+
+    /// Text space → spread-parent space for a frame's composed text (the item transform, with the
+    /// quarter turn of a vertical frame).
+    pub fn text_xf(&self, item: &Item) -> Affine {
+        item.xf * self.text_local(item)
     }
 
     /// Hit test: the frontmost visible, unlocked-layer item on spread `si` containing `p` (spread space).
@@ -345,8 +367,10 @@ impl Document {
         Some(serde_json::json!({
             "id": sid.0,
             "length": st.text.len(),
+            "direction": st.direction,
             "paragraphs": st.paras.len(),
             "frames": st.frames.iter().map(|f| f.0).collect::<Vec<_>>(),
+            "vertical": st.vertical,
             "text": st.text,
         }))
     }

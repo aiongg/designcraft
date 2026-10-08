@@ -1,5 +1,5 @@
 //! Placed graphics: format sniffing, sizes and decoding for the renderer and PDF export.
-//! Rasters go through `image` (PNG, JPEG, GIF, WebP, TIFF, BMP) or `psd` (Photoshop's merged
+//! Rasters go through `image` (PNG, JPEG, GIF, WebP, TIFF, BMP) or [`psd`] (Photoshop's merged
 //! composite); SVG is parsed with usvg (text set in the bundled fonts) and rasterised with resvg
 //! for the screen — PDF export draws the same tree as vectors.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
@@ -9,6 +9,7 @@ use std::sync::{Arc, OnceLock};
 pub use resvg::usvg;
 
 mod eps;
+mod psd;
 pub use eps::{bounding_box as eps_bounding_box, eps_proxy, is_eps};
 
 /// CSS pixels (SVG user units) → points.
@@ -99,10 +100,80 @@ pub fn pixel_size(bytes: &[u8]) -> Option<(u32, u32)> {
 /// Straight (non-premultiplied) RGBA8 of a raster.
 pub fn decode_rgba(bytes: &[u8]) -> Option<image::RgbaImage> {
     if is_psd(bytes) {
-        let p = psd::Psd::from_bytes(bytes).ok()?;
-        return image::RgbaImage::from_raw(p.width(), p.height(), p.rgba());
+        return psd::decode(bytes);
     }
     Some(image::load_from_memory(bytes).ok()?.to_rgba8())
+}
+
+/// A CMYK raster's ink values, 8 bits per ink (0 = no ink, 255 = solid), as PDF's DeviceCMYK
+/// reads them.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct CmykRaster {
+    pub width: u32,
+    pub height: u32,
+    /// C, M, Y, K for each pixel, row by row: `width * height * 4` bytes.
+    pub cmyk: Vec<u8>,
+    /// Straight alpha, `width * height` bytes; `None` when the image is opaque.
+    pub alpha: Option<Vec<u8>>,
+}
+
+fn tiff_decoder(bytes: &[u8]) -> Option<tiff::decoder::Decoder<std::io::Cursor<&[u8]>>> {
+    let tiff = [b"II*\0", b"MM\0*", b"II+\0", b"MM\0+"].iter().any(|m| bytes.starts_with(*m));
+    if !tiff {
+        return None;
+    }
+    tiff::decoder::Decoder::new(std::io::Cursor::new(bytes)).ok()
+}
+
+/// A TIFF whose pixels are CMYK (PhotometricInterpretation Separated, four inks).
+pub fn is_cmyk_tiff(bytes: &[u8]) -> bool {
+    tiff_decoder(bytes).and_then(|mut d| d.colortype().ok()).is_some_and(|c| matches!(c, tiff::ColorType::CMYK(_) | tiff::ColorType::CMYKA(_)))
+}
+
+/// The ink values of a CMYK TIFF, which [`decode_rgba`] converts to RGB. 8- or 16-bit CMYK,
+/// pixels interleaved, opaque or with unassociated alpha. `None` for anything else — another
+/// format, another ink set (InkSet 2), planar storage or premultiplied alpha — and for files
+/// over the decoder's 256 MiB limit; [`is_cmyk_tiff`] tells those apart from RGB files.
+pub fn decode_cmyk_tiff(bytes: &[u8]) -> Option<CmykRaster> {
+    use tiff::tags::Tag;
+    let mut d = tiff_decoder(bytes)?;
+    let has_alpha = match d.colortype().ok()? {
+        tiff::ColorType::CMYK(8 | 16) => false,
+        tiff::ColorType::CMYKA(8 | 16) => true,
+        _ => return None,
+    };
+    // InkSet (tag 332): 1 or absent = CMYK; 2 = other inks, named in InkNames.
+    if d.find_tag_unsigned::<u16>(Tag::Unknown(332)).ok()?.is_some_and(|s| s != 1) {
+        return None;
+    }
+    // ExtraSamples 2 = unassociated alpha. Premultiplied CMYK has no meaning as ink values.
+    if has_alpha && d.find_tag_unsigned_vec::<u16>(Tag::ExtraSamples).ok()?.and_then(|v| v.first().copied()) != Some(2) {
+        return None;
+    }
+    let (w, h) = d.dimensions().ok()?;
+    let pixels = usize::try_from(w).ok()?.checked_mul(usize::try_from(h).ok()?)?;
+    let samples = if has_alpha { 5 } else { 4 };
+    let px = match d.read_image().ok()? {
+        tiff::decoder::DecodingResult::U8(v) => v,
+        tiff::decoder::DecodingResult::U16(v) => v.iter().map(|&s| ((u32::from(s) * 255 + 32_767) / 65_535) as u8).collect(),
+        _ => return None,
+    };
+    // A planar file reads back as its first plane only, and extra non-alpha samples make the
+    // pixels wider: either way the length is not `pixels * samples`.
+    if px.len() != pixels.checked_mul(samples)? {
+        return None;
+    }
+    if !has_alpha {
+        return Some(CmykRaster { width: w, height: h, cmyk: px, alpha: None });
+    }
+    let mut cmyk = Vec::with_capacity(pixels.checked_mul(4)?);
+    let mut alpha = Vec::with_capacity(pixels);
+    for &[c, m, y, k, a] in px.as_chunks::<5>().0 {
+        cmyk.extend([c, m, y, k]);
+        alpha.push(a);
+    }
+    let alpha = alpha.iter().any(|&a| a < 255).then_some(alpha);
+    Some(CmykRaster { width: w, height: h, cmyk, alpha })
 }
 
 /// An SVG rasterised so its longer side is `max_side` pixels: premultiplied RGBA8.
@@ -167,6 +238,48 @@ mod tests {
         let img = decode_rgba(&b).unwrap();
         assert_eq!(img.get_pixel(0, 0).0, [255, 0, 0, 255]);
         assert_eq!(img.get_pixel(1, 0).0, [0, 255, 0, 255]);
+    }
+
+    fn tiff_of<C: tiff::encoder::colortype::ColorType>(w: u32, h: u32, px: &[C::Inner], alpha: bool) -> Vec<u8>
+    where
+        [C::Inner]: tiff::encoder::TiffValue,
+    {
+        let mut b = Vec::new();
+        let mut enc = tiff::encoder::TiffEncoder::new(std::io::Cursor::new(&mut b)).unwrap();
+        let mut img = enc.new_image::<C>(w, h).unwrap();
+        if alpha {
+            // CMYKA8 already has five samples: only the tag that says the fifth is alpha.
+            img.encoder().write_tag(tiff::tags::Tag::ExtraSamples, &[2u16][..]).unwrap();
+        }
+        img.write_data(px).unwrap();
+        b
+    }
+
+    /// CMYK TIFFs read back as their ink values; RGB ones aren't CMYK.
+    #[test]
+    fn cmyk_tiff_keeps_inks() {
+        use tiff::encoder::colortype::{CMYK8, CMYK16, CMYKA8, RGB8};
+        // 2×1: 100% K, then C0 M100 Y100 K0.
+        let px = [0, 0, 0, 255, 0, 255, 255, 0];
+        let b = tiff_of::<CMYK8>(2, 1, &px, false);
+        assert_eq!(mime(&b), "image/tiff");
+        assert!(is_cmyk_tiff(&b));
+        assert_eq!(decode_cmyk_tiff(&b), Some(CmykRaster { width: 2, height: 1, cmyk: px.to_vec(), alpha: None }));
+        // The screen still gets RGB.
+        assert_eq!(decode_rgba(&b).unwrap().get_pixel(0, 0).0, [0, 0, 0, 255]);
+
+        let b = tiff_of::<CMYK16>(2, 1, &[0, 0, 0, 65_535, 0, 32_896, 65_535, 0], false);
+        assert_eq!(decode_cmyk_tiff(&b).unwrap().cmyk, [0, 0, 0, 255, 0, 128, 255, 0]);
+
+        let b = tiff_of::<CMYKA8>(2, 1, &[0, 0, 0, 255, 255, 0, 255, 255, 0, 0], true);
+        let r = decode_cmyk_tiff(&b).unwrap();
+        assert_eq!((r.cmyk, r.alpha), (px.to_vec(), Some(vec![255, 0])));
+
+        let rgb = tiff_of::<RGB8>(1, 1, &[255, 0, 0], false);
+        assert!(!is_cmyk_tiff(&rgb));
+        assert_eq!(decode_cmyk_tiff(&rgb), None);
+        assert!(!is_cmyk_tiff(b"II*\0"), "truncated");
+        assert_eq!(decode_cmyk_tiff(&b[..b.len() / 2]), None, "truncated");
     }
 
     #[test]
