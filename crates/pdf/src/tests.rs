@@ -201,3 +201,139 @@ fn tables_export_cell_text() {
         assert!(text.contains(w), "{w} missing from {text:?}");
     }
 }
+
+/// A 4×2 CMYK TIFF: the left half 100% K (text in a scan), the right half C0 M100 Y100 K0.
+fn cmyk_tiff() -> (Vec<u8>, Vec<u8>) {
+    let (k, red) = ([0u8, 0, 0, 255], [0u8, 255, 255, 0]);
+    let px: Vec<u8> = (0..2).flat_map(|_| [k, k, red, red]).flatten().collect();
+    let mut b = Vec::new();
+    tiff::encoder::TiffEncoder::new(std::io::Cursor::new(&mut b)).unwrap().write_image::<tiff::encoder::colortype::CMYK8>(4, 2, &px).unwrap();
+    (b, px)
+}
+
+fn place(d: &mut Document, data: Vec<u8>, px: (u32, u32)) {
+    let asset = designcraft_doc::AssetId(d.alloc());
+    let mime = designcraft_images::mime(&data).into();
+    d.assets.insert(
+        asset,
+        std::sync::Arc::new(designcraft_doc::Asset {
+            id: asset,
+            name: "scan.tif".into(),
+            mime,
+            link: None,
+            data: data.into(),
+            pixels: Some(px),
+            page: 0,
+        }),
+    );
+    let lid = d.default_layer();
+    let id = ItemId(d.alloc());
+    let mut it = Item::new(id, lid, designcraft_doc::Shape::Rectangle, designcraft_geom::shapes::rectangle(Rect::new(72.0, 72.0, 272.0, 172.0)));
+    it.content = designcraft_doc::Content::Graphic(designcraft_doc::Graphic {
+        asset,
+        size: (px.0 as f64, px.1 as f64),
+        xf: designcraft_geom::Affine::translate((72.0, 72.0)) * designcraft_geom::Affine::scale(50.0),
+        auto_fit: designcraft_doc::Fitting::FillProportionally,
+        fit_align: 4,
+        crop: [0.0; 4],
+    });
+    d.insert_item(SpreadRef::Doc(0), it, None).unwrap();
+}
+
+/// Every image XObject in a PDF: its /ColorSpace name (`?` when not a name) and decoded samples.
+fn image_xobjects(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {
+    use hayro_syntax::object::Name;
+    let pdf = hayro_syntax::Pdf::new(bytes.to_vec()).expect("parse");
+    pdf.objects()
+        .into_iter()
+        .filter_map(|o| o.into_stream())
+        .filter(|s| s.dict().get::<Name>("Subtype").is_some_and(|n| n.as_str() == "Image"))
+        .map(|s| {
+            let cs = s.dict().get::<Name>("ColorSpace").map_or("?".to_string(), |n| n.as_str().to_string());
+            (cs, s.decoded().expect("decode").into_owned())
+        })
+        .collect()
+}
+
+/// A placed CMYK TIFF went into PDFs as DeviceRGB (#35): 100% K became RGB black, which the
+/// press separates as four-colour black.
+#[test]
+fn cmyk_tiff_keeps_its_inks() {
+    let (tif, px) = cmyk_tiff();
+    let mut d = doc_with_text("x");
+    place(&mut d, tif, (4, 2));
+    for standard in [Standard::None, Standard::PdfX4] {
+        let r = export_pdf_with_report(&d, &Cache::new(), &PdfOptions { standard, ..Default::default() }).unwrap();
+        assert!(r.warnings.is_empty(), "{standard:?}: {:?}", r.warnings);
+        let images = image_xobjects(&r.bytes);
+        assert_eq!(images, vec![("DeviceCMYK".to_string(), px.clone())], "{standard:?}");
+        assert_eq!(images[0].1[..4], [0, 0, 0, 255], "K only");
+    }
+}
+
+/// What a page draws: each glyph (its text and outline bounds) and each filled path's bounds.
+fn drawn(bytes: &[u8]) -> (Vec<(String, kurbo::Rect)>, Vec<kurbo::Rect>) {
+    use hayro_interpret::font::Glyph;
+    use hayro_interpret::{
+        BlendMode, ClipPath, Context, Device, GlyphDrawMode, Image, InterpreterCache, InterpreterSettings, Paint, PathDrawMode, SoftMask,
+        interpret_page,
+    };
+    use kurbo::Shape as _;
+    #[derive(Default)]
+    struct Rec(Vec<(String, kurbo::Rect)>, Vec<kurbo::Rect>);
+    impl Device<'_> for Rec {
+        fn set_soft_mask(&mut self, _: Option<SoftMask<'_>>) {}
+        fn set_blend_mode(&mut self, _: BlendMode) {}
+        fn draw_path(&mut self, p: &kurbo::BezPath, xf: kurbo::Affine, _: &Paint<'_>, _: &PathDrawMode) {
+            self.1.push((xf * p.clone()).bounding_box());
+        }
+        fn push_clip_path(&mut self, _: &ClipPath) {}
+        fn push_transparency_group(&mut self, _: f32, _: Option<SoftMask<'_>>, _: BlendMode) {}
+        fn draw_glyph(&mut self, g: &Glyph<'_>, _: kurbo::Affine, _: kurbo::Affine, _: &Paint<'_>, _: &GlyphDrawMode) {
+            let text = match g.as_unicode() {
+                Some(hayro_cmap::BfString::Char(c)) => c.to_string(),
+                Some(hayro_cmap::BfString::String(s)) => s,
+                None => String::new(),
+            };
+            let bounds = match g {
+                Glyph::Outline(o) => o.outline().bounding_box(),
+                Glyph::Type3(_) => kurbo::Rect::ZERO,
+            };
+            self.0.push((text, bounds));
+        }
+        fn draw_image(&mut self, _: Image<'_, '_>, _: kurbo::Affine) {}
+        fn pop_clip_path(&mut self) {}
+        fn pop_transparency_group(&mut self) {}
+    }
+    let pdf = hayro_syntax::Pdf::new(bytes.to_vec()).expect("parse");
+    let cache = InterpreterCache::new();
+    let page = &pdf.pages()[0];
+    let mut ctx = Context::new(kurbo::Affine::IDENTITY, kurbo::Rect::new(0.0, 0.0, 1.0, 1.0), &cache, pdf.xref(), InterpreterSettings::default());
+    let mut rec = Rec::default();
+    interpret_page(page, &mut ctx, &mut rec);
+    (rec.0, rec.1)
+}
+
+#[test]
+fn missing_glyphs_print_as_boxes() {
+    // Source Serif 4 lacks 語: its .notdef box is drawn as a path, not as a .notdef glyph
+    // (which PDF/A and PDF/UA forbid).
+    let boxes = |paths: &[kurbo::Rect]| paths.iter().filter(|r| r.width() > 1.0 && r.width() < 12.0 && r.height() > 3.0 && r.height() < 12.0).count();
+    let d = doc_with_text("a語b");
+    assert!(!d.settings.glyph_fallback);
+    let (glyphs, paths) = drawn(&export_pdf(&d, &Cache::new(), &PdfOptions::default()).unwrap());
+    assert_eq!(glyphs.iter().map(|g| g.0.as_str()).collect::<Vec<_>>(), ["a", "b"], "{glyphs:?}");
+    assert_eq!(boxes(&paths), 1, "{paths:?}");
+    let a = export_pdf_with_report(&d, &Cache::new(), &PdfOptions { standard: Standard::PdfA2b, ..Default::default() });
+    assert!(a.is_ok(), "PDF/A takes the box: {:?}", a.err());
+    // A font whose .notdef is empty: the box DesignCraft draws for it.
+    const FAMILY: &str = "DC Test PDF Empty Notdef";
+    let font = designcraft_fonts::testing::font_mapping(FAMILY, &[('a', 'a'), ('b', 'b')]).unwrap();
+    designcraft_fonts::FontDb::global().add_font(designcraft_fonts::testing::with_empty_notdef(font).unwrap());
+    let mut d = doc_with_text("a語b");
+    let sid = *d.stories.keys().next().unwrap();
+    d.story_mut(sid).unwrap().format_chars(0.."a語b".len(), |f| f.over.font_family = Some(FAMILY.into()));
+    let (glyphs, paths) = drawn(&export_pdf(&d, &Cache::new(), &PdfOptions::default()).unwrap());
+    assert_eq!(glyphs.iter().map(|g| g.0.as_str()).collect::<Vec<_>>(), ["a", "b"], "{glyphs:?}");
+    assert_eq!(boxes(&paths), 1, "{paths:?}");
+}
