@@ -124,7 +124,7 @@ fn file_new(s: &mut Session, p: &Value) -> Result<Value> {
     nd.height = f64_or(p, "height", nd.height);
     nd.pages = p.get("pages").and_then(Value::as_u64).map(|v| v as usize).unwrap_or(nd.pages).clamp(1, 9999);
     nd.facing_pages = p.get("facingPages").and_then(Value::as_bool).unwrap_or(nd.facing_pages);
-    nd.columns = p.get("columns").and_then(Value::as_u64).map(|v| v as u32).unwrap_or(nd.columns);
+    nd.columns = p.get("columns").and_then(Value::as_u64).map(|v| v.clamp(1, 216) as u32).unwrap_or(nd.columns);
     nd.gutter = f64_or(p, "gutter", nd.gutter);
     nd.primary_text_frame = p.get("primaryTextFrame").and_then(Value::as_bool).unwrap_or(false);
     match p.get("margins") {
