@@ -81,6 +81,7 @@ pub struct SavedWorkspace {
     pub name: String,
     pub control_bar: bool,
     pub task_bar: bool,
+    pub task_bar_pin: Option<[f32; 2]>,
     pub tools_double_column: bool,
     pub dock_tab: String,
     pub dock_expanded: bool,
@@ -189,6 +190,12 @@ pub struct UiState {
     pub snap_zone: f64,
     /// Window > Contextual Task Bar.
     pub task_bar: bool,
+    /// Where the Contextual Task Bar is pinned: its top-left, in points from the canvas's top-left
+    /// (`None`: it follows the selection).
+    pub task_bar_pin: Option<[f32; 2]>,
+    /// Where the Contextual Task Bar was last shown, like [`Self::task_bar_pin`].
+    #[serde(skip)]
+    pub task_bar_at: Option<[f32; 2]>,
     /// Help › About DesignCraft is open.
     pub about: bool,
     /// The About window's tab: 0 About, 1 Contributors, 2 Models (`about::ABOUT_TABS`).
@@ -264,6 +271,8 @@ impl Default for UiState {
             smart_spacing: true,
             snap_zone: 4.0,
             task_bar: true,
+            task_bar_pin: None,
+            task_bar_at: None,
             about: false,
             about_tab: 0,
             pending_urls: Vec::new(),
