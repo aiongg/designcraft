@@ -925,4 +925,9 @@ pub(crate) mod test_window {
         h.drop_at(pos);
         h.run_steps(4);
     }
+
+    /// The outer rect of a side or top panel, from egui's memory.
+    pub fn panel_rect(h: &Harness<'static, Window>, id: &str) -> egui::Rect {
+        egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new(id)).map(|s| s.outer_rect).unwrap()
+    }
 }

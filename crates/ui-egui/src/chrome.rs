@@ -7,7 +7,7 @@ use serde_json::json;
 
 use crate::panels::{self, SelInfo};
 use crate::theme::{Tokens, semibold};
-use crate::widgets::{caption, measure, number};
+use crate::widgets::{FIELD_H, caption, measure, number};
 use crate::{DesignApp, icons};
 
 pub fn app_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
@@ -127,31 +127,33 @@ impl DesignApp {
     }
 }
 
+/// The Control bar's two rows of fields.
+const CONTROL_ROWS_H: f32 = 2.0 * FIELD_H + 4.0;
+
 fn vsep(ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
-    let (r, _) = ui.allocate_exact_size(vec2(9.0, 46.0), Sense::hover());
+    let (r, _) = ui.allocate_exact_size(vec2(9.0, CONTROL_ROWS_H), Sense::hover());
     ui.painter().line_segment([r.center_top() + vec2(0.0, 4.0), r.center_bottom() - vec2(0.0, 4.0)], Stroke::new(1.0, t.divider));
 }
 
 /// Two-row context-sensitive Control panel.
 pub fn control_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
-    egui::Panel::top("control_bar")
-        .exact_size(59.0)
-        .frame(
-            egui::Frame::NONE.fill(t.panel).inner_margin(egui::Margin { left: 8, right: 8, top: 5, bottom: 3 }).stroke(Stroke::new(1.0, t.divider)),
-        )
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                let text_mode =
-                    matches!(app.session.tool_id(), "type" | "verticalType") || app.session.active().is_some_and(|d| d.selection.text.is_some());
-                if text_mode {
-                    control_text(app, ui);
-                } else {
-                    control_object(app, ui);
-                }
-            });
+    let frame =
+        egui::Frame::NONE.fill(t.panel).inner_margin(egui::Margin { left: 8, right: 8, top: 5, bottom: 5 }).stroke(Stroke::new(1.0, t.divider));
+    // As tall as its two rows (sized to them; the default is only the first frame's guess), each
+    // group of fields from the top.
+    egui::Panel::top("control_bar").default_size(CONTROL_ROWS_H + frame.total_margin().sum().y + 1.0).frame(frame).show(ui, |ui| {
+        ui.horizontal_top(|ui| {
+            let text_mode =
+                matches!(app.session.tool_id(), "type" | "verticalType") || app.session.active().is_some_and(|d| d.selection.text.is_some());
+            if text_mode {
+                control_text(app, ui);
+            } else {
+                control_object(app, ui);
+            }
         });
+    });
 }
 
 /// A field label drawn as a tool icon (hover for its name).
@@ -715,4 +717,42 @@ fn community_card(app: &mut DesignApp, ui: &mut egui::Ui) {
             });
         });
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use egui::vec2;
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::Queryable;
+    use serde_json::json;
+
+    use crate::test_window::{self, Window};
+
+    fn window(text: bool) -> Harness<'static, Window> {
+        let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.ui.control_bar = true;
+        let mut h = test_window::open(app, vec2(1440.0, 900.0));
+        let app = &mut h.state_mut().app;
+        app.run("frame.create", json!({"rect": [72, 72, 300, 200], "content": "text", "text": "Hello", "caret": text})).unwrap();
+        if text {
+            app.run("tool.select", json!({"tool": "type"})).unwrap();
+        }
+        h.run_steps(4);
+        h
+    }
+
+    #[test]
+    fn the_control_bar_shows_both_rows_whole() {
+        // The captions of each mode's second row.
+        for (text, captions) in [(false, ["Y:", "H:"]), (true, ["Ā", "↓¶"])] {
+            let h = window(text);
+            let bar = test_window::panel_rect(&h, "control_bar");
+            for c in captions {
+                let r = h.get_all_by_value(c).next().unwrap().rect();
+                assert!(bar.contains_rect(r), "{c} at {r:?} is cut off by the bar {bar:?}");
+            }
+            let first = h.get_all_by_value(if text { "A" } else { "X:" }).next().unwrap().rect();
+            assert!(first.min.y - bar.min.y < 12.0, "the first row starts at the top of the bar ({first:?} in {bar:?})");
+        }
+    }
 }
