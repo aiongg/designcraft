@@ -1570,6 +1570,32 @@ fn missing_glyphs_are_the_fonts_box_unless_fallback_is_on() {
     assert_ne!(gid, 0, "a fallback font draws it");
 }
 
+/// A missing font's substitute draws what it lacks from fallback fonts whatever the setting, also
+/// in text shaped as one piece across a colour change.
+#[test]
+fn a_missing_fonts_substitute_takes_fallback_fonts() {
+    use designcraft_fonts::testing::font_with;
+    designcraft_fonts::FontDb::global().add_font(font_with("DC Test Missing Glyph Helper", &['語']).unwrap());
+    let text = "a語b語";
+    let (mut d, sid, _) = doc_with(text, Rect::new(36.0, 36.0, 300.0, 100.0), ParaAttrs::default());
+    {
+        let s = d.story_mut(sid).unwrap();
+        s.format_chars(0..text.len(), |f| {
+            f.over.language = Some("Japanese".into());
+            f.over.font_family = Some("DC Test No Such Family".into());
+        });
+        s.format_chars("a語".len()..text.len(), |f| f.over.fill = Some("Red".into()));
+    }
+    assert!(!d.settings.glyph_fallback);
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let glyphs: Vec<&PlacedGlyph> = all_lines(&cs).into_iter().flat_map(|l| l.glyphs.iter()).filter(|g| text[g.byte..].starts_with('語')).collect();
+    assert_eq!(glyphs.len(), 2);
+    for g in glyphs {
+        assert_ne!(g.face.family, designcraft_fonts::DEFAULT_FAMILY, "byte {}", g.byte);
+        assert_ne!(g.gid, 0, "byte {}: a fallback font draws it", g.byte);
+    }
+}
+
 #[test]
 fn kenten_missing_from_the_font_are_its_box_unless_fallback_is_on() {
     use designcraft_fonts::testing::font_with;

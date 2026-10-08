@@ -375,14 +375,17 @@ pub(crate) fn shape_para(
         let range = group[0].range.start..group[j - i - 1].range.end;
         let runs: Vec<(usize, u32)> = group.iter().map(|p| (p.range.start, p.style)).collect();
         let start = glyphs.len();
-        shape_run(db, &story.text, range, &first.props, auto_leading, &StyleRuns(&runs), sub, &mut glyphs);
+        // A missing font's substitute stands in for the whole font: fallback fonts help it.
+        // Pieces shaped together share their font, so the first one's says for all.
+        shape_run(db, &story.text, range, &first.props, table.env_for(auto_leading, first.style), &StyleRuns(&runs), sub, &mut glyphs);
         // A cluster (a ligature, a letter with its marks) that spans two styles would paint one
         // of them in the other's colour: shape those pieces apart instead.
         let spans_cut = |g: &Glyph| runs[1..].iter().any(|&(cut, _)| g.byte < cut && cut < g.byte + g.len);
         if group.len() > 1 && glyphs[start..].iter().any(spans_cut) {
             glyphs.truncate(start);
             for p in group {
-                shape_run(db, &story.text, p.range.clone(), &p.props, auto_leading, &StyleRuns(&[(p.range.start, p.style)]), sub, &mut glyphs);
+                let env = table.env_for(auto_leading, p.style);
+                shape_run(db, &story.text, p.range.clone(), &p.props, env, &StyleRuns(&[(p.range.start, p.style)]), sub, &mut glyphs);
             }
         }
         i = j;
