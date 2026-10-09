@@ -1683,10 +1683,12 @@ pub fn confirm(app: &mut DesignApp) -> Result<Value, String> {
                         let parsed = serde_json::from_str::<Value>(v).ok().filter(|x| !x.is_string());
                         p.insert(f.key, parsed.unwrap_or_else(|| json!(v)));
                     }
-                    Some(Value::Bool(b)) => {
-                        p.insert(f.key, json!(b));
+                    Some(Value::String(_)) | None => {}
+                    Some(value) => {
+                        // Control/MCP callers can supply JSON directly. Preserve its type,
+                        // including explicit null, for the command to interpret.
+                        p.insert(f.key, value.clone());
                     }
-                    _ => {}
                 }
             }
             let r = app.run(cid, Value::Object(p));
@@ -2653,6 +2655,73 @@ fn find_font(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn command_app(id: &str, fields: Value) -> DesignApp {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.ui.dialog = Some(Dialog::new(&format!("cmd:{id}"), fields));
+        app
+    }
+
+    #[test]
+    fn generic_new_document_preserves_typed_values_and_text_entry() {
+        for pages in [json!(2), json!(" 2 ")] {
+            let mut app = command_app(
+                "file.new",
+                json!({
+                    "preset": "A4", "pages": pages, "facingPages": false, "gutter": 0,
+                    "margins": {"top": 10, "bottom": 20, "inside": 30, "outside": 40},
+                    "title": "  ", "status": "internal", "primaryTextFrame": true
+                }),
+            );
+            confirm(&mut app).unwrap();
+            let doc = &app.session.active().unwrap().doc;
+            assert_eq!(doc.page_count(), 2);
+            assert!(!doc.settings.facing_pages);
+            assert!(doc.title.starts_with("Untitled-"));
+            for page in doc.spreads.iter().flat_map(|s| &s.pages) {
+                assert!((page.width - 595.2755905511812).abs() < 0.01);
+                assert!((page.height - 841.8897637795277).abs() < 0.01);
+                assert_eq!(page.columns.gutter, 0.0);
+                assert_eq!(page.margins.top, 10.0);
+                assert_eq!(page.margins.outside, 40.0);
+            }
+            assert!(doc.spreads.iter().all(|s| s.items.is_empty()), "undocumented fields stay excluded");
+            assert!(app.ui.dialog.is_none());
+        }
+    }
+
+    #[test]
+    fn generic_command_preserves_array_geometry() {
+        let mut app = command_app("file.new", json!({}));
+        confirm(&mut app).unwrap();
+        app.ui.dialog = Some(Dialog::new("cmd:frame.create", json!({"rect": [10, 20, 110, 220]})));
+        confirm(&mut app).unwrap();
+        let doc = &app.session.active().unwrap().doc;
+        let item = doc.spreads.iter().flat_map(|s| &s.items).next().unwrap();
+        assert_eq!(item.bounds(), designcraft_geom::Rect::new(10.0, 20.0, 110.0, 220.0));
+    }
+
+    #[test]
+    fn generic_explicit_null_uses_the_commands_existing_semantics() {
+        // file.new accepts null width by using the selected preset's width.
+        for width in [Value::Null, json!("null")] {
+            let mut app = command_app("file.new", json!({"preset": "A4", "width": width, "title": "  Sample layout  "}));
+            confirm(&mut app).unwrap();
+            let doc = &app.session.active().unwrap().doc;
+            assert_eq!(doc.title, "Sample layout");
+            assert!((doc.settings.page_width - 595.2755905511812).abs() < 0.01);
+        }
+    }
+
+    #[test]
+    fn generic_invalid_number_retains_dialog_without_creating_document() {
+        let mut app = command_app("file.new", json!({"width": 0}));
+        assert!(confirm(&mut app).is_err());
+        assert!(app.session.active().is_none());
+        let dialog = app.ui.dialog.as_ref().unwrap();
+        assert_eq!(dialog.fields["width"], 0);
+        assert!(dialog.fields["status"].as_str().unwrap().contains("page size out of range"));
+    }
 
     #[test]
     fn parses_command_params() {
