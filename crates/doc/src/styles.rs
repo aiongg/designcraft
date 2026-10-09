@@ -336,6 +336,11 @@ impl Styles {
         cp
     }
 
+    /// Character-style-only resolution (no paragraph base, no local overrides).
+    pub fn resolve_char_style(&self, name: &str) -> CharProps {
+        self.resolve_char(&CharProps::default(), &CharFormat { style: name.into(), over: CharAttrs::default() })
+    }
+
     /// Would making `name` based on `parent` create a cycle?
     pub fn para_based_on_cycles(&self, name: &str, parent: &str) -> bool {
         name == parent || self.para_chain(parent).iter().any(|s| s.name == name)

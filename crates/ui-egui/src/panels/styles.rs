@@ -98,6 +98,8 @@ fn style_row(app: &mut DesignApp, ui: &mut egui::Ui, para: bool, n: &str, curren
     );
     if resp.double_clicked() && para {
         app.ui.dialog = Some(crate::dialogs::Dialog::new("paragraphStyleOptions", json!({"name": n})));
+    } else if resp.double_clicked() && !n.starts_with('[') {
+        app.ui.dialog = Some(crate::dialogs::Dialog::new("characterStyleOptions", json!({"name": n})));
     } else if resp.clicked() {
         let cmd = if para { "style.paragraph.apply" } else { "style.character.apply" };
         let clear = ui.input(|i| i.modifiers.alt);
@@ -160,6 +162,17 @@ fn style_row(app: &mut DesignApp, ui: &mut egui::Ui, para: bool, n: &str, curren
             }
             if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Delete Paragraph Style…"))).clicked() {
                 app.ui.dialog = Some(crate::dialogs::Dialog::new("deleteParagraphStyle", json!({"name": n})));
+                ui.close();
+            }
+        }
+        if !para && !n.starts_with('[') {
+            ui.separator();
+            if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Edit Character Style…"))).clicked() {
+                app.ui.dialog = Some(crate::dialogs::Dialog::new("characterStyleOptions", json!({"name": n})));
+                ui.close();
+            }
+            if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Delete Character Style…"))).clicked() {
+                app.ui.dialog = Some(crate::dialogs::Dialog::new("deleteCharacterStyle", json!({"name": n})));
                 ui.close();
             }
         }
