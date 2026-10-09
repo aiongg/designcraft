@@ -573,6 +573,7 @@ fn upload(app: &mut DesignApp, ctx: &egui::Context, mut img: designcraft_render:
         designcraft_render::separation_view(&mut img, None, app.ui.ink_limit);
     }
     let ci = egui::ColorImage::from_rgba_premultiplied([img.width as usize, img.height as usize], &img.pixels);
+    let ci = crate::widgets::fit_texture(ci, ctx.input(|i| i.max_texture_side));
     match &mut app.canvas.texture {
         Some(tex) => tex.set(ci, egui::TextureOptions::LINEAR),
         None => app.canvas.texture = Some(ctx.load_texture("canvas", ci, egui::TextureOptions::LINEAR)),
@@ -1154,7 +1155,7 @@ fn draw_inverse_highlight(
             let mut res = vello_cpu::Resources::new();
             rc.render(&mut pm, &mut res);
             let ci = egui::ColorImage::from_rgba_premultiplied([w as usize, h as usize], pm.data_as_u8_slice());
-            let t = ctx.load_texture("inverse_selection", ci, egui::TextureOptions::NEAREST);
+            let t = crate::widgets::load_texture(ctx, "inverse_selection", ci, egui::TextureOptions::NEAREST);
             ctx.data_mut(|d| d.insert_temp(cache_id, (key, t.clone())));
             t
         }
