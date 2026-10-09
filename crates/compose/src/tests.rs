@@ -1320,6 +1320,197 @@ fn only_english_text_gets_english_hyphenation() {
     assert_eq!(hyphenated(&d2, sid), 0, "French isn't hyphenated with English rules");
 }
 
+// A text frame's bottom inset constrains its last baseline. The full font descent
+// still belongs to the line metrics, caret geometry and measured content height.
+fn baseline_fit_doc(text: &str, height: f64) -> (Document, StoryId, ItemId) {
+    let (mut d, sid, fid) = doc_with(text, Rect::new(0.0, 0.0, 200.0, height), ParaAttrs::default());
+    let tf = d.item_mut(fid).unwrap().text_frame_mut().unwrap();
+    tf.options.first_baseline = FirstBaseline::Fixed;
+    tf.options.first_baseline_min = 10.0;
+    d.story_mut(sid).unwrap().format_chars(0..text.len(), |f| {
+        f.over.font_family = Some("Source Serif 4".into());
+        f.over.size = Some(8.0);
+        f.over.leading = Some(designcraft_doc::Leading::Points(11.0));
+    });
+    (d, sid, fid)
+}
+
+#[test]
+fn horizontal_text_fits_its_baseline_at_the_bottom_inset() {
+    // Include spaces, a nonprinting anchor and real descenders, rather than only capitals.
+    let text = format!("{}Map gaps ", designcraft_doc::ANCHOR_MARK);
+    let (d, sid, _) = baseline_fit_doc(&text, 10.0);
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    assert!(!cs.is_overset());
+    let line = &cs.frames[0].lines[0];
+    assert_eq!(line.baseline, 10.0);
+    assert!(line.descent > 0.0);
+    assert!(cs.frames[0].content_height > 10.0, "measured content must retain descenders");
+    assert!(line.glyphs.iter().any(|g| g.visible && text[g.byte..].starts_with('g')));
+}
+
+#[test]
+fn bottom_baseline_fit_preserves_leading_and_paragraph_spacing() {
+    let text = "Heading\nFirst line\u{2028}Second line\u{2028}Last line.";
+    let (mut d, sid, fid) = baseline_fit_doc(text, 65.5);
+    d.item_mut(fid).unwrap().text_frame_mut().unwrap().options.inset = [9.0; 4];
+    d.story_mut(sid).unwrap().paras[0].para.space_after = Some(4.5);
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    assert!(!cs.is_overset());
+    assert_eq!(cs.frames[0].lines.iter().map(|l| l.baseline).collect::<Vec<_>>(), [19.0, 34.5, 45.5, 56.5]);
+    assert_eq!(cs.frames[0].columns[0].y1, 56.5);
+    assert_eq!(cs.frames[0].range.end, text.len());
+}
+
+#[test]
+fn baseline_beyond_bottom_still_oversets_and_threads() {
+    let text = "First\u{2028}Second";
+    let (mut d, sid, f1) = baseline_fit_doc(text, 20.75);
+    let before = compose_story(&d, sid, &ComposeOptions::default());
+    assert_eq!(before.line_count(), 1);
+    assert_eq!(before.overset_at, Some("First\u{2028}".len()));
+    let lid = d.default_layer();
+    let (f2, _) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(0.0, 50.0, 200.0, 60.0), lid, "", ParaFormat::default()).unwrap();
+    let options = d.item(f1).unwrap().text_frame().unwrap().options.clone();
+    d.item_mut(f2).unwrap().text_frame_mut().unwrap().options = options;
+    d.thread(f1, f2).unwrap();
+    let after = compose_story(&d, sid, &ComposeOptions::default());
+    assert!(!after.is_overset());
+    assert_eq!(after.frames.iter().map(|f| f.lines.len()).collect::<Vec<_>>(), [1, 1]);
+    assert_eq!(after.frames[0].lines[0].baseline, before.frames[0].lines[0].baseline);
+}
+
+#[test]
+fn vertical_text_keeps_its_full_cross_line_extent() {
+    let (mut d, sid, fid) = baseline_fit_doc("Map", 200.0);
+    let it = d.item_mut(fid).unwrap();
+    it.path = designcraft_geom::shapes::rectangle(Rect::new(0.0, 0.0, 10.0, 200.0));
+    d.story_mut(sid).unwrap().vertical = true;
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    assert!(cs.is_overset());
+    assert_eq!(cs.line_count(), 0);
+}
+
+#[test]
+fn inline_objects_still_clear_the_bottom_edge() {
+    let (mut d, sid, _) = baseline_fit_doc("Text", 10.0);
+    let it = designcraft_doc::Item::new(
+        ItemId(d.alloc()),
+        d.default_layer(),
+        designcraft_doc::Shape::Rectangle,
+        designcraft_geom::shapes::rectangle(Rect::new(0.0, 0.0, 6.0, 6.0)),
+    );
+    d.story_mut(sid).unwrap().insert_object(0, designcraft_doc::AnchoredObject::new(it, designcraft_doc::AnchorPosition::Inline { y_offset: -3.0 }));
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    assert!(cs.is_overset());
+    assert_eq!(cs.line_count(), 0);
+}
+
+#[test]
+fn custom_anchors_do_not_change_bottom_baseline_fitting() {
+    let (mut d, sid, _) = baseline_fit_doc("Text", 10.0);
+    let it = designcraft_doc::Item::new(
+        ItemId(d.alloc()),
+        d.default_layer(),
+        designcraft_doc::Shape::Rectangle,
+        designcraft_geom::shapes::rectangle(Rect::new(0.0, 0.0, 6.0, 6.0)),
+    );
+    let pos = designcraft_doc::AnchorPosition::Custom {
+        x_relative: Default::default(),
+        y_relative: Default::default(),
+        x_offset: 0.0,
+        y_offset: 0.0,
+        object_point: 0,
+        ref_point: 0,
+        keep_within_column: false,
+    };
+    d.story_mut(sid).unwrap().insert_object(0, designcraft_doc::AnchoredObject::new(it, pos));
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    assert!(!cs.is_overset());
+    assert_eq!(cs.line_count(), 1);
+    assert_eq!(cs.frames[0].objects.len(), 1);
+}
+
+#[test]
+fn baseline_shift_keeps_its_metrics_and_glyph_offset_at_bottom() {
+    let (mut d, sid, _) = baseline_fit_doc("Map", 10.0);
+    let plain = compose_story(&d, sid, &ComposeOptions::default());
+    d.story_mut(sid).unwrap().format_chars(0..3, |f| f.over.baseline_shift = Some(-3.0));
+    let shifted = compose_story(&d, sid, &ComposeOptions::default());
+    assert!(!plain.is_overset() && !shifted.is_overset());
+    let (p, s) = (&plain.frames[0].lines[0], &shifted.frames[0].lines[0]);
+    assert_eq!(p.baseline, s.baseline);
+    assert!((s.descent - p.descent - 3.0).abs() < 1e-6);
+    assert!((s.glyphs[0].y - p.glyphs[0].y - 3.0).abs() < 1e-6);
+}
+
+#[test]
+fn path_text_keeps_the_original_vertical_fit_limit() {
+    // A path's synthetic layout area is not an ordinary text frame: admitting a
+    // second line would paint both lines on the same path, regardless of leading.
+    for separator in ['\n', designcraft_doc::story::FORCED_LINE_BREAK] {
+        for leading in [8.0, 10.0] {
+            let text = format!("HELLO{separator}WORLD");
+            let (mut d, sid, fid) = doc_with(&text, Rect::new(0.0, 0.0, 200.0, 100.0), ParaAttrs::default());
+            let it = d.item_mut(fid).unwrap();
+            it.shape = designcraft_doc::Shape::Path;
+            it.path = designcraft_geom::shapes::line(Point::ZERO, Point::new(200.0, 0.0));
+            it.text_frame_mut().unwrap().options.path =
+                Some(designcraft_doc::PathType { start: 0.0, flip: false, align: designcraft_doc::PathAlign::Baseline });
+            d.story_mut(sid).unwrap().format_chars(0..text.len(), |f| {
+                f.over.font_family = Some("Source Serif 4".into());
+                f.over.size = Some(20.0);
+                f.over.leading = Some(designcraft_doc::Leading::Points(leading));
+            });
+            let cs = compose_story(&d, sid, &ComposeOptions::default());
+            assert_eq!(cs.line_count(), 1, "{separator:?}, leading {leading}");
+            assert_eq!(cs.overset_at, Some("HELLO".len() + separator.len_utf8()));
+        }
+    }
+}
+
+fn two_keep_frames(text: &str) -> (Document, StoryId, ItemId, ItemId) {
+    let (mut d, sid, first) = baseline_fit_doc(text, 48.0);
+    d.item_mut(first).unwrap().path = designcraft_geom::shapes::rectangle(Rect::new(0.0, 0.0, 75.0, 48.0));
+    let lid = d.default_layer();
+    let (second, _) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(100.0, 0.0, 210.0, 69.0), lid, "", ParaFormat::default()).unwrap();
+    let options = d.item(first).unwrap().text_frame().unwrap().options.clone();
+    d.item_mut(second).unwrap().text_frame_mut().unwrap().options = options;
+    d.thread(first, second).unwrap();
+    (d, sid, first, second)
+}
+
+#[test]
+fn keep_chain_spanning_frames_does_not_empty_its_top_column() {
+    let a = "One\u{2028}Two\u{2028}Three\u{2028}Four\u{2028}Five\u{2028}Six";
+    let b = "Seven\u{2028}Eight\u{2028}Nine\u{2028}Ten";
+    let text = format!("{a}\n{b}\nEnd");
+    let (mut d, sid, first, second) = two_keep_frames(&text);
+    let paras = &mut d.story_mut(sid).unwrap().paras;
+    paras[0].para.keep_with_next = Some(2);
+    paras[0].para.space_after = Some(2.0);
+    paras[1].para.keep_with_next = Some(2);
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    // The keep chain cannot fit in either column. Fall back to flowing it, rather
+    // than moving a paragraph already at a column top and throwing that column away.
+    assert_eq!(cs.frame(first).unwrap().lines.len(), 4);
+    assert_eq!(cs.frame(second).unwrap().lines.len(), 6);
+    assert_eq!(cs.overset_at, Some(a.len() + b.len() + 2));
+}
+
+#[test]
+fn satisfiable_keep_chain_still_moves_together_to_the_next_frame() {
+    let text = "One\u{2028}Two\nHeading\nSubheading\nBody";
+    let (mut d, sid, first, second) = two_keep_frames(text);
+    let paras = &mut d.story_mut(sid).unwrap().paras;
+    paras[1].para.keep_with_next = Some(1);
+    paras[2].para.keep_with_next = Some(1);
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    assert!(!cs.is_overset());
+    assert_eq!(cs.frame(first).unwrap().lines.len(), 2);
+    assert_eq!(cs.frame(second).unwrap().lines.iter().map(|l| l.para).collect::<Vec<_>>(), [1, 2, 3]);
+}
+
 /// OS/2 field offsets: sTypoAscender, sxHeight, sCapHeight.
 const TYPO_ASCENDER: usize = 68;
 const X_HEIGHT: usize = 86;

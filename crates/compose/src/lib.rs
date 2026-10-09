@@ -407,7 +407,7 @@ pub fn frame_specs(doc: &Document, sid: StoryId) -> Vec<FrameSpec> {
                     columns: 1,
                     inset: [0.0; 4],
                     first_baseline: designcraft_doc::FirstBaseline::Ascent,
-                    path: None,
+                    // Keep the path identity: its synthetic area uses full line extents.
                     ..tf.options.clone()
                 };
                 (Rect::new(0.0, 0.0, (len - pt.start).max(1.0), size * 1.6), opts)
@@ -857,7 +857,20 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                 let col_w = cols[cur.fi][cur.col.min(cols[cur.fi].len() - 1)].width();
                 let reserve = notes.reserve(doc, cur.fi, cur.col, &line_notes, col_w, f, opts);
                 let reserve = if cur.last_baseline.is_none() { notes.reserve(doc, cur.fi, cur.col, &[], col_w, f, opts) } else { reserve };
-                let fits = baseline + desc <= col.y1 - reserve + 0.01 && !capped;
+                // A horizontal text frame's bottom inset limits the last baseline, not
+                // the font's descender box. Descenders remain in the line metrics and may
+                // hang below that edge. Paths, vertical text, inline objects and text above
+                // reserved footnotes keep the full extent to prevent collisions.
+                let fit_descent = if f.opts.path.is_some()
+                    || f.vertical
+                    || reserve > 0.0
+                    || line_glyphs.iter().any(|g| sub_objects.get(&g.byte).is_some_and(|o| !o.custom))
+                {
+                    desc
+                } else {
+                    0.0
+                };
+                let fits = baseline + fit_descent <= col.y1 - reserve + 0.01 && !capped;
                 if !fits {
                     if !capped {
                         let ctx = KeepCtx {
@@ -1402,8 +1415,10 @@ fn keep_violation(ctx: &KeepCtx, pp: &ParaProps, info: &[ParaInfo], force_col: &
     };
     let force = |j: usize| -> Option<KeepAction> {
         let top = if j == ctx.pi { ctx.at_top } else { info[j].at_top };
-        let starts_here = if j == ctx.pi { ctx.started_here } else { info[j].start == ctx.here };
-        (!(force_col[j] || top && starts_here)).then_some(KeepAction::Force(j))
+        // Keep the top-of-column fallback even when this paragraph has continued
+        // into a later column. Rewinding and forcing its original start would leave
+        // that earlier column empty when a spanning keep chain cannot be satisfied.
+        (!(force_col[j] || top)).then_some(KeepAction::Force(j))
     };
     let total_lines = ctx.line_no + ctx.remaining;
     // Keep with next: the previous paragraph's last line must share a column with our first lines.

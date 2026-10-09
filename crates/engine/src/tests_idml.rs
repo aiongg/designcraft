@@ -147,13 +147,14 @@ fn para_lines_per_frame(d: &Document, para: usize) -> Vec<usize> {
 }
 
 /// Keep Lines Together without a mode in the IDML: InDesign's default, at start/end of paragraph.
-/// A 10-line paragraph starting 6 lines above the first frame's bottom splits 6/4.
+/// A 10-line paragraph starting 7 lines above the first frame's bottom (the last baseline may sit
+/// on the bottom edge) splits 7/3.
 #[test]
 fn idml_keep_lines_without_mode_split_at_start_and_end() {
     let keep = r#"KeepLinesTogether="true" KeepFirstLines="2" KeepLastLines="2""#;
     let d = designcraft_idml::import_idml(&keep_lines_idml(keep, &[13, 10, 2])).unwrap();
     assert_eq!(para_lines_per_frame(&d, 0), [13, 0]);
-    assert_eq!(para_lines_per_frame(&d, 1), [6, 4]);
+    assert_eq!(para_lines_per_frame(&d, 1), [7, 3]);
     // All lines in paragraph, written explicitly: the paragraph moves whole.
     let d = designcraft_idml::import_idml(&keep_lines_idml(&format!(r#"{keep} KeepAllLinesTogether="true""#), &[13, 10, 2])).unwrap();
     assert_eq!(para_lines_per_frame(&d, 1), [0, 10]);
@@ -173,7 +174,7 @@ fn format_1_keep_lines_without_mode_lays_out_all_lines() {
     let v1 = designcraft_format::load(&w.finish().unwrap().into_inner()).unwrap();
     assert_eq!(para_lines_per_frame(&v1, 1), [0, 10]);
     let now = designcraft_format::load(&designcraft_format::save(&d).unwrap()).unwrap();
-    assert_eq!(para_lines_per_frame(&now, 1), [6, 4]);
+    assert_eq!(para_lines_per_frame(&now, 1), [7, 3]);
 }
 
 #[test]
