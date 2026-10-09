@@ -144,6 +144,11 @@ fn user_dictionary(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
     });
 }
 
+fn is_modifier_key(key: egui::Key) -> bool {
+    use egui::Key::*;
+    matches!(key, ShiftLeft | ShiftRight | ControlLeft | ControlRight | AltLeft | AltRight | SuperLeft | SuperRight)
+}
+
 fn keyboard_shortcuts(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
     let mut q = d.s("query");
     ui.add(
@@ -153,11 +158,12 @@ fn keyboard_shortcuts(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
     );
     d.fields.insert("query".into(), json!(q));
     let recording = d.s("recording");
-    // Capture the next key press for the command being recorded.
+    // Capture the next key press for the command being recorded. Pressing a modifier
+    // reports the modifier itself as a key; skip it and wait for the key it modifies.
     if !recording.is_empty() {
         let pressed = ui.input(|i| {
             i.events.iter().find_map(|e| match e {
-                egui::Event::Key { key, pressed: true, modifiers, .. } => Some((*key, *modifiers)),
+                egui::Event::Key { key, pressed: true, modifiers, .. } if !is_modifier_key(*key) => Some((*key, *modifiers)),
                 _ => None,
             })
         });
@@ -3783,5 +3789,20 @@ mod tests {
                 frame(&mut app);
             }
         }
+    }
+
+    #[test]
+    fn shortcut_recorder_waits_for_the_key_after_its_modifiers() {
+        let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        let mut d = Dialog::new("keyboardShortcuts", json!({"query": "", "recording": "app.palette"}));
+        let ctx = egui::Context::default();
+        let key = |key, modifiers| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers };
+        // Holding Ctrl reports Ctrl itself as a key press, then Ctrl+K arrives.
+        for event in [key(egui::Key::ControlLeft, egui::Modifiers::COMMAND), key(egui::Key::K, egui::Modifiers::COMMAND)] {
+            let input = egui::RawInput { events: vec![event], ..Default::default() };
+            ctx.run_ui(input, |ui| keyboard_shortcuts(&mut app, ui, &mut d)).textures_delta.clear();
+        }
+        assert_eq!(crate::menus::shortcut_of(&app, "app.palette").as_deref(), Some("Cmd+K"));
+        assert_eq!(d.s("recording"), "", "recording ends with the recorded shortcut");
     }
 }
