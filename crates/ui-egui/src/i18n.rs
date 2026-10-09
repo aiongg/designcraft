@@ -5,6 +5,7 @@ use std::{collections::HashMap, sync::OnceLock};
 
 mod ar;
 mod pt_br;
+mod uk;
 
 /// Supported interface languages: (code, name in that language).
 pub const LANGUAGES: &[(&str, &str)] = &[
@@ -16,6 +17,7 @@ pub const LANGUAGES: &[(&str, &str)] = &[
     ("zh", "简体中文"),
     ("ar", "العربية"),
     ("pt-br", "Português (Brasil)"),
+    ("uk", "Українська"),
 ];
 
 /// English → [German, French, Spanish, Japanese, Simplified Chinese].
@@ -2732,6 +2734,7 @@ fn column(lang: &str) -> Option<usize> {
 pub fn tr<'a>(lang: &str, s: &'a str) -> &'a str {
     static TRANSLATIONS: OnceLock<HashMap<&'static str, [&'static str; 5]>> = OnceLock::new();
     static ARABIC: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
+    static UKRAINIAN: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
     static PORTUGUESE_BR: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
     if lang == "ar" {
         return ARABIC.get_or_init(|| ar::TABLE.iter().copied().collect()).get(s).copied().unwrap_or(s);
@@ -2739,8 +2742,30 @@ pub fn tr<'a>(lang: &str, s: &'a str) -> &'a str {
     if lang == "pt-br" {
         return PORTUGUESE_BR.get_or_init(|| pt_br::TABLE.iter().copied().collect()).get(s).copied().unwrap_or(s);
     }
+    if lang == "uk" {
+        return UKRAINIAN.get_or_init(|| uk::TABLE.iter().copied().collect()).get(s).copied().unwrap_or(s);
+    }
     let Some(c) = column(lang) else { return s };
     TRANSLATIONS.get_or_init(|| TABLE.iter().copied().collect()).get(s).and_then(|row| row.get(c)).copied().unwrap_or(s)
+}
+
+/// Context-sensitive UI captions; unsupported contexts keep the shared translation.
+pub fn tr_context<'a>(lang: &str, s: &'a str, context: &str) -> &'a str {
+    if lang == "uk" {
+        return uk::CONTEXT.iter().find(|(key, scope, _)| *key == s && *scope == context).map_or_else(|| tr(lang, s), |(_, _, text)| text);
+    }
+    tr(lang, s)
+}
+
+#[cfg(test)]
+pub(crate) fn ukrainian_catalog() -> Vec<&'static str> {
+    uk::TABLE.iter().map(|(_, text)| *text).chain(uk::CONTEXT.iter().map(|(_, _, text)| *text)).collect()
+}
+
+/// Count captions in Ukrainian put the category before the value so every count uses
+/// a grammatical form; other languages keep the existing value-first caption.
+pub fn count_label(lang: &str, noun: &str, count: usize) -> String {
+    if lang == "uk" { format!("{}: {count}", tr(lang, noun)) } else { format!("{count} {}", tr(lang, noun)) }
 }
 
 /// Localize reserved built-in style names only; user-defined names are document data.
@@ -2777,8 +2802,11 @@ mod tests {
         for (key, expected) in pt_br::TABLE {
             assert_eq!(tr("pt-br", key), *expected, "pt-br: {key}");
         }
+        for (key, expected) in uk::TABLE {
+            assert_eq!(tr("uk", key), *expected, "uk: {key}");
+        }
         let unknown = String::from("A user-defined untranslated label");
-        for lang in ["ar", "pt-br", "zh", "ja", "de", "fr", "es", "", "unknown"] {
+        for lang in ["uk", "ar", "pt-br", "zh", "ja", "de", "fr", "es", "", "unknown"] {
             assert!(std::ptr::eq(tr(lang, &unknown), unknown.as_str()));
         }
     }
@@ -2808,6 +2836,56 @@ mod tests {
             assert!(TABLE[..i].iter().all(|(e, _)| e != en), "duplicate {en}");
             assert!(t.iter().all(|x| !x.is_empty()), "{en}");
         }
+    }
+
+    #[test]
+    fn ukrainian_catalog_covers_existing_keys_and_preserves_placeholders() {
+        let catalog: std::collections::HashMap<_, _> = uk::TABLE.iter().copied().collect();
+        assert_eq!(catalog.len(), uk::TABLE.len(), "duplicate Ukrainian keys");
+        let mut keys = std::collections::HashSet::new();
+        keys.extend(TABLE.iter().map(|(key, _)| *key));
+        keys.extend(ar::TABLE.iter().map(|(key, _)| *key));
+        keys.extend(pt_br::TABLE.iter().map(|(key, _)| *key));
+        assert_eq!(keys, catalog.keys().copied().collect());
+        let placeholders =
+            |s: &str| s.split('{').skip(1).filter_map(|part| part.split_once('}').map(|(name, _)| name.to_owned())).collect::<Vec<_>>();
+        for (key, translation) in uk::TABLE {
+            assert!(!translation.trim().is_empty(), "empty {key}");
+            let mut source = placeholders(key);
+            let mut translated = placeholders(translation);
+            source.sort();
+            translated.sort();
+            assert_eq!(source, translated, "placeholders: {key}");
+        }
+        assert_eq!(tr_context("uk", "Columns", "table"), "Стовпці");
+        assert_eq!(tr("uk", "Columns"), "Колонки");
+        assert_eq!(tr_context("uk", "Group", "selection"), "Група");
+        assert_eq!(tr("uk", "Group"), "Згрупувати");
+        assert_eq!(tr_context("", "Columns", "table"), "Columns");
+        assert_eq!(tr_context("uk", "Custom caption", "custom"), "Custom caption");
+        assert_eq!(tr("uk", "through"), "включно");
+        assert_eq!(tr("uk", "up to"), "не включно");
+        assert!(!is_rtl("uk"));
+        assert_eq!(tr("uk", "Type"), "Текст");
+        assert_eq!(tr("uk", "Spread"), "Розворот");
+        assert_eq!(tr("uk", "Story"), "Текстовий матеріал");
+        assert_eq!(tr("uk", "Footer Rows"), "Рядки нижнього колонтитула");
+        assert_eq!(style_name("uk", "[Basic Paragraph]"), "[Основний абзац]");
+        assert_eq!(style_name("uk", "My layout style"), "My layout style");
+        assert_eq!(workspace_name("uk", "Essentials"), "Основне");
+        assert_eq!(workspace_name("uk", "My workspace"), "My workspace");
+    }
+
+    #[test]
+    fn ukrainian_counts_use_category_captions_for_every_number() {
+        for n in [0, 1, 2, 4, 5, 11, 21, 22, 25] {
+            assert_eq!(count_label("uk", "pages", n), format!("сторінок: {n}"));
+            assert_eq!(count_label("uk", "objects", n), format!("об’єктів: {n}"));
+            assert_eq!(count_label("uk", "errors", n), format!("помилок: {n}"));
+            let pages = tr("uk", "{pages} Pages in {spreads} Spreads").replace("{pages}", &n.to_string()).replace("{spreads}", &n.to_string());
+            assert_eq!(pages, format!("Сторінок: {n}; розворотів: {n}"));
+        }
+        assert_eq!(count_label("", "objects", 2), "2 objects");
     }
 
     #[test]

@@ -1332,7 +1332,7 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
                 egui::Grid::new("ins_table").num_columns(4).spacing([8.0, 6.0]).show(ui, |ui| {
                     crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Body Rows"));
                     text_field(ui, &mut d, "bodyRows", 60.0);
-                    crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Columns"));
+                    crate::rtl::label(ui, crate::i18n::tr_context(&app.ui.language, "Columns", "table"));
                     text_field(ui, &mut d, "columns", 60.0);
                     ui.end_row();
                     crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Header Rows"));
@@ -1812,13 +1812,25 @@ fn paragraph_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
                                 }
                             });
                         let mut n = ns["count"].as_u64().unwrap_or(1) as u32;
-                        if ui.add(egui::DragValue::new(&mut n).range(1..=999)).changed() {
-                            ns["count"] = json!(n);
-                            changed = true;
+                        let mut count_value = |ui: &mut egui::Ui, ns: &mut Value, changed: &mut bool| {
+                            if ui.add(egui::DragValue::new(&mut n).range(1..=999)).changed() {
+                                ns["count"] = json!(n);
+                                *changed = true;
+                            }
+                        };
+                        if app.ui.language != "uk" {
+                            count_value(ui, ns, &mut changed);
                         }
                         let kind = ns["until"]["kind"].as_str().unwrap_or("words").to_string();
                         egui::ComboBox::from_id_salt(("ns_until", i))
-                            .selected_text(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, &kind)))
+                            .selected_text(crate::rtl::widget(
+                                ui,
+                                if app.ui.language == "uk" {
+                                    format!("{}:", crate::i18n::tr("uk", &kind))
+                                } else {
+                                    crate::i18n::tr(&app.ui.language, &kind).to_owned()
+                                },
+                            ))
                             .width(100.0)
                             .show_ui(ui, |ui| {
                                 for k in
@@ -1830,6 +1842,9 @@ fn paragraph_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
                                     }
                                 }
                             });
+                        if app.ui.language == "uk" {
+                            count_value(ui, ns, &mut changed);
+                        }
                         if kind == "chars" {
                             let mut c = ns["until"]["chars"].as_str().unwrap_or("").to_string();
                             if ui.add(egui::TextEdit::singleline(&mut c).desired_width(40.0)).changed() {
@@ -1881,13 +1896,22 @@ fn paragraph_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
                                     }
                                 }
                             });
-                        crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "for"));
+                        crate::rtl::label(
+                            ui,
+                            if app.ui.language == "uk" {
+                                format!("{}:", crate::i18n::tr("uk", "lines"))
+                            } else {
+                                crate::i18n::tr(&app.ui.language, "for").to_owned()
+                            },
+                        );
                         let mut n = l["lines"].as_u64().unwrap_or(1) as u32;
                         if ui.add(egui::DragValue::new(&mut n).range(1..=999)).changed() {
                             l["lines"] = json!(n);
                             changed = true;
                         }
-                        crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, if n == 1 { "line" } else { "lines" }));
+                        if app.ui.language != "uk" {
+                            crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, if n == 1 { "line" } else { "lines" }));
+                        }
                         if ui
                             .small_button("×")
                             .on_hover_ui(|ui| {

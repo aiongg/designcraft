@@ -56,7 +56,7 @@ fn selection_title(app: &DesignApp, info: &Option<SelInfo>) -> String {
         Some(i) if i.count > 1 => crate::i18n::tr(&app.ui.language, "Multiple Objects").into(),
         Some(i) => match i.kind {
             "<text frame>" => crate::i18n::tr(&app.ui.language, "Text Frame").into(),
-            "<group>" => crate::i18n::tr(&app.ui.language, "Group").into(),
+            "<group>" => crate::i18n::tr_context(&app.ui.language, "Group", "selection").into(),
             "<image>" => crate::i18n::tr(&app.ui.language, "Image").into(),
             "<rectangle>" => crate::i18n::tr(&app.ui.language, "Rectangle").into(),
             "<ellipse>" => crate::i18n::tr(&app.ui.language, "Ellipse").into(),
@@ -1918,13 +1918,10 @@ pub fn info_panel(app: &mut DesignApp, ui: &mut egui::Ui) {
                 crate::rtl::label(
                     ui,
                     format!(
-                        "{} {} · {} {} · {} {}",
-                        st.doc.page_count(),
-                        crate::i18n::tr(&app.ui.language, "pages"),
-                        st.doc.stories.len(),
-                        crate::i18n::tr(&app.ui.language, "stories"),
-                        st.doc.all_items().len(),
-                        crate::i18n::tr(&app.ui.language, "items")
+                        "{} · {} · {}",
+                        crate::i18n::count_label(&app.ui.language, "pages", st.doc.page_count()),
+                        crate::i18n::count_label(&app.ui.language, "stories", st.doc.stories.len()),
+                        crate::i18n::count_label(&app.ui.language, "items", st.doc.all_items().len())
                     ),
                 );
             }
@@ -2038,10 +2035,9 @@ pub fn preflight_panel(app: &mut DesignApp, ui: &mut egui::Ui) {
                 crate::i18n::tr(&app.ui.language, "No errors").to_string()
             } else {
                 format!(
-                    "{errors} {}, {} {}",
-                    crate::i18n::tr(&app.ui.language, "errors"),
-                    issues.len() - errors,
-                    crate::i18n::tr(&app.ui.language, "warnings")
+                    "{}, {}",
+                    crate::i18n::count_label(&app.ui.language, "errors", errors),
+                    crate::i18n::count_label(&app.ui.language, "warnings", issues.len() - errors)
                 )
             },
         );

@@ -566,7 +566,14 @@ pub fn status_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
                     egui::RichText::new(if errors == 0 {
                         format!("{} ▾", crate::i18n::tr(&app.ui.language, "No errors"))
                     } else {
-                        format!("{errors} {} ▾", crate::i18n::tr(&app.ui.language, if errors == 1 { "error" } else { "errors" }))
+                        format!(
+                            "{} ▾",
+                            crate::i18n::count_label(
+                                &app.ui.language,
+                                if errors == 1 && app.ui.language != "uk" { "error" } else { "errors" },
+                                errors
+                            )
+                        )
                     })
                     .font(small.clone()),
                 );
