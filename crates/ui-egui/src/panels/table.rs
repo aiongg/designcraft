@@ -139,6 +139,14 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
         }
         ui.end_row();
     });
+    if ui
+        .button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Distribute Rows Evenly")))
+        .on_hover_text("Equal fixed heights for the selected rows; cell text may become overset.")
+        .clicked()
+        && let Err(e) = app.run("table.distributeRows", json!({}))
+    {
+        app.status(format!("Table: {e}"));
+    }
     divider(ui);
     caption(ui, crate::i18n::tr(&app.ui.language, "Cell Text"));
     ui.horizontal(|ui| {

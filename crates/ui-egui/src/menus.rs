@@ -576,6 +576,7 @@ pub const MENUS: &[(&str, &[&str])] = &[
             "cmd:table.splitHorizontally",
             "cmd:table.splitVertically",
             "cmd:table.distributeColumns",
+            "cmd:table.distributeRows",
             "-",
             "ui:app.tablePanel",
         ],
@@ -2447,12 +2448,32 @@ mod tests {
     }
 
     #[test]
+    fn distribute_rows_menu_dispatches_an_undoable_edit() {
+        let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({})).unwrap();
+        let frame = app.run("frame.create", json!({"rect": [72, 72, 500, 700], "content": "text", "text": ""})).unwrap();
+        app.run("text.select", json!({"story": frame["story"], "anchor": 0, "focus": 0})).unwrap();
+        app.run("table.insert", json!({"rows": 2, "cols": 2})).unwrap();
+        app.run("table.setRowHeight", json!({"row": 0, "height": 40, "mode": "exactly"})).unwrap();
+        app.run("table.setRowHeight", json!({"row": 1, "height": 80, "mode": "exactly"})).unwrap();
+        app.run("table.selectTable", json!({})).unwrap();
+        activate(&mut app, "table.distributeRows", &Value::Null);
+        assert!(app.ui.dialog.is_none());
+        let info = app.run("table.get", json!({})).unwrap();
+        assert_eq!(info["rows"][0]["height"], 60.0);
+        assert_eq!(info["rows"][1]["height"], 60.0);
+        app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(app.run("table.get", json!({})).unwrap()["rows"][0]["height"], 40.0);
+    }
+
+    #[test]
     fn every_menu_entry_is_a_command() {
         let mut all = Vec::new();
         for (_, items) in menu_tree() {
             walk(&items, &mut all);
         }
         assert!(all.len() > 80, "{}", all.len());
+        assert!(all.iter().any(|(label, id, _)| label == "Distribute Rows Evenly" && id == "table.distributeRows"));
         for (label, id, params) in &all {
             assert!(ui_label(id).is_some() || designcraft_engine::find_command(id).is_some(), "menu entry {label}: unknown command {id}");
             assert!(!label.is_empty() && label != id, "menu entry {id} has no label");
