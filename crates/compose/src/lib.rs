@@ -71,7 +71,7 @@ pub struct RunStyle {
     pub kenten_character: String,
 }
 
-/// An underline or strikethrough bar: its top edge `offset` below the baseline (negative =
+/// An underline or strikethrough bar: its centre `offset` below the baseline (negative =
 /// above), thickness and colour.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Rule {
@@ -81,13 +81,21 @@ pub struct Rule {
     pub tint: f32,
 }
 
+impl Rule {
+    /// The stroke is centred on the offset, matching Underline / Strikethrough Options.
+    pub fn rect(&self, x0: f64, x1: f64, baseline: f64) -> Rect {
+        let center = baseline + self.offset;
+        Rect::new(x0, center - self.weight / 2.0, x1, center + self.weight / 2.0)
+    }
+}
+
 impl RunStyle {
     /// The bars this run draws between `x0` and `x1` on a line at `baseline`.
     pub fn rules(&self, x0: f64, x1: f64, baseline: f64) -> impl Iterator<Item = (&Rule, Rect)> {
         [(self.underline, &self.underline_rule), (self.strikethrough, &self.strike_rule)]
             .into_iter()
             .filter(|(on, _)| *on)
-            .map(move |(_, r)| (r, Rect::new(x0, baseline + r.offset, x1, baseline + r.offset + r.weight)))
+            .map(move |(_, r)| (r, r.rect(x0, x1, baseline)))
     }
 }
 

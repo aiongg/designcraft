@@ -7,6 +7,8 @@ use designcraft_geom::{Rect, shapes};
 
 use super::*;
 
+mod decorations;
+
 fn zip_files(files: &[(&str, &str)]) -> Vec<u8> {
     use zip::write::SimpleFileOptions;
     let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));

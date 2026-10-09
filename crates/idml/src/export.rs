@@ -1098,8 +1098,8 @@ impl<'a> Ex<'a> {
             if let Some(o) = o {
                 el.set(&format!("{k}Offset"), num(o.unwrap_or(-9999.0)));
             }
-            if let Some(c) = c.as_ref().filter(|c| !c.is_empty()) {
-                el.set(&format!("{k}Color"), self.sw(c));
+            if let Some(c) = c {
+                el.set(&format!("{k}Color"), if c.is_empty() { "Text Color".into() } else { self.sw(c) });
             }
             if let Some(t) = t {
                 el.set(&format!("{k}Tint"), num(t as f64 * 100.0));
