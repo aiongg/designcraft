@@ -1379,6 +1379,7 @@ fn content_type(s: &mut Session, p: &Value) -> Result<Value> {
                 ("text", Some(Content::Unassigned | Content::Graphic(_))) => {
                     let sid = StoryId(d.alloc());
                     let mut st = Story::new(sid);
+                    st.direction = d.new_story_direction();
                     st.frames.push(*id);
                     d.stories.insert(sid, Arc::new(st));
                     if let Some(it) = d.item_mut(*id) {

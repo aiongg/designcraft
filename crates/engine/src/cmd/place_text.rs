@@ -200,6 +200,7 @@ pub(super) fn place_text(s: &mut Session, p: &Value, name: &str, bytes: &[u8]) -
                 Some(_) => {
                     let sid = StoryId(d.alloc());
                     let mut ns = Story::new(sid);
+                    ns.direction = d.new_story_direction();
                     ns.frames = vec![fid];
                     d.stories.insert(sid, std::sync::Arc::new(ns));
                     if let Some(it) = d.item_mut(fid) {
