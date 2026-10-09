@@ -24,3 +24,6 @@ sync_github_name = false
 
 [people.moppeeer]
 sync_github_name = true
+
+[people.emanuelebonaventura]
+display_name = "insanityxoff"
