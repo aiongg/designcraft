@@ -1998,6 +1998,9 @@ pub fn shortcuts(app: &mut DesignApp, ctx: &egui::Context) {
             if app.native_shortcuts.contains(&id) && !app.ui.shortcuts.contains_key(&id) {
                 continue; // The native menu handles it.
             }
+            // The key press belongs to the shortcut: what it opens (Quick Apply's list, a dialog's
+            // default button) must not see the same press as Enter or Space this frame.
+            ctx.input_mut(|i| i.consume_key(modifiers, key));
             // Like choosing the menu item: "…" commands open their dialog.
             activate(app, &id, &Value::Null);
             continue;
@@ -2033,6 +2036,13 @@ pub fn palette(app: &mut DesignApp, ctx: &egui::Context) {
         );
         r.request_focus();
         let items = quick_apply_items(&app.session, &q);
+        // Only a fresh Return runs the first entry: ⌘Return pressed again or held down (repeats) is
+        // the shortcut, not a choice.
+        let enter = ui.input(|i| {
+            i.events
+                .iter()
+                .any(|e| matches!(e, egui::Event::Key { key: egui::Key::Enter, pressed: true, repeat: false, modifiers, .. } if !modifiers.command))
+        });
         egui::ScrollArea::vertical().max_height(340.0).show(ui, |ui| {
             for (i, it) in items.iter().enumerate() {
                 let mut b = egui::Button::new(it.label.as_str()).frame(false);
@@ -2041,7 +2051,13 @@ pub fn palette(app: &mut DesignApp, ctx: &egui::Context) {
                 } else if !it.kind.is_empty() {
                     b = b.shortcut_text(it.kind);
                 }
-                if ui.add_sized([460.0, 22.0], b).clicked() || (i == 0 && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
+                // The button aligns its label by the layout it's in: left, like the rows with a shortcut.
+                let size = egui::vec2(460.0, 22.0);
+                let row =
+                    ui.allocate_ui_with_layout(size, egui::Layout::left_to_right(egui::Align::Center).with_main_align(egui::Align::Min), |ui| {
+                        ui.add(b.min_size(size))
+                    });
+                if row.inner.clicked() || (i == 0 && enter) {
                     run = Some((it.id.clone(), it.params.clone()));
                 }
             }
@@ -2480,6 +2496,78 @@ mod tests {
         assert_eq!(app.session.tool_id(), "selection", "V switches tools straight after drawing");
         frame(&mut app, key(egui::Key::F));
         assert_eq!(app.session.tool_id(), "rectangleFrame");
+    }
+
+    #[test]
+    fn the_quick_apply_shortcut_opens_it_without_running_an_entry() {
+        let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.session.execute("file.new", &json!({})).unwrap();
+        let ctx = egui::Context::default();
+        let frame = |app: &mut crate::DesignApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))),
+                events,
+                ..Default::default()
+            };
+            let mut out = ctx.run_ui(input, |ui| {
+                app.logic(&ui.ctx().clone());
+                app.ui(ui);
+            });
+            out.textures_delta.clear();
+        };
+        let cmd_return =
+            |pressed| egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed, repeat: false, modifiers: egui::Modifiers::COMMAND };
+        frame(&mut app, vec![]);
+        frame(&mut app, vec![]);
+        frame(&mut app, vec![cmd_return(true), cmd_return(false)]);
+        frame(&mut app, vec![]);
+        assert_eq!(app.ui.palette.as_deref(), Some(""), "Quick Apply stays open");
+        assert_eq!(app.session.documents().len(), 1, "the first entry (New Document) didn't run");
+        // Pressing the shortcut again, or holding it until it repeats, doesn't run it either.
+        frame(&mut app, vec![cmd_return(true), cmd_return(false)]);
+        let repeat = egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed: true, repeat: true, modifiers: egui::Modifiers::COMMAND };
+        frame(&mut app, vec![repeat, cmd_return(false)]);
+        assert_eq!(app.ui.palette.as_deref(), Some(""), "Quick Apply stays open");
+        assert_eq!(app.session.documents().len(), 1, "a second ⌘Return or a repeat doesn't run the first entry");
+        // A plain Return still does.
+        let enter =
+            |pressed| egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed, repeat: false, modifiers: egui::Modifiers::NONE };
+        frame(&mut app, vec![enter(true), enter(false)]);
+        assert_eq!(app.ui.palette, None, "Return runs the first entry and closes Quick Apply");
+        assert_eq!(app.session.documents().len(), 2);
+    }
+
+    #[test]
+    fn quick_apply_rows_are_left_aligned() {
+        let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.session.execute("file.new", &json!({})).unwrap();
+        app.ui.palette = Some(String::new());
+        let ctx = egui::Context::default();
+        let mut shapes = Vec::new();
+        for _ in 0..3 {
+            let input =
+                egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))), ..Default::default() };
+            let mut out = ctx.run_ui(input, |ui| {
+                app.logic(&ui.ctx().clone());
+                app.ui(ui);
+            });
+            out.textures_delta.clear();
+            shapes = out.shapes;
+        }
+        let label_x = |label: &str| {
+            // The palette is painted last, over anything else with the same text.
+            shapes.iter().rev().find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.text() == label => Some(t.pos.x),
+                _ => None,
+            })
+        };
+        // Rows that show a shortcut or a style kind, and rows that show neither, among the first visible ones.
+        let items = quick_apply_items(&app.session, "");
+        let first = items.iter().take(10);
+        let plain = first.clone().find(|it| it.shortcut.is_none() && it.kind.is_empty()).expect("a row without a shortcut");
+        let with_sc = first.clone().find(|it| it.shortcut.is_some()).expect("a row with a shortcut");
+        let (a, b) = (label_x(&plain.label).expect("plain row drawn"), label_x(&with_sc.label).expect("shortcut row drawn"));
+        assert!((a - b).abs() < 0.5, "{:?} at x {a}, {:?} at x {b}", plain.label, with_sc.label);
     }
 
     #[test]
