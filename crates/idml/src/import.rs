@@ -1090,7 +1090,9 @@ impl<'r> Importer<'r> {
         // Underline / strikethrough options (-9999 = automatic).
         for k in ["Underline", "StrikeThru"] {
             let num = |n: &str| e.num(&format!("{k}{n}")).filter(|v| *v > -9000.0);
-            let color = e.prop(&format!("{k}Color")).map(|r| self.swatch_ref(r.trim())).filter(|r| r != "Text Color" && !r.is_empty());
+            // An explicit Text Color resets an inherited swatch; absence still inherits.
+            // Resolve the sentinel before swatch_ref, which maps unknown names to [None].
+            let color = e.prop(&format!("{k}Color")).map(|r| if r.trim() == "Text Color" { String::new() } else { self.swatch_ref(r.trim()) });
             let tint = tint(e.num(&format!("{k}Tint")));
             if k == "Underline" {
                 a.underline_weight = num("Weight").map(Some);
