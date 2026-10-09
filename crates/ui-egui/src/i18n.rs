@@ -2710,6 +2710,12 @@ const TABLE: &[(&str, [&str; 5])] = &[
             "请通过控制通道传入 csv、rows 或 bytes。",
         ],
     ),
+    // Paragraph Rules.
+    ("Paragraph Rules…", ["Absatzlinien …", "Filets de paragraphe…", "Filetes de párrafo…", "段落境界線…", "段落线…"]),
+    ("Paragraph Rules", ["Absatzlinien", "Filets de paragraphe", "Filetes de párrafo", "段落境界線", "段落线"]),
+    ("Rule Below", ["Linie unterhalb", "Filet après", "Filete después", "後境界線", "下方横线"]),
+    ("Tint:", ["Farbton:", "Teinte:", "Matiz:", "濃淡:", "色调："]),
+    ("Column", ["Spalte", "Colonne", "Columna", "段", "栏"]),
 ];
 
 /// Interface direction; independent of document binding and paragraph direction.
