@@ -2,6 +2,17 @@
 
 - FID1: PDF export normalizes mixed emitted gradient color spaces to RGB with an explicit warning; homogeneous device-space gradients retain their components. Linear/radial, midpoint, archival and print policies have synthetic regression coverage.
 
+- CJK-MOJI8: preserve shaped narrow punctuation when tracking changes its advance.
+- CJK-MOJI7: prevent numeric coercion in Mojikumi import, preserve finite unsupported rules, and check nested note/cell rules in preflight.
+- CJK-MOJI6: apply spacing at shaped-cluster boundaries without moving attached marks.
+- CJK-MOJI5: share equal-priority boundary spacing and honor discrete compression endpoints, including leading-only ragged-line fitting.
+
+- CJK-MOJI3: use the composition rule resolver in preflight, report unknown Mojikumi presets and retain regression coverage for supported and unsupported settings.
+
+- CJK-MOJI2: share Mojikumi pair and line-edge metrics between breaking and placement; honor spacing bounds, compression priorities, explicit aki and kinsoku policies.
+
+- CJK-MOJI1: resolve Chinese and half-em Mojikumi presets and directional custom overrides; preserve IDML table references independently of display names.
+
 - FONT7: replacement recommendations check the characters actually used; placeholder LastResort fonts and glyph-zero mappings cannot masquerade as glyph coverage or suppress missing-glyph diagnostics.
 
 - FONT6: localized and legacy family/style names share canonical resolution across shaping, inventory and replacement. Known compatible and script-based substitutes retain missing status; Find Font shows the resolved face and offers it as the replacement, while preflight reports unavailable styles.

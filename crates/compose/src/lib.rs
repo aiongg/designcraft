@@ -14,6 +14,7 @@ mod bidi;
 pub mod breaker;
 mod cache;
 pub mod hyphen;
+mod mojikumi;
 mod notes;
 mod overlay;
 mod ruby;
@@ -660,6 +661,7 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                     (col.width() - pp.left_indent - pp.right_indent - ind).max(1.0)
                 };
                 apply_desired_spacing(&mut gl, &pp);
+                mojikumi::apply(&mut gl, &doc.styles, &pp.mojikumi);
                 let hy = hyphenation_points(&story.text, &gl, &pp, &hyph_exceptions, &foreign_ranges(doc, story, prange.clone(), &base_chars));
                 let breaks = if pp.composer == Composer::SingleLine || gl.iter().any(|g| g.ch == '\t') || gl.len() > 4000 {
                     breaker::greedy(&gl, &hy, &spacing, &width)
@@ -752,6 +754,7 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
         );
         bidi::resolve_mirroring(&mut glyphs, &bidi_info);
         apply_desired_spacing(&mut glyphs, &pp);
+        mojikumi::apply(&mut glyphs, &doc.styles, &pp.mojikumi);
         let hyph_after = hyphenation_points(&story.text, &glyphs, &pp, &hyph_exceptions, &foreign_ranges(doc, story, prange.clone(), &base_chars));
         let base_size = base_chars.size;
         let spacing = spacing_for(&pp, base_size);
@@ -1305,6 +1308,12 @@ fn spacing_for(pp: &ParaProps, base_size: f64) -> Spacing {
         hyph_zone: if pp.align.is_justified() { 0.0 } else { pp.hyph_zone },
         optical: pp.optical_margin,
         korean_char_breaks: pp.korean_char_breaks,
+        kinsoku_priority: match pp.kinsoku_type.as_str() {
+            "KinsokuPushInFirst" => 1,
+            "KinsokuPushOutFirst" => 2,
+            "KinsokuPushOutOnly" => 3,
+            _ => 0,
+        },
     }
 }
 
@@ -1820,6 +1829,7 @@ fn layout_line(
     bidi_info: &unicode_bidi::BidiInfo<'_>,
 ) -> (Vec<PlacedGlyph>, f64, f64) {
     let mut line: Vec<Glyph> = glyphs[s..e.max(s)].to_vec();
+    mojikumi::edges(&mut line);
     let reference = line.iter().max_by(|a, b| a.size.total_cmp(&b.size)).cloned();
     if let Some(reference) = reference {
         for g in &mut line {
@@ -1910,7 +1920,10 @@ fn layout_line(
     };
     let justify_this = align.is_justified() && (!last || align == Align::FullyJustified || forced_mid) && !has_tab;
     // A justified paragraph's last line may have been composed with shrunk spaces: shrink it too.
-    let squeeze_last = align.is_justified() && !justify_this && !has_tab && extra < 0.0 && !spaces.is_empty();
+    let squeeze_last = !justify_this
+        && !has_tab
+        && extra < 0.0
+        && (align.is_justified() || line.iter().any(|g| g.moji.shrink > 0.0 || mojikumi::start_elastic(g, false, true)[1] > 0.0));
     // Extra advance per glyph (word spaces and letter gaps) and horizontal scale per glyph.
     let mut add = vec![0.0; line.len()];
     let mut scale = vec![1.0; line.len()];
@@ -1929,6 +1942,9 @@ fn layout_line(
             }
         }
     }
+    if (justify_this || squeeze_last) && (extra >= 0.0 || sp.kinsoku_priority != 3) {
+        extra = mojikumi::distribute(&mut line, extra, &mut add);
+    }
     if (justify_this || squeeze_last) && !spaces.is_empty() {
         distribute(&line, &spaces, extra, sp, &mut add, &mut scale);
     } else if justify_this && spaces.is_empty() && line.len() > 1 && !last {
@@ -1939,13 +1955,13 @@ fn layout_line(
                     .iter()
                     .enumerate()
                     .take(line.len() - 1)
-                    .filter(|(_, g)| !g.locked_advance || g.break_after != Some(false))
+                    .filter(|(_, g)| !g.moji.active && (!g.locked_advance || g.break_after != Some(false)))
                     .map(|(i, _)| i)
                     .collect();
                 if !gaps.is_empty() {
                     let per = extra / gaps.len() as f64;
                     for i in gaps {
-                        add[i] = per;
+                        add[i] += per;
                     }
                 }
             }

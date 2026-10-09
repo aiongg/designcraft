@@ -105,6 +105,7 @@ struct Importer<'r> {
     stroke_styles: Vec<designcraft_doc::StrokeStyleDef>,
     styles: Styles,
     composite_names: HashMap<String, String>,
+    mojikumi_names: HashMap<String, String>,
     kinsoku: HashMap<String, designcraft_doc::cjk::Kinsoku>,
     para_names: HashMap<String, String>,
     char_names: HashMap<String, String>,
@@ -140,6 +141,40 @@ struct Importer<'r> {
 fn lab_to_color(l: f32, a: f32, b: f32) -> Color {
     let rgb = lab::xyz_to_srgb(lab::lab_to_xyz(lab::Lab::new(l, a, b)));
     Color::rgb(rgb[0], rgb[1], rgb[2])
+}
+
+fn mojikumi_row(e: &El) -> Result<designcraft_doc::cjk::MojikumiAki> {
+    let number = |key: &str| -> Result<f64> {
+        let Some(raw) = e.prop(key) else {
+            return Ok(0.0);
+        };
+        raw.trim().parse::<f64>().ok().filter(|v| v.is_finite()).ok_or_else(|| IdmlError::Invalid(format!("Mojikumi row has invalid {key}")))
+    };
+    let integer = |key: &str| -> Result<i16> {
+        let v = number(key)?;
+        if v.fract() != 0.0 || v < f64::from(i16::MIN) || v > f64::from(i16::MAX) {
+            return Err(IdmlError::Invalid(format!("Mojikumi {key} must be an in-range integer")));
+        }
+        Ok(v as i16)
+    };
+    let boolean = |key: &str| -> Result<bool> {
+        match e.prop(key).as_deref().map(str::trim) {
+            None | Some("false") => Ok(false),
+            Some("true") => Ok(true),
+            _ => Err(IdmlError::Invalid(format!("Mojikumi row has invalid {key}"))),
+        }
+    };
+    let row = designcraft_doc::cjk::MojikumiAki {
+        target_class: integer("TargetMojikumiClass")?,
+        side_class: integer("SideMojikumiClass")?,
+        after: boolean("SideIsAfterTarget")?,
+        minimum: number("Minimum")?,
+        desired: number("Desired")?,
+        maximum: number("Maximum")?,
+        priority: integer("CompressionPriority")?,
+        does_not_float: boolean("AkiDoesNotFloat")?,
+    };
+    Ok(row)
 }
 
 fn nums(s: &str) -> Vec<f64> {
@@ -193,6 +228,7 @@ impl<'r> Importer<'r> {
             stroke_styles: Vec::new(),
             styles,
             composite_names: HashMap::new(),
+            mojikumi_names: HashMap::new(),
             kinsoku: HashMap::new(),
             para_names: HashMap::new(),
             char_names: HashMap::new(),
@@ -314,23 +350,14 @@ impl<'r> Importer<'r> {
             }
         }
         for e in top.iter().filter(|e| e.local() == "MojikumiTable") {
-            let overrides = e
-                .prop_el("OverrideMojikumiAkiList")
-                .map(|l| {
-                    l.find_all("OverrideMojikumiAkiType")
-                        .map(|r| designcraft_doc::cjk::MojikumiAki {
-                            target_class: r.num("TargetMojikumiClass").unwrap_or(0.0) as i16,
-                            side_class: r.num("SideMojikumiClass").unwrap_or(0.0) as i16,
-                            after: r.boolean("SideIsAfterTarget").unwrap_or(false),
-                            minimum: r.num("Minimum").unwrap_or(0.0),
-                            desired: r.num("Desired").unwrap_or(0.0),
-                            maximum: r.num("Maximum").unwrap_or(0.0),
-                            priority: r.num("CompressionPriority").unwrap_or(0.0) as i16,
-                            does_not_float: r.boolean("AkiDoesNotFloat").unwrap_or(false),
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+            if let (Some(id), Some(name)) = (e.get("Self"), e.get("Name")) {
+                self.mojikumi_names.insert(id.into(), format!("MojikumiTable/{}", unescape_id(name)));
+            }
+            let overrides = if let Some(list) = e.prop_el("OverrideMojikumiAkiList") {
+                list.find_all("OverrideMojikumiAkiType").map(mojikumi_row).collect::<Result<Vec<_>>>()?
+            } else {
+                Vec::new()
+            };
             self.styles.mojikumi_tables.push(designcraft_doc::cjk::MojikumiTable {
                 name: unescape_id(e.get("Name").unwrap_or("")),
                 based_on: e.get("BasedOnMojikumiSet").unwrap_or("").into(),
@@ -1184,7 +1211,7 @@ impl<'r> Importer<'r> {
             "KinsokuHangForce" => Some(designcraft_doc::cjk::KinsokuHang::Force),
             _ => None,
         });
-        a.mojikumi = e.prop("Mojikumi");
+        a.mojikumi = e.prop("Mojikumi").map(|name| self.mojikumi_names.get(&name).cloned().unwrap_or_else(|| unescape_id(&name)));
         a.kinsoku_type = e.prop("KinsokuType");
         a.bunri_kinshi = e.boolean("BunriKinshi");
         a.rensuuji = e.boolean("Rensuuji");

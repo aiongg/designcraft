@@ -1178,12 +1178,11 @@ fn cjk_composite_fonts_and_custom_kinsoku_are_document_resources() {
 }
 
 #[test]
-fn cjk_unsupported_mojikumi_is_preserved_instead_of_silently_dropped() {
-    let map = DESIGNMAP.replace("</Document>", r#"<MojikumiTable Self="MojikumiTable/Spacing" Name="Spacing" BasedOnMojikumiSet="SimpChineseDefault"><Properties><OverrideMojikumiAkiList>
+fn cjk_mojikumi_overrides_and_priority_round_trip() {
+    let map = DESIGNMAP.replace("</Document>", r#"<MojikumiTable Self="uMojikumi1" Name="Spacing" BasedOnMojikumiSet="SimpChineseDefault"><Properties><OverrideMojikumiAkiList>
     <OverrideMojikumiAkiType TargetMojikumiClass="1" SideMojikumiClass="23" SideIsAfterTarget="false" Minimum="-0.1" Desired="0.25" Maximum="0.5" CompressionPriority="3" AkiDoesNotFloat="true"/>
     </OverrideMojikumiAkiList></Properties></MojikumiTable></Document>"#);
-    let story =
-        STORY.replace("<ParagraphStyleRange ", "<ParagraphStyleRange Mojikumi=\"MojikumiTable/Spacing\" KinsokuType=\"KinsokuPushOutFirst\" ");
+    let story = STORY.replace("<ParagraphStyleRange ", "<ParagraphStyleRange Mojikumi=\"uMojikumi1\" KinsokuType=\"KinsokuPushOutFirst\" ");
     let bytes = zip_files(&[
         ("designmap.xml", &map),
         ("Resources/Graphic.xml", GRAPHIC),
@@ -1486,4 +1485,47 @@ fn composite_references_resolve_by_identity_and_export_as_objects() {
     assert!(xml.contains("<AppliedFont type=\"object\">CompositeFont/Mixed%253a literal</AppliedFont>"), "{xml}");
     let back = import_idml(&output).unwrap();
     assert_eq!(back.styles.composite_fonts, d.styles.composite_fonts);
+}
+
+#[test]
+fn malformed_mojikumi_rows_are_not_silently_coerced() {
+    let good = r#"<OverrideMojikumiAkiType TargetMojikumiClass="12" SideMojikumiClass="18" SideIsAfterTarget="true" Minimum="0" Desired="0.25" Maximum="0.5" CompressionPriority="3" AkiDoesNotFloat="false"/>"#;
+    for (key, value) in [
+        ("TargetMojikumiClass", "12.9"),
+        ("SideMojikumiClass", "65536"),
+        ("Minimum", "NaN"),
+        ("Desired", "oops"),
+        ("Minimum", "0.4"),
+        ("Maximum", "0.1"),
+        ("Maximum", "101"),
+        ("CompressionPriority", "10"),
+        ("AkiDoesNotFloat", "maybe"),
+    ] {
+        let mut row = crate::xml::parse(good.as_bytes()).unwrap();
+        row.set(key, value);
+        let mut xml = String::new();
+        row.write(&mut xml, 0);
+        let map = DESIGNMAP.replace("</Document>", &format!("<MojikumiTable Name=\"Bad\" BasedOnMojikumiSet=\"SimpChineseDefault\"><Properties><OverrideMojikumiAkiList>{xml}</OverrideMojikumiAkiList></Properties></MojikumiTable></Document>"));
+        let bytes = zip_files(&[
+            ("designmap.xml", &map),
+            ("Resources/Graphic.xml", GRAPHIC),
+            ("Resources/Styles.xml", STYLES),
+            ("Resources/Preferences.xml", PREFS),
+            ("MasterSpreads/MasterSpread_m1.xml", MASTER),
+            ("Spreads/Spread_sp1.xml", SPREAD),
+            ("Stories/Story_s1.xml", STORY),
+        ]);
+        if matches!((key, value), ("Minimum", "0.4") | ("Maximum", "0.1" | "101") | ("CompressionPriority", "10")) {
+            // Finite, representable rules survive import even if composition
+            // cannot apply them. The resolver supplies a diagnostic instead.
+            let document = import_idml(&bytes).unwrap();
+            document.check().unwrap();
+            assert!(designcraft_doc::mojikumi::Rules::resolve(&document.styles, "MojikumiTable/Bad").is_err());
+            let restored = import_idml(&export_idml(&document)).unwrap();
+            assert_eq!(restored.styles.mojikumi_tables, document.styles.mojikumi_tables);
+        } else {
+            let err = import_idml(&bytes).unwrap_err().to_string();
+            assert!(err.contains("Mojikumi"), "{key}={value}: {err}");
+        }
+    }
 }

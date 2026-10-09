@@ -54,6 +54,7 @@ pub struct Glyph {
     /// Resolved CJK boundary constraint, independent of glyph outlines.
     pub break_after: Option<bool>,
     pub cjk_hang: f64,
+    pub moji: crate::mojikumi::Metrics,
     pub ideographic_space_elastic: bool,
     pub character_alignment: designcraft_doc::cjk::CharacterAlignment,
     pub leading_model: designcraft_doc::cjk::LeadingModel,
@@ -930,6 +931,7 @@ fn control_glyph(face: &Arc<FontFace>, p: &CharProps, auto_leading: TypeEnv, sty
         space: face.advance(face.glyph_for(' ')) * k * p.h_scale,
         break_after: None,
         cjk_hang: 0.0,
+        moji: crate::mojikumi::Metrics { explicit_before: p.leading_aki.is_some(), explicit_after: p.trailing_aki.is_some(), ..Default::default() },
         ideographic_space_elastic: false,
         character_alignment: p.character_alignment,
         leading_model: p.leading_model,
@@ -1039,6 +1041,7 @@ fn shape_segment(
             (sg.x_offset as f64 * k * hs, -(sg.y_offset as f64) * k * p.v_scale)
         };
         let (ascent, descent) = if up { (em_top * k_v, -em_bottom * k_v) } else { (ascent, descent) };
+        let body = adv;
         if ch == SOFT_HYPHEN {
             adv = 0.0;
         } else if last_in_cluster {
@@ -1076,6 +1079,12 @@ fn shape_segment(
             space,
             break_after: None,
             cjk_hang: 0.0,
+            moji: crate::mojikumi::Metrics {
+                body,
+                explicit_before: p.leading_aki.is_some(),
+                explicit_after: p.trailing_aki.is_some(),
+                ..Default::default()
+            },
             ideographic_space_elastic: false,
             character_alignment: p.character_alignment,
             leading_model: p.leading_model,
@@ -1124,5 +1133,7 @@ pub(crate) fn hyphen_after(g: &Glyph) -> Glyph {
     h.byte = g.byte + g.len;
     h.len = 0;
     h.ch = '-';
+    h.rendered_char = '-';
+    h.moji = Default::default();
     h
 }
