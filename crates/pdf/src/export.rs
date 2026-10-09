@@ -1355,6 +1355,10 @@ fn untagged_rgb(data: &[u8]) -> bool {
 }
 
 fn lossless(data: &Arc<Vec<u8>>, fmt: Option<image::ImageFormat>, mode: RasterMode) -> Option<Image> {
+    // krilla reads PNG, GIF and WebP lazily: a damaged file is accepted here and fails the whole
+    // export when the PDF is written. Decoding it first means it is skipped, like any other
+    // image that can't be decoded.
+    let rgba = designcraft_images::decode_rgba(data)?;
     let i = mode.interpolate;
     let direct = match fmt {
         Some(image::ImageFormat::Png | image::ImageFormat::Gif | image::ImageFormat::WebP) if mode.tag_rgb && untagged_rgb(data) => None,
@@ -1365,7 +1369,6 @@ fn lossless(data: &Arc<Vec<u8>>, fmt: Option<image::ImageFormat>, mode: RasterMo
     };
     direct.or_else(|| {
         // TIFF, BMP, PSD composites… and, with `tag_rgb`, untagged RGB.
-        let rgba = designcraft_images::decode_rgba(data)?;
         if mode.tag_rgb {
             return SrgbImage::new(rgba).and_then(|img| Image::from_custom(img, i).ok());
         }
