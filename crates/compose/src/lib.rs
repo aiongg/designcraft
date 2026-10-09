@@ -742,6 +742,16 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
         let hyph_after = hyphenation_points(&story.text, &glyphs, &pp, &hyph_exceptions, &foreign_ranges(doc, story, prange.clone(), &base_chars));
         let base_size = base_chars.size;
         let spacing = spacing_for(&pp, base_size);
+        // An empty paragraph takes its height from its paragraph mark's character format.
+        let mark_chars = if glyphs.is_empty() {
+            std::borrow::Cow::Owned(doc.styles.resolve_char(&base_chars, story.char_format_of(prange.start)))
+        } else {
+            std::borrow::Cow::Borrowed(&base_chars)
+        };
+        let mark_leading = match mark_chars.leading {
+            designcraft_doc::Leading::Auto => mark_chars.size * pp.auto_leading,
+            designcraft_doc::Leading::Points(v) => v,
+        };
         // Paragraph start options.
         if force_col[pi] {
             cur.next_column(&cols);
@@ -818,7 +828,7 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
             for (k, b) in breaks.iter().enumerate() {
                 let (s, e) = (g0 + b.start, g0 + b.end);
                 let line_glyphs = &glyphs[s..e.max(s)];
-                let (asc, tops, desc, lead) = line_metrics(line_glyphs, &glyphs, s, base_leading, base_chars.size, db, &base_chars);
+                let (asc, tops, desc, lead) = line_metrics(line_glyphs, &glyphs, s, mark_leading, mark_chars.size, db, &mark_chars);
                 let reference = cjk_line_reference(line_glyphs);
                 // Baseline grid: the next grid line at or below.
                 let grid = f.grid.filter(|&(_, inc)| {
