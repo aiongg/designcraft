@@ -359,6 +359,8 @@ impl<'r> Importer<'r> {
                 self.layer_ids.insert(s.to_string(), id);
             }
         }
+        // IDML lists layers back to front; `Document::layers` is front to back.
+        self.layers.reverse();
         if self.layers.is_empty() {
             let id = LayerId(self.alloc());
             self.layers.push(Layer {
