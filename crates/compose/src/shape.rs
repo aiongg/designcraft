@@ -693,11 +693,11 @@ fn shape_run_raw(
                             // Sits on the baseline like a (big) character.
                             Some(y) => {
                                 g.adv = o.w;
-                                g.ascent = g.ascent.max(o.h + y);
-                                g.typo_ascent = g.typo_ascent.max(o.h + y);
-                                g.cap = g.cap.max(o.h + y);
-                                g.xh = g.xh.max(o.h + y);
-                                g.descent = g.descent.max(-y);
+                                // The replacement character has no font ink. Its box alone
+                                // supplies extents; adjacent text supplies its own font metrics.
+                                let top = (o.h + y).max(0.0);
+                                (g.ascent, g.typo_ascent, g.cap, g.xh) = (top, top, top, top);
+                                g.descent = (-y).max(0.0);
                             }
                             // Pushes its line down by its height and spacing.
                             None => {
