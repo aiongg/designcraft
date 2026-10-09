@@ -277,7 +277,7 @@ fn main() -> eframe::Result {
                 let _ = app.run("file.newSample", serde_json::json!({}));
             }
             for f in files {
-                if let Err(e) = app.run("file.open", serde_json::json!({"path": f})) {
+                if let Err(e) = app.open_file("file.open", serde_json::json!({"path": f})) {
                     eprintln!("designcraft: {f}: {e}");
                 }
             }

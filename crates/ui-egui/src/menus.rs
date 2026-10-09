@@ -712,7 +712,7 @@ pub fn run_ui(app: &mut DesignApp, id: &str, p: &Value) -> Option<Result<Value, 
             let Some(path) = app.services.pick_open.as_mut().and_then(|f| f("place")) else { return Some(Ok(Value::Null)) };
             let l = path.to_lowercase();
             if !(l.ends_with(".docx") || l.ends_with(".rtf")) {
-                return Some(app.run("file.place", json!({"path": path})));
+                return Some(app.open_file("file.place", json!({"path": path})));
             }
             let info = match app.run("place.styles", json!({"path": path})) {
                 Ok(v) => v,

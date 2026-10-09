@@ -803,7 +803,9 @@ fn check(ui: &mut egui::Ui, d: &mut Dialog, key: &str, label: &str) {
 pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
     let Some(mut d) = app.ui.dialog.clone() else { return };
     let mut result: Option<bool> = None;
+    let alert_title = d.s("title");
     let title = match d.id.as_str() {
+        "alert" => crate::i18n::tr(&app.ui.language, &alert_title),
         "ruby" => crate::i18n::tr(&app.ui.language, "Ruby"),
         "newDocument" => crate::i18n::tr(&app.ui.language, "New Document"),
         "frameSize" => crate::i18n::tr(&app.ui.language, "Rectangle"),
@@ -839,7 +841,12 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
     };
     egui::Modal::new(egui::Id::new("dialog")).show(ctx, |ui| {
         ui.set_min_width(380.0);
-        ui.set_max_width(if d.id == "closeDocument" || (d.id == "newDocument" && crate::i18n::is_rtl(&app.ui.language)) { 380.0 } else { 640.0 });
+        ui.set_max_width(match d.id.as_str() {
+            "alert" => 440.0,
+            "closeDocument" => 380.0,
+            "newDocument" if crate::i18n::is_rtl(&app.ui.language) => 380.0,
+            _ => 640.0,
+        });
         if crate::i18n::is_rtl(&app.ui.language) {
             ui.horizontal(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1373,6 +1380,14 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
                 });
             }
             "documentSetup" => document_setup(app, ui, &mut d),
+            "alert" => {
+                let file = d.s("file");
+                if !file.is_empty() {
+                    crate::rtl::label(ui, egui::RichText::new(crate::rtl::isolate(&file)).font(semibold(13.0)));
+                    ui.add_space(4.0);
+                }
+                crate::rtl::label(ui, d.s("message"));
+            }
             _ => {}
         }
         ui.add_space(12.0);
@@ -1389,7 +1404,9 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
                 {
                     result = Some(true);
                 }
-                if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Cancel"))).clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                // An alert only has OK.
+                let cancel = d.id != "alert" && ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Cancel"))).clicked();
+                if cancel || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                     result = Some(false);
                 }
                 if d.id == "closeDocument" && ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Don't Save"))).clicked() {
@@ -1557,7 +1574,7 @@ pub fn confirm(app: &mut DesignApp) -> Result<Value, String> {
         }
         "pdfImport" => {
             let crop = d.s("crop");
-            app.run("file.place", json!({"path": d.s("path"), "pdfPage": d.n("page").unwrap_or(1.0).max(1.0) as u64, "pdfCrop": if crop.is_empty() { "crop".to_string() } else { crop }}))
+            app.open_file("file.place", json!({"path": d.s("path"), "pdfPage": d.n("page").unwrap_or(1.0).max(1.0) as u64, "pdfCrop": if crop.is_empty() { "crop".to_string() } else { crop }}))
         }
         "print" => {
             let pages = if d.s("range") == "all" { Value::Null } else { json!(d.s("pages")) };
@@ -1678,7 +1695,7 @@ pub fn confirm(app: &mut DesignApp) -> Result<Value, String> {
                 None => Ok(Value::Null),
             }
         }
-        "importOptions" => app.run(
+        "importOptions" => app.open_file(
             "file.place",
             json!({"path": d.s("path"), "removeStyles": d.b("removeStyles"), "styleConflicts": d.s("styleConflicts"), "styleMap": d.fields.get("map").cloned().unwrap_or(json!({}))}),
         ),
@@ -1746,6 +1763,7 @@ pub fn confirm(app: &mut DesignApp) -> Result<Value, String> {
             }
             app.run("footnote.options", p)
         }
+        "alert" => Ok(Value::Null),
         "findChange" if d.b("objectMode") => Ok(Value::Null),
         "findChange" => app.run("find.change", json!({"find": d.s("find"), "change": d.s("change"), "grep": d.b("grep"), "caseSensitive": d.b("caseSensitive"), "wholeWord": d.b("wholeWord"), "scope": d.s("scope")})),
         id if id.starts_with("cmd:") => {
