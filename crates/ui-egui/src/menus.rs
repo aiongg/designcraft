@@ -1896,6 +1896,9 @@ pub fn shortcuts(app: &mut DesignApp, ctx: &egui::Context) {
             if app.native_shortcuts.contains(&id) && !app.ui.shortcuts.contains_key(&id) {
                 continue; // The native menu handles it.
             }
+            // The key press belongs to the shortcut: what it opens (Quick Apply's list, a dialog's
+            // default button) must not see the same press as Enter or Space this frame.
+            ctx.input_mut(|i| i.consume_key(modifiers, key));
             // Like choosing the menu item: "…" commands open their dialog.
             activate(app, &id, &Value::Null);
             continue;
@@ -2378,6 +2381,33 @@ mod tests {
         assert_eq!(app.session.tool_id(), "selection", "V switches tools straight after drawing");
         frame(&mut app, key(egui::Key::F));
         assert_eq!(app.session.tool_id(), "rectangleFrame");
+    }
+
+    #[test]
+    fn the_quick_apply_shortcut_opens_it_without_running_an_entry() {
+        let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.session.execute("file.new", &json!({})).unwrap();
+        let ctx = egui::Context::default();
+        let frame = |app: &mut crate::DesignApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))),
+                events,
+                ..Default::default()
+            };
+            let mut out = ctx.run_ui(input, |ui| {
+                app.logic(&ui.ctx().clone());
+                app.ui(ui);
+            });
+            out.textures_delta.clear();
+        };
+        let cmd_return =
+            |pressed| egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed, repeat: false, modifiers: egui::Modifiers::COMMAND };
+        frame(&mut app, vec![]);
+        frame(&mut app, vec![]);
+        frame(&mut app, vec![cmd_return(true), cmd_return(false)]);
+        frame(&mut app, vec![]);
+        assert_eq!(app.ui.palette.as_deref(), Some(""), "Quick Apply stays open");
+        assert_eq!(app.session.documents().len(), 1, "the first entry (New Document) didn't run");
     }
 
     #[test]
