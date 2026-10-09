@@ -857,8 +857,9 @@ pub fn run_ui(app: &mut DesignApp, id: &str, p: &Value) -> Option<Result<Value, 
                     None => Ok(Value::Null),
                 });
             }
+            let request = app.import_request("swatches");
             if let Some(open) = app.services.open_async.as_mut() {
-                open("swatches");
+                open(request);
             }
             Ok(Value::Null)
         }
