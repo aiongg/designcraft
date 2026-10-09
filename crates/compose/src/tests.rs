@@ -1961,6 +1961,66 @@ fn caret_follows_spaces_typed_at_the_end() {
 }
 
 #[test]
+fn colour_change_keeps_kerning_and_ligatures_keep_colour() {
+    let mut d = Document::new(&NewDocument::default());
+    let lid = d.default_layer();
+    let (_, sid) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(100.0, 100.0, 400.0, 200.0), lid, "ayay", ParaFormat::default()).unwrap();
+    d.story_mut(sid).unwrap().format_chars(0..4, |f| f.over.font_style = Some("Bold".into()));
+    let line = |d: &Document| compose_story(d, sid, &ComposeOptions::default()).frames[0].lines[0].clone();
+    let xs = |l: &Line| l.glyphs.iter().map(|g| (g.x, g.adv)).collect::<Vec<_>>();
+    let kerned = line(&d);
+    // The font kerns "ay" (otherwise this test proves nothing).
+    d.story_mut(sid).unwrap().format_chars(0..4, |f| f.over.kerning = Some(designcraft_doc::Kerning::None));
+    assert_ne!(xs(&line(&d)), xs(&kerned), "Source Serif 4 Bold kerns a–y");
+    d.story_mut(sid).unwrap().format_chars(0..4, |f| f.over.kerning = Some(designcraft_doc::Kerning::Metrics));
+    // Colour the first "a": positions are unchanged, only its style differs.
+    d.story_mut(sid).unwrap().format_chars(0..1, |f| f.over.fill = Some("Cyan".into()));
+    let coloured = line(&d);
+    assert_eq!(xs(&coloured), xs(&kerned), "a colour change must not change spacing");
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let fill = |l: &Line, i: usize| cs.styles[l.glyphs[i].style as usize].fill.clone();
+    assert_eq!(fill(&coloured, 0), "Cyan");
+    assert_ne!(fill(&coloured, 1), "Cyan");
+
+    // A ligature never swallows a differently coloured letter: the "i" of "fi" keeps its colour.
+    let (_, sid) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(100.0, 300.0, 400.0, 400.0), lid, "fifi", ParaFormat::default()).unwrap();
+    d.story_mut(sid).unwrap().format_chars(1..2, |f| f.over.fill = Some("Cyan".into()));
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let l = &cs.frames[0].lines[0];
+    let at = |b: usize| l.glyphs.iter().find(|g| g.len > 0 && g.byte <= b && b < g.byte + g.len).map(|g| cs.styles[g.style as usize].fill.clone());
+    assert_eq!(at(1).as_deref(), Some("Cyan"));
+    assert_ne!(at(2).as_deref(), Some("Cyan"));
+}
+
+/// The emphasis mark drawn over the text only paints: a change of kenten character keeps the
+/// kerning across it.
+#[test]
+fn kenten_character_change_keeps_kerning() {
+    let mut d = Document::new(&NewDocument::default());
+    let lid = d.default_layer();
+    let (_, sid) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(100.0, 100.0, 400.0, 200.0), lid, "ayay", ParaFormat::default()).unwrap();
+    d.story_mut(sid).unwrap().format_chars(0..4, |f| {
+        f.over.font_style = Some("Bold".into());
+        f.over.kenten = Some(true);
+    });
+    let xs = |d: &Document| {
+        let cs = compose_story(d, sid, &ComposeOptions::default());
+        cs.frames[0].lines[0].glyphs.iter().filter(|g| g.len > 0).map(|g| (g.byte, g.x, g.adv)).collect::<Vec<_>>()
+    };
+    let kerned = xs(&d);
+    d.story_mut(sid).unwrap().format_chars(0..4, |f| f.over.kerning = Some(designcraft_doc::Kerning::None));
+    assert_ne!(xs(&d), kerned, "Source Serif 4 Bold kerns a–y");
+    d.story_mut(sid).unwrap().format_chars(0..4, |f| f.over.kerning = Some(designcraft_doc::Kerning::Metrics));
+    d.story_mut(sid).unwrap().format_chars(0..1, |f| f.over.kenten_character = Some("●".into()));
+    assert_eq!(xs(&d), kerned, "a kenten character change must not change spacing");
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let mark = |b: usize| {
+        cs.frames[0].lines[0].glyphs.iter().find(|g| g.len > 0 && g.byte == b).map(|g| cs.styles[g.style as usize].kenten_character.clone())
+    };
+    assert_eq!((mark(0).as_deref(), mark(1).as_deref()), (Some("●"), Some("")));
+}
+
+#[test]
 fn cjk_aki_adds_space_without_scaling_outlines() {
     let (mut d, sid, _) = doc_with("AB", Rect::new(0.0, 0.0, 300.0, 100.0), ParaAttrs::default());
     let old = compose_story(&d, sid, &ComposeOptions::default());
@@ -2427,6 +2487,32 @@ fn missing_glyphs_are_the_fonts_box_unless_fallback_is_on() {
     let (face, gid, _) = glyph_at(&d, 1);
     assert_ne!(face.family, designcraft_fonts::DEFAULT_FAMILY);
     assert_ne!(gid, 0, "a fallback font draws it");
+}
+
+/// A missing font's substitute draws what it lacks from fallback fonts whatever the setting, also
+/// in text shaped as one piece across a colour change.
+#[test]
+fn a_missing_fonts_substitute_takes_fallback_fonts() {
+    use designcraft_fonts::testing::font_with;
+    designcraft_fonts::FontDb::global().add_font(font_with("DC Test Missing Glyph Helper", &['語']).unwrap());
+    let text = "a語b語";
+    let (mut d, sid, _) = doc_with(text, Rect::new(36.0, 36.0, 300.0, 100.0), ParaAttrs::default());
+    {
+        let s = d.story_mut(sid).unwrap();
+        s.format_chars(0..text.len(), |f| {
+            f.over.language = Some("Japanese".into());
+            f.over.font_family = Some("DC Test No Such Family".into());
+        });
+        s.format_chars("a語".len()..text.len(), |f| f.over.fill = Some("Red".into()));
+    }
+    assert!(!d.settings.glyph_fallback);
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let glyphs: Vec<&PlacedGlyph> = all_lines(&cs).into_iter().flat_map(|l| l.glyphs.iter()).filter(|g| text[g.byte..].starts_with('語')).collect();
+    assert_eq!(glyphs.len(), 2);
+    for g in glyphs {
+        assert_ne!(g.face.family, designcraft_fonts::DEFAULT_FAMILY, "byte {}", g.byte);
+        assert_ne!(g.gid, 0, "byte {}: a fallback font draws it", g.byte);
+    }
 }
 
 #[test]
