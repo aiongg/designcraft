@@ -819,6 +819,7 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
         "polygonSettings" => crate::i18n::tr(&app.ui.language, "Polygon Settings"),
         "userDictionary" => crate::i18n::tr(&app.ui.language, "User Dictionary"),
         "newWorkspace" => crate::i18n::tr(&app.ui.language, "New Workspace"),
+        "closeDocument" => crate::i18n::tr(&app.ui.language, "Unsaved Changes"),
         "menus" => crate::i18n::tr(&app.ui.language, "Menu Customization"),
         "importOptions" => crate::i18n::tr(&app.ui.language, "Import Options"),
         "fittingOptions" => crate::i18n::tr(&app.ui.language, "Frame Fitting Options"),
@@ -837,7 +838,7 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
     };
     egui::Modal::new(egui::Id::new("dialog")).show(ctx, |ui| {
         ui.set_min_width(380.0);
-        ui.set_max_width(if d.id == "newDocument" && crate::i18n::is_rtl(&app.ui.language) { 380.0 } else { 640.0 });
+        ui.set_max_width(if d.id == "closeDocument" || (d.id == "newDocument" && crate::i18n::is_rtl(&app.ui.language)) { 380.0 } else { 640.0 });
         if crate::i18n::is_rtl(&app.ui.language) {
             ui.horizontal(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1198,6 +1199,10 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
                     });
                 }
             }
+            "closeDocument" => {
+                let text = crate::i18n::tr(&app.ui.language, "“{}” has changes that are not saved. Save them before closing?").replace("{}", &d.s("title"));
+                crate::rtl::label(ui, text);
+            }
             "newWorkspace" => {
                 ui.horizontal(|ui| {
                     crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Name:"));
@@ -1369,11 +1374,12 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
             _ => {}
         }
         ui.add_space(12.0);
+        let ok_label = if d.id == "closeDocument" { "  Save  " } else { "  OK  " };
         ui.horizontal(|ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
                     .add(
-                        egui::Button::new(crate::rtl::widget(ui, egui::RichText::new(crate::i18n::tr(&app.ui.language, "  OK  ")).color(egui::Color32::WHITE)))
+                        egui::Button::new(crate::rtl::widget(ui, egui::RichText::new(crate::i18n::tr(&app.ui.language, ok_label)).color(egui::Color32::WHITE)))
                             .fill(crate::theme::Tokens::get(ui.ctx()).accent_strong),
                     )
                     .clicked()
@@ -1383,6 +1389,10 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
                 }
                 if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Cancel"))).clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                     result = Some(false);
+                }
+                if d.id == "closeDocument" && ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Don't Save"))).clicked() {
+                    d.fields.insert("discard".into(), json!(true));
+                    result = Some(true);
                 }
             });
         });
@@ -1601,6 +1611,24 @@ pub fn confirm(app: &mut DesignApp) -> Result<Value, String> {
             app.run("document.preferences", doc)
         }
         "newWorkspace" => app.run("window.newWorkspace", json!({"name": d.s("name")})),
+        "closeDocument" => {
+            // The document may have moved in the tab row (or gone) while the dialog was open.
+            let uid = d.fields.get("uid").and_then(Value::as_u64);
+            let index = |app: &DesignApp| app.session.documents().iter().position(|doc| Some(doc.uid) == uid);
+            let Some(i) = index(app) else { return Ok(Value::Null) };
+            if !d.b("discard") {
+                app.run("file.activate", json!({"index": i}))?;
+                app.run("app.save", json!({}))?;
+                // Still unsaved: the save was cancelled (no file chosen). Keep the document open.
+                if app.session.documents().get(i).is_none_or(|doc| doc.is_dirty()) {
+                    return Ok(Value::Null);
+                }
+            }
+            match index(app) {
+                Some(i) => app.run("file.close", json!({"index": i})),
+                None => Ok(Value::Null),
+            }
+        }
         "importOptions" => app.run(
             "file.place",
             json!({"path": d.s("path"), "removeStyles": d.b("removeStyles"), "styleConflicts": d.s("styleConflicts"), "styleMap": d.fields.get("map").cloned().unwrap_or(json!({}))}),
