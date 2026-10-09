@@ -417,7 +417,18 @@ pub(crate) fn shape_para(
                     let style = table.intern(db, &props);
                     let env = table.env_for(first.env, style);
                     let face = db.face(&props.font_family, &props.font_style);
-                    shape_segment(db, &story.text, first.range.clone(), label.get(a..b), &props, &face, env, &StyleRuns(&[(at, style)]), &mut glyphs, sub.vertical);
+                    shape_segment(
+                        db,
+                        &story.text,
+                        first.range.clone(),
+                        label.get(a..b),
+                        &props,
+                        &face,
+                        env,
+                        &StyleRuns(&[(at, style)]),
+                        &mut glyphs,
+                        sub.vertical,
+                    );
                 }
                 for (index, glyph) in glyphs[begin..].iter_mut().enumerate() {
                     glyph.len = if index == 0 { first.range.len() } else { 0 };
