@@ -59,6 +59,8 @@ pub struct Glyph {
     pub leading_model: designcraft_doc::cjk::LeadingModel,
     pub character_direction: designcraft_doc::arabic::CharacterDirection,
     pub display_char: char,
+    /// Actual shaped character, including generated labels, for glyph diagnostics.
+    pub rendered_char: char,
     pub bidi_offset: usize,
     pub bidi_end: usize,
     pub allow_kashidas: bool,
@@ -101,6 +103,9 @@ struct Piece {
     env: TypeEnv,
     /// Hidden conditional text or tracked deletions: laid out as zero-width place-holders.
     hidden: bool,
+    /// A note reference set in a composite font: its label is shaped alone, each part in the
+    /// composite entry's font.
+    composite_note: bool,
 }
 
 /// The style of each byte of a shaped run: `(first byte, style)` in story order.
@@ -303,8 +308,7 @@ pub(crate) fn shape_para(
             None => para_chars,
         };
         let props = styles.resolve_char(para_chars, fmt);
-        let family = props.font_family.trim_start_matches("CompositeFont/");
-        if let Some(font) = styles.composite_fonts.iter().find(|f| f.name == family) {
+        if let Some(font) = styles.composite_font(&props.font_family) {
             let mut start = a;
             let mut selected = None;
             for (offset, c) in story.text.get(a..b).unwrap_or("").char_indices() {
@@ -327,12 +331,12 @@ pub(crate) fn shape_para(
         let auto_leading = table.env_for(auto_leading, style);
         let deleted = props.change == designcraft_doc::ChangeMark::Deleted;
         if deleted || (!props.conditions.is_empty() && props.conditions.iter().all(|c| sub.hidden_conditions.contains(c))) {
-            pieces.push(Piece { range: a..b, props, style, env: auto_leading, hidden: true });
+            pieces.push(Piece { range: a..b, props, style, env: auto_leading, hidden: true, composite_note: false });
             continue;
         }
         let is_ref = |c: char| c == designcraft_doc::FOOTNOTE_REF || c == designcraft_doc::ENDNOTE_REF;
         if !story.text[a..b].contains(is_ref) {
-            pieces.push(Piece { range: a..b, props, style, env: auto_leading, hidden: false });
+            pieces.push(Piece { range: a..b, props, style, env: auto_leading, hidden: false, composite_note: false });
             continue;
         }
         // Footnote references take the reference position / character style; endnote references
@@ -354,18 +358,24 @@ pub(crate) fn shape_para(
         for (i, m) in story.text[a..b].match_indices(is_ref) {
             let i = a + i;
             if k < i {
-                pieces.push(Piece { range: k..i, props: props.clone(), style, env: auto_leading, hidden: false });
+                pieces.push(Piece { range: k..i, props: props.clone(), style, env: auto_leading, hidden: false, composite_note: false });
             }
             let e = i + m.len();
             if m.starts_with(designcraft_doc::ENDNOTE_REF) {
-                pieces.push(Piece { range: i..e, props: eprops.clone(), style: estyle, env: eenv, hidden: false });
+                pieces.push(Piece { range: i..e, props: eprops.clone(), style: estyle, env: eenv, hidden: false, composite_note: false });
             } else {
-                pieces.push(Piece { range: i..e, props: rprops.clone(), style: rstyle, env: renv, hidden: false });
+                if styles.composite_font(&rprops.font_family).is_some() {
+                    // Shaped entry by entry below, from the run's env: the composite font's own
+                    // name is never an installed family, so `renv` would force glyph fallback.
+                    pieces.push(Piece { range: i..e, props: rprops.clone(), style: rstyle, env: auto_leading, hidden: false, composite_note: true });
+                } else {
+                    pieces.push(Piece { range: i..e, props: rprops.clone(), style: rstyle, env: renv, hidden: false, composite_note: false });
+                }
             }
             k = e;
         }
         if k < b {
-            pieces.push(Piece { range: k..b, props, style, env: auto_leading, hidden: false });
+            pieces.push(Piece { range: k..b, props, style, env: auto_leading, hidden: false, composite_note: false });
         }
     }
     let mut i = 0;
@@ -387,12 +397,42 @@ pub(crate) fn shape_para(
             i += 1;
             continue;
         }
+        if first.composite_note {
+            if let Some(composite) = styles.composite_font(&first.props.font_family) {
+                let at = first.range.start;
+                let label = sub.notes.get(&at).map_or("#", String::as_str);
+                let begin = glyphs.len();
+                let mut segments: Vec<(usize, usize, Option<&designcraft_doc::cjk::CompositeFontEntry>)> = Vec::new();
+                for (at, c) in label.char_indices() {
+                    let entry = composite.entry(c);
+                    if let Some((_, end, _)) = segments.last_mut().filter(|(_, _, previous)| *previous == entry) {
+                        *end = at + c.len_utf8();
+                    } else {
+                        segments.push((at, at + c.len_utf8(), entry));
+                    }
+                }
+                for (a, b, entry) in segments {
+                    let props = composite_props(db, &first.props, entry);
+                    let style = table.intern(db, &props);
+                    let env = table.env_for(first.env, style);
+                    let face = db.face(&props.font_family, &props.font_style);
+                    shape_segment(db, &story.text, first.range.clone(), label.get(a..b), &props, &face, env, &StyleRuns(&[(at, style)]), &mut glyphs, sub.vertical);
+                }
+                for (index, glyph) in glyphs[begin..].iter_mut().enumerate() {
+                    glyph.len = if index == 0 { first.range.len() } else { 0 };
+                    glyph.no_break = true;
+                }
+            }
+            i += 1;
+            continue;
+        }
         let key = shaping_key(&first.props);
         let mut j = i + 1;
         // Jidori fits its own run into whole ems: such pieces stay apart.
         while j < pieces.len()
             && first.props.jidori == 0
             && !pieces[j].hidden
+            && !pieces[j].composite_note
             && pieces[j].range.start == pieces[j - 1].range.end
             && pieces[j].env.glyph_fallback == first.env.glyph_fallback
             && shaping_key(&pieces[j].props) == key
@@ -894,6 +934,7 @@ fn control_glyph(face: &Arc<FontFace>, p: &CharProps, auto_leading: TypeEnv, sty
         character_alignment: p.character_alignment,
         leading_model: p.leading_model,
         character_direction: p.character_direction,
+        rendered_char: ch,
         display_char: ch,
         bidi_offset: 0,
         bidi_end: 0,
@@ -919,7 +960,32 @@ fn shape_segment(
     out: &mut Vec<Glyph>,
     vertical: bool,
 ) {
-    let _ = db;
+    // Generated labels need the same coverage fallback as ordinary text. Keep the
+    // original marker address and one carrier even when several faces draw the label.
+    if let Some(label) = replacement.filter(|_| auto_leading.glyph_fallback) {
+        let lang = designcraft_doc::language_tag(&p.language);
+        let mut segments: Vec<(usize, usize, Arc<FontFace>)> = Vec::new();
+        for (at, c) in label.char_indices() {
+            let selected = if face.covers(c) { face.clone() } else { db.fallback_for(c, face.id(), lang).unwrap_or_else(|| face.clone()) };
+            if let Some((_, end, previous)) = segments.last_mut().filter(|(_, _, previous)| previous.id() == selected.id()) {
+                *end = at + c.len_utf8();
+                let _ = previous;
+            } else {
+                segments.push((at, at + c.len_utf8(), selected));
+            }
+        }
+        if segments.iter().any(|(_, _, selected)| selected.id() != face.id()) {
+            let begin = out.len();
+            for (a, b, selected) in segments {
+                shape_segment(db, text, range.clone(), label.get(a..b), p, &selected, auto_leading, styles, out, vertical);
+            }
+            for (i, glyph) in out[begin..].iter_mut().enumerate() {
+                glyph.len = if i == 0 { range.len() } else { 0 };
+                glyph.no_break = true;
+            }
+            return;
+        }
+    }
     let (size, k, ascent, descent, leading, cap, xh, shift) = metrics(face, p, auto_leading);
     let hs = p.h_scale;
     let tracking = p.tracking / 1000.0 * p.size;
@@ -1014,6 +1080,7 @@ fn shape_segment(
             character_alignment: p.character_alignment,
             leading_model: p.leading_model,
             character_direction: p.character_direction,
+            rendered_char: src.get(sg.cluster..).and_then(|s| s.chars().next()).unwrap_or(ch),
             display_char: if replacement.is_some() && matches!(ch, '0'..='9' | '\u{0660}'..='\u{0669}' | '\u{06F0}'..='\u{06F9}') {
                 src.chars().next().unwrap_or(ch)
             } else {
