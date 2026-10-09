@@ -1755,7 +1755,7 @@ pub fn menu_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
             if crate::i18n::is_rtl(&lang) {
                 ui.set_max_width(320.0);
             }
-            ui.with_layout(egui::Layout::top_down(if crate::i18n::is_rtl(&lang) { egui::Align::Max } else { egui::Align::Min }), |ui| {
+            ui.with_layout(egui::Layout::top_down_justified(if crate::i18n::is_rtl(&lang) { egui::Align::Max } else { egui::Align::Min }), |ui| {
                 ui.set_min_width(240.0);
                 let hidden = menu_items(app, ui, &entries, menu);
                 if hidden > 0 && !app.ui.show_full_menus {
