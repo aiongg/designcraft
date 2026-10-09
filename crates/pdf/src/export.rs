@@ -937,22 +937,43 @@ impl Exporter<'_> {
     }
 
     /// A swatch fill (solid or gradient) in the item's inner space. `None` for [None]/unknown.
-    fn fill_paint(&self, fill: &designcraft_doc::Fill, bounds: Rect) -> Option<krilla::paint::Paint> {
+    fn fill_paint(&mut self, fill: &designcraft_doc::Fill, bounds: Rect) -> Option<krilla::paint::Paint> {
         let (swatch, tint, angle) = (fill.swatch.as_str(), fill.tint, fill.gradient_angle);
         if let Some(g) = designcraft_color::swatch::resolve_gradient(&self.doc.swatches, swatch) {
+            let kind = g.kind;
+            let expanded = g.expanded_stops();
+            // A PDF shading needs one colour space. Midpoint expansion can introduce RGB even
+            // when every authored stop is CMYK/Gray; PDF/A can also change the output space.
+            let components = |c: &Color| match c {
+                Color::Cmyk { .. } if !self.rgb_only => 4,
+                Color::Gray { .. } => 1,
+                _ => 3,
+            };
+            let mixed = expanded.first().is_some_and(|(_, first, _)| expanded.iter().any(|(_, c, _)| components(c) != components(first)));
+            if mixed {
+                self.warn(format!("gradient '{swatch}': mixed color spaces converted to RGB (colour appearance and separations may change)"));
+            }
             let mut stops: Vec<Stop> = Vec::new();
             let mut last = 0.0f32;
-            for (o, c, a) in g.expanded_stops() {
+            for (o, c, a) in expanded {
                 let o = o.clamp(last, 1.0);
                 last = o;
-                stops.push(Stop { offset: norm(o), color: device(&c, self.rgb_only), opacity: norm(a) });
+                let color = if mixed && !matches!(c, Color::Rgb { .. }) {
+                    let [r, g, b] = c.to_rgb();
+                    rgb::Color::new(q(r), q(g), q(b)).into()
+                } else {
+                    // Preserve RGB values, including already-interpolated display RGB, and
+                    // leave every homogeneous gradient on its existing device-space path.
+                    device(&c, self.rgb_only)
+                };
+                stops.push(Stop { offset: norm(o), color, opacity: norm(a) });
             }
             if stops.is_empty() {
                 return None;
             }
             let c = bounds.center();
             let v = fill.gradient_vector;
-            return Some(match g.kind {
+            return Some(match kind {
                 GradientKind::Radial => {
                     let (c, r) = match v {
                         Some([x0, y0, x1, y1]) => (designcraft_geom::Point::new(x0, y0), Vec2::new(x1 - x0, y1 - y0).hypot()),

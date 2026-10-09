@@ -12,6 +12,8 @@
 //! - **Colour:** CMYK as DeviceCMYK, RGB as DeviceRGB, Gray as DeviceGray, spot swatches (and their
 //!   tints) as `/Separation` with the swatch's own values as the alternate space, `[Registration]`
 //!   as `/Separation /All`.
+//!   Gradients with mixed output colour spaces are converted to RGB with an export warning;
+//!   homogeneous gradients keep their existing colour space (subject to PDF/A conversion).
 //! - **Images:** clipped to their frame; JPEG data is passed through, PNG/GIF/WebP are embedded
 //!   losslessly (or re-encoded as JPEG with [`PdfOptions::compress_images`]).
 //! - **Text as real text:** the composed glyph runs are emitted with embedded, subsetted fonts and a
