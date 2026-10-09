@@ -63,6 +63,8 @@ krilla = { version = "0.8", features = ["pdf"] }
 hayro = "0.7"
 quick-xml = "0.38"
 zip = { version = "3", default-features = false, features = ["deflate"] }
+# INDD/INDT → IDML conversion for File › Open (indd-utils; MIT OR Apache-2.0, no dependencies).
+indd = { git = "https://github.com/aiongg/indd-utils", rev = "9cf456d94fea43269f4744a934a70c9842728e71" }
 
 # ui
 egui = "0.36"
