@@ -223,7 +223,7 @@ pub fn tool_definitions() -> Vec<Value> {
              also write it to `path`.",
             obj(
                 json!({
-                    "page": int("Page index, 0-based (default 0; in the desktop app default = the current page)"),
+                    "page": {"type": "integer", "minimum": 0, "description": "Page index, 0-based (default 0; in the desktop app default = the current page)"},
                     "scale": num("Pixels per point (default 1 = 72 ppi)"),
                     "bleed": boolean("Include the bleed area"),
                     "path": string("Also write the PNG here"),
@@ -237,7 +237,7 @@ pub fn tool_definitions() -> Vec<Value> {
             "Export PNG",
             "Export one page as a PNG (or JPEG if the path ends in .jpg) file. Returns the path and pixel size.",
             obj(
-                json!({"path": string("Destination file"), "page": int("Page index, 0-based (default 0)"), "scale": num("Pixels per point (default 2)")}),
+                json!({"path": string("Destination file"), "page": {"type": "integer", "minimum": 0, "description": "Page index, 0-based (default 0; in the desktop app default = the current page)"}, "scale": num("Pixels per point (default 2)")}),
                 &["path"],
             ),
             false,
@@ -303,7 +303,7 @@ pub fn tool_definitions() -> Vec<Value> {
         tool(
             "type_text",
             "Type text",
-            "Type text at the text insertion point (as the keyboard would with the type tool), or into the focused dialog field in \
+            "Type text at the text insertion point, independently of the active tool, or into the focused dialog field in \
              the desktop app. Put a caret first with pointer (tool \"type\") or execute text.placeCaret / text.select.",
             obj(json!({"text": string("Text to type (\\n = new paragraph)")}), &["text"]),
             false,
@@ -409,6 +409,15 @@ fn pick(a: &Args, keys: &[&str]) -> Value {
     Value::Object(keys.iter().filter_map(|k| a.get(*k).filter(|v| !v.is_null()).map(|v| (k.to_string(), v.clone()))).collect())
 }
 
+/// Page omission selects a default, but an explicitly supplied null must reach validation.
+fn page_params(a: &Args, keys: &[&str]) -> Value {
+    let mut p = pick(a, keys);
+    if let Some(page) = a.get("page") {
+        p["page"] = page.clone();
+    }
+    p
+}
+
 fn command_params(v: Option<&Value>) -> Result<Value, String> {
     match v {
         None | Some(Value::Null) => Ok(json!({})),
@@ -463,7 +472,7 @@ fn story_id(b: &mut dyn Backend, a: &Args) -> Result<Value, String> {
 }
 
 fn render_page(b: &mut dyn Backend, a: &Args) -> Result<ToolResult, String> {
-    let r = b.call("ui.render", pick(a, &["page", "scale", "bleed"]))?;
+    let r = b.call("ui.render", page_params(a, &["page", "scale", "bleed"]))?;
     let b64 = r.get("pngBase64").and_then(Value::as_str).ok_or("renderer returned no image")?.to_string();
     let path = a.get("path").and_then(Value::as_str);
     if let Some(path) = path {
@@ -550,7 +559,7 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Args) -> Result<ToolResult, Str
         "render_page" => render_page(b, a),
         "export_png" => {
             req_str(a, "path")?;
-            j(b.call("app.export", pick(a, &["path", "page", "scale"]))?)
+            j(b.call("app.export", page_params(a, &["path", "page", "scale"]))?)
         }
         "screenshot" => screenshot(b, a),
         "select_tool" => j(b.call("ui.tool.select", json!({"tool": req_str(a, "tool")?}))?),
