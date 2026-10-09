@@ -1435,7 +1435,17 @@ pub fn paragraph_panel(app: &mut DesignApp, ui: &mut egui::Ui) {
     };
     let u = units(app);
     let p = a["para"].clone();
-    crate::rtl::label(ui, egui::RichText::new(crate::i18n::tr(&app.ui.language, "Paragraph")).strong());
+    ui.horizontal(|ui| {
+        crate::rtl::label(ui, egui::RichText::new(crate::i18n::tr(&app.ui.language, "Paragraph")).strong());
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.menu_button("☰", |ui| {
+                if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Paragraph Rules…"))).clicked() {
+                    let _ = app.run("app.paragraphRulesDialog", json!({}));
+                    ui.close();
+                }
+            });
+        });
+    });
     let cur: Align = serde_json::from_value(p["align"].clone()).unwrap_or_default();
     ui.horizontal(|ui| {
         for (al, icon) in [

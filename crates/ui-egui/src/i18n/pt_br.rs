@@ -1044,4 +1044,8 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("No conflicts", "Nenhum conflito"),
     ("Page (1–{count}):", "Página (1–{count}):"),
     ("Fonts in Document: {count}    Missing: {missing}", "Fontes no documento: {count}    Ausentes: {missing}"),
+    ("Paragraph Rules…", "Linhas de parágrafo…"),
+    ("Paragraph Rules", "Linhas de parágrafo"),
+    ("Rule Below", "Linha abaixo"),
+    ("Tint:", "Matiz:"),
 ];

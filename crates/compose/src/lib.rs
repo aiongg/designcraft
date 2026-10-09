@@ -1098,7 +1098,12 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
             if pp.rule_above.on {
                 let r = &pp.rule_above;
                 let y = bl - asc - r.offset;
-                let col = ft.lines.iter().rev().find(|l| l.para == pi).map(|l| (l.x0, l.x1)).unwrap_or((0.0, 0.0));
+                let col = ft
+                    .lines
+                    .iter()
+                    .find(|l| l.para == pi && l.first_in_para)
+                    .map(|l| if r.column_width { (l.x0, l.x1) } else { (l.x0, l.end_x) })
+                    .unwrap_or((0.0, 0.0));
                 let (color, tint) = rule_color(r, &above);
                 ft.decos.push(Deco { rect: Rect::new(col.0 + r.left_indent, y - r.weight, col.1 - r.right_indent, y), color, tint });
             }
