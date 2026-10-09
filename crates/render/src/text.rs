@@ -562,8 +562,8 @@ mod cache_identity_tests {
         let glyphs = cache.get(&cs, &cs.frames[0]);
         assert!(glyphs.elements > 0);
         let runs = glyphs.lines[0].runs.clone();
-        let decorations = glyphs.lines[0].decos.clone();
-        assert!(!decorations.is_empty());
+        let underlines = glyphs.lines[0].underlines.clone();
+        assert!(!underlines.is_empty());
         drop(cs);
         origin.clear();
         assert!(lifetime.upgrade().is_some());
@@ -572,7 +572,7 @@ mod cache_identity_tests {
         drop(in_flight);
         assert!(lifetime.upgrade().is_none(), "only the real in-flight owner should keep the layout alive");
         assert_eq!(glyphs.lines[0].runs, runs);
-        assert_eq!(glyphs.lines[0].decos, decorations);
+        assert_eq!(glyphs.lines[0].underlines, underlines);
         assert_eq!(cache.len(), 1, "no path eviction was needed");
     }
 
