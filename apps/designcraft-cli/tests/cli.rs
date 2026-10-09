@@ -67,6 +67,26 @@ fn run_cmd_references_and_describe() {
     assert!(v.as_array().unwrap().iter().all(|c| c.to_string().contains("footnote")));
 }
 
+/// `designcraft-cli --help` printed usage to stderr and exited 1; asking for help is not an
+/// error (#243). It now goes to stdout and succeeds, while an unknown command keeps the same
+/// usage on stderr and fails.
+#[test]
+fn help_goes_to_stdout_and_unknown_args_to_stderr() {
+    for flag in ["--help", "-h", "help"] {
+        let out = cli().arg(flag).output().unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(out.status.success(), "{flag}: {:?}", out.status);
+        assert!(stdout.starts_with("usage: designcraft-cli"), "{flag}: {stdout:?}");
+        assert!(stdout.contains("designcraft-cli --version"), "{flag}: {stdout:?}");
+        assert!(out.stderr.is_empty(), "{flag} wrote to stderr: {}", String::from_utf8_lossy(&out.stderr));
+    }
+    // An unknown option is still an error: usage on stderr, nothing on stdout, non-zero exit.
+    let out = cli().arg("--no-such-option").output().unwrap();
+    assert!(!out.status.success(), "{:?}", out.status);
+    assert!(out.stdout.is_empty(), "unexpected stdout: {}", String::from_utf8_lossy(&out.stdout));
+    assert!(String::from_utf8_lossy(&out.stderr).starts_with("usage: designcraft-cli"));
+}
+
 /// `designcraft-cli commands | head -1` panicked with "failed printing to
 /// stdout: Broken pipe (os error 32)" and exit status 101.
 #[test]
