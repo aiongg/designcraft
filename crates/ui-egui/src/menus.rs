@@ -1934,6 +1934,13 @@ pub fn palette(app: &mut DesignApp, ctx: &egui::Context) {
         );
         r.request_focus();
         let items = quick_apply_items(&app.session, &q);
+        // Only a fresh Return runs the first entry: ⌘Return pressed again or held down (repeats) is
+        // the shortcut, not a choice.
+        let enter = ui.input(|i| {
+            i.events
+                .iter()
+                .any(|e| matches!(e, egui::Event::Key { key: egui::Key::Enter, pressed: true, repeat: false, modifiers, .. } if !modifiers.command))
+        });
         egui::ScrollArea::vertical().max_height(340.0).show(ui, |ui| {
             for (i, it) in items.iter().enumerate() {
                 let mut b = egui::Button::new(it.label.as_str()).frame(false);
@@ -1948,7 +1955,7 @@ pub fn palette(app: &mut DesignApp, ctx: &egui::Context) {
                     ui.allocate_ui_with_layout(size, egui::Layout::left_to_right(egui::Align::Center).with_main_align(egui::Align::Min), |ui| {
                         ui.add(b.min_size(size))
                     });
-                if row.inner.clicked() || (i == 0 && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
+                if row.inner.clicked() || (i == 0 && enter) {
                     run = Some((it.id.clone(), it.params.clone()));
                 }
             }
@@ -2414,6 +2421,18 @@ mod tests {
         frame(&mut app, vec![]);
         assert_eq!(app.ui.palette.as_deref(), Some(""), "Quick Apply stays open");
         assert_eq!(app.session.documents().len(), 1, "the first entry (New Document) didn't run");
+        // Pressing the shortcut again, or holding it until it repeats, doesn't run it either.
+        frame(&mut app, vec![cmd_return(true), cmd_return(false)]);
+        let repeat = egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed: true, repeat: true, modifiers: egui::Modifiers::COMMAND };
+        frame(&mut app, vec![repeat, cmd_return(false)]);
+        assert_eq!(app.ui.palette.as_deref(), Some(""), "Quick Apply stays open");
+        assert_eq!(app.session.documents().len(), 1, "a second ⌘Return or a repeat doesn't run the first entry");
+        // A plain Return still does.
+        let enter =
+            |pressed| egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed, repeat: false, modifiers: egui::Modifiers::NONE };
+        frame(&mut app, vec![enter(true), enter(false)]);
+        assert_eq!(app.ui.palette, None, "Return runs the first entry and closes Quick Apply");
+        assert_eq!(app.session.documents().len(), 2);
     }
 
     #[test]
