@@ -1360,10 +1360,20 @@ pub fn run_ui(app: &mut DesignApp, id: &str, p: &Value) -> Option<Result<Value, 
             }
             // Workspaces choose which bars and panels are visible.
             app.ui.control_bar = matches!(name, "Advanced" | "Typography" | "Printing and Proofing" | "Book");
-            app.ui.dock_tab = if name == "Typography" { "properties".into() } else { app.ui.dock_tab.clone() };
+            let dock_tab = match name {
+                "Typography" => Some("properties"),
+                "Interactive for PDF" | "Digital Publishing" => Some("pages"),
+                _ => None,
+            };
+            if let Some(tab) = dock_tab {
+                app.ui.dock_tab = tab.into();
+                app.ui.dock_expanded = true;
+            }
             app.ui.open_panel = match name {
                 "Typography" => Some("paragraphStyles".into()),
                 "Printing and Proofing" => Some("swatches".into()),
+                "Interactive for PDF" => Some("buttons".into()),
+                "Digital Publishing" => Some("liquid".into()),
                 _ => None,
             };
             app.ui.workspace = name.to_string();
@@ -2487,6 +2497,18 @@ mod tests {
         run_ui(&mut app, "window.deleteWorkspace", &json!({"name": "Mine"})).unwrap().unwrap();
         assert!(app.ui.custom_workspaces.is_empty());
         assert_eq!(app.ui.workspace, "Essentials");
+    }
+
+    #[test]
+    fn interactive_workspaces_show_their_panels() {
+        let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.ui.dock_expanded = false;
+        run_ui(&mut app, "window.workspace", &json!({"name": "Interactive for PDF"})).unwrap().unwrap();
+        assert_eq!((app.ui.dock_tab.as_str(), app.ui.dock_expanded, app.ui.open_panel.as_deref()), ("pages", true, Some("buttons")));
+        run_ui(&mut app, "window.workspace", &json!({"name": "Digital Publishing"})).unwrap().unwrap();
+        assert_eq!((app.ui.dock_tab.as_str(), app.ui.open_panel.as_deref()), ("pages", Some("liquid")));
+        run_ui(&mut app, "window.workspace", &json!({"name": "Essentials"})).unwrap().unwrap();
+        assert_eq!(app.ui.open_panel, None);
     }
 
     #[test]
