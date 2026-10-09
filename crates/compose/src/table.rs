@@ -417,6 +417,7 @@ fn emit(
         spacing: 1.0,
         hj: 0,
         keep_violation: false,
+        drop_cap: None,
     });
     ft.tables.push(TableFrag {
         table: table.id,
