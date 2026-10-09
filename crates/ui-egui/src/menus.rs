@@ -38,7 +38,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
         "app.language",
         "Interface Language",
         None,
-        "{lang: \"\"|de|fr|es|ja|zh|ar|pt-br} — menus and panel names (the macOS menu bar follows on the next launch)",
+        "{lang: \"\"|de|fr|es|ja|zh|ar|pt-br|it} — menus and panel names (the macOS menu bar follows on the next launch)",
     ),
     (
         "app.flattener",
@@ -234,6 +234,7 @@ pub const MENUS: &[(&str, &[&str])] = &[
             "ui:app.language|简体中文|{\"lang\": \"zh\"}",
             "ui:app.language|العربية|{\"lang\": \"ar\"}",
             "ui:app.language|Português (Brasil)|{\"lang\": \"pt-br\"}",
+            "ui:app.language|Italiano|{\"lang\": \"it\"}",
             "<",
             ">Transparency Flattener Presets",
             "ui:app.flattener|None (keep transparency)|{\"preset\": \"\"}",
@@ -2139,6 +2140,17 @@ mod tests {
                 assert_ne!(crate::i18n::tr("pt-br", title), title, "{title}");
             }
         }
+
+        run_ui(&mut app, "app.language", &json!({"lang": "it"})).unwrap().unwrap();
+        assert_eq!(app.ui.language, "it");
+        assert_eq!(checked(&app, "app.language", &json!({"lang": "it"})), Some(true));
+        for (title, _) in menu_tree() {
+            // "File" and "Layout" are the usual Italian menu names, so they stay identical
+            // to English; every other title must be translated.
+            if title != "File" && title != "Layout" {
+                assert_ne!(crate::i18n::tr("it", title), title, "{title}");
+            }
+        }
     }
 
     #[test]
@@ -2168,7 +2180,7 @@ mod tests {
         crate::dialogs::confirm(&mut app).unwrap();
         frame(&mut app);
         assert_eq!(app.session.documents().len(), 1);
-        for lang in ["zh", "", "ar", "pt-br"] {
+        for lang in ["zh", "", "ar", "pt-br", "it"] {
             app.run("app.language", json!({"lang": lang})).unwrap();
             frame(&mut app);
         }

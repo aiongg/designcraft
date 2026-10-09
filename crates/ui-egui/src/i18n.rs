@@ -4,6 +4,7 @@
 use std::{collections::HashMap, sync::OnceLock};
 
 mod ar;
+mod it;
 mod pt_br;
 
 /// Supported interface languages: (code, name in that language).
@@ -16,6 +17,7 @@ pub const LANGUAGES: &[(&str, &str)] = &[
     ("zh", "简体中文"),
     ("ar", "العربية"),
     ("pt-br", "Português (Brasil)"),
+    ("it", "Italiano"),
 ];
 
 /// English → [German, French, Spanish, Japanese, Simplified Chinese].
@@ -2733,11 +2735,15 @@ pub fn tr<'a>(lang: &str, s: &'a str) -> &'a str {
     static TRANSLATIONS: OnceLock<HashMap<&'static str, [&'static str; 5]>> = OnceLock::new();
     static ARABIC: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
     static PORTUGUESE_BR: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
+    static ITALIAN: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
     if lang == "ar" {
         return ARABIC.get_or_init(|| ar::TABLE.iter().copied().collect()).get(s).copied().unwrap_or(s);
     }
     if lang == "pt-br" {
         return PORTUGUESE_BR.get_or_init(|| pt_br::TABLE.iter().copied().collect()).get(s).copied().unwrap_or(s);
+    }
+    if lang == "it" {
+        return ITALIAN.get_or_init(|| it::TABLE.iter().copied().collect()).get(s).copied().unwrap_or(s);
     }
     let Some(c) = column(lang) else { return s };
     TRANSLATIONS.get_or_init(|| TABLE.iter().copied().collect()).get(s).and_then(|row| row.get(c)).copied().unwrap_or(s)
@@ -2777,8 +2783,11 @@ mod tests {
         for (key, expected) in pt_br::TABLE {
             assert_eq!(tr("pt-br", key), *expected, "pt-br: {key}");
         }
+        for (key, expected) in it::TABLE {
+            assert_eq!(tr("it", key), *expected, "it: {key}");
+        }
         let unknown = String::from("A user-defined untranslated label");
-        for lang in ["ar", "pt-br", "zh", "ja", "de", "fr", "es", "", "unknown"] {
+        for lang in ["ar", "pt-br", "it", "zh", "ja", "de", "fr", "es", "", "unknown"] {
             assert!(std::ptr::eq(tr(lang, &unknown), unknown.as_str()));
         }
     }
@@ -2794,6 +2803,9 @@ mod tests {
         assert_eq!(tr("pt-br", "File"), "Arquivo");
         assert_eq!(tr("pt-br", "New Document…"), "Novo documento…");
         assert_eq!(tr("pt-br", "Unknown label"), "Unknown label");
+        assert_eq!(tr("it", "Edit"), "Modifica");
+        assert_eq!(tr("it", "New Document…"), "Nuovo documento…");
+        assert_eq!(tr("it", "Unknown label"), "Unknown label");
         assert!(is_rtl("ar"));
         for (i, (en, translation)) in ar::TABLE.iter().enumerate() {
             assert!(ar::TABLE[..i].iter().all(|(key, _)| key != en), "duplicate {en}");
@@ -2802,6 +2814,14 @@ mod tests {
         for (i, (en, translation)) in pt_br::TABLE.iter().enumerate() {
             assert!(pt_br::TABLE[..i].iter().all(|(key, _)| key != en), "duplicate {en}");
             assert!(!translation.is_empty(), "{en}");
+        }
+        for (i, (en, translation)) in it::TABLE.iter().enumerate() {
+            assert!(it::TABLE[..i].iter().all(|(key, _)| key != en), "duplicate {en}");
+            assert!(!translation.is_empty(), "{en}");
+        }
+        // Italian covers every key of the shared table and of the Arabic one.
+        for en in TABLE.iter().map(|(en, _)| *en).chain(ar::TABLE.iter().map(|(en, _)| *en)) {
+            assert!(it::TABLE.iter().any(|(key, _)| *key == en), "it: missing {en}");
         }
         // Every row is unique and complete.
         for (i, (en, t)) in TABLE.iter().enumerate() {
