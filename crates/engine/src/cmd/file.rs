@@ -164,6 +164,7 @@ fn file_open(s: &mut Session, p: &Value) -> Result<Value> {
         }
         let bytes = std::fs::read(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
         let mut d = from_bytes(&bytes)?;
+        super::interchange::resolve_packaged_links(&mut d, std::path::Path::new(path).parent());
         super::datamerge::resolve_sources_on_open(&mut d, Some(std::path::Path::new(path)));
         let (fonts, faces, warnings) = load_document_fonts(&mut d, path);
         let mut st = DocState::new(d, Some(path.to_string()));
