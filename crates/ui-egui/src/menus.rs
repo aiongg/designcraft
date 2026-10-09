@@ -38,7 +38,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
         "app.language",
         "Interface Language",
         None,
-        "{lang: \"\"|de|fr|es|ja|zh|ar|pt-br|it} — menus and panel names (the macOS menu bar follows on the next launch)",
+        "{lang: \"\"|de|fr|es|ja|zh|ar|pt-br|it|uk} — menus and panel names (the macOS menu bar follows on the next launch)",
     ),
     (
         "app.flattener",
@@ -248,6 +248,7 @@ pub const MENUS: &[(&str, &[&str])] = &[
             "ui:app.language|العربية|{\"lang\": \"ar\"}",
             "ui:app.language|Português (Brasil)|{\"lang\": \"pt-br\"}",
             "ui:app.language|Italiano|{\"lang\": \"it\"}",
+            "ui:app.language|Українська|{\"lang\": \"uk\"}",
             "<",
             ">Transparency Flattener Presets",
             "ui:app.flattener|None (keep transparency)|{\"preset\": \"\"}",
@@ -2308,6 +2309,30 @@ mod tests {
     }
 
     #[test]
+    fn ukrainian_language_is_selectable_persisted_and_keeps_document_data() {
+        let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"pages": 4, "facingPages": true})).unwrap();
+        app.run("frame.create", json!({"rect": [36, 36, 200, 200], "content": "text", "text": "My words · Мої слова"})).unwrap();
+        let before = serde_json::to_value(&app.session.doc().unwrap().doc).unwrap();
+        run_ui(&mut app, "app.language", &json!({"lang": "uk"})).unwrap().unwrap();
+        assert_eq!(checked(&app, "app.language", &json!({"lang": "uk"})), Some(true));
+        assert_eq!(before, serde_json::to_value(&app.session.doc().unwrap().doc).unwrap());
+        for (title, _) in menu_tree() {
+            assert_ne!(crate::i18n::tr("uk", title), title, "{title}");
+        }
+        let bytes = serde_json::to_vec(&app.ui).unwrap();
+        let restored: crate::UiState = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(restored.language, "uk");
+        assert_eq!(crate::i18n::tr(&restored.language, "File"), "Файл");
+        assert_eq!(crate::i18n::tr(&restored.language, "A custom name"), "A custom name");
+        assert!(menu_tree().iter().flat_map(|(_, entries)| entries.iter()).any(|entry| {
+            matches!(entry, Item::Sub(label, children) if label == "Interface Language" && children.iter().any(|child| {
+                matches!(child, Item::Cmd { label, id, params, .. } if label == "Українська" && id == "app.language" && params["lang"] == "uk")
+            }))
+        }));
+    }
+
+    #[test]
     fn arabic_dialog_and_language_switch_keep_finite_widget_geometry() {
         let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
         let ctx = egui::Context::default();
@@ -2334,7 +2359,7 @@ mod tests {
         crate::dialogs::confirm(&mut app).unwrap();
         frame(&mut app);
         assert_eq!(app.session.documents().len(), 1);
-        for lang in ["zh", "", "ar", "pt-br", "it"] {
+        for lang in ["uk", "zh", "", "ar", "pt-br", "it"] {
             app.run("app.language", json!({"lang": lang})).unwrap();
             frame(&mut app);
         }
