@@ -431,6 +431,9 @@ pub struct DesignApp {
     /// A control-channel request is being handled: commands it runs never read or write the
     /// user's system clipboard (a control client must not see or replace it).
     pub(crate) in_control: bool,
+    /// What the last object copy put on the system clipboard (no native menu): without it the
+    /// paste keys produce no paste event. It is never pasted as text.
+    object_clip_text: Option<String>,
 }
 
 impl DesignApp {
@@ -469,6 +472,7 @@ impl DesignApp {
             last_recovery: 0.0,
             egui_ctx: None,
             in_control: false,
+            object_clip_text: None,
         }
     }
 
@@ -521,8 +525,19 @@ impl DesignApp {
             Err(e) => self.status(e.clone()),
             // Copied text goes to the system clipboard too, whichever way Copy was chosen.
             Ok(v) if system_clipboard && matches!(id, "edit.copy" | "edit.cut") => {
-                if let (Some(t), Some(ctx)) = (v.get("text").and_then(Value::as_str), &self.egui_ctx) {
-                    ctx.copy_text(t.to_string());
+                let text = match v.get("text").and_then(Value::as_str) {
+                    Some(t) => {
+                        self.object_clip_text = None;
+                        Some(t.to_string())
+                    }
+                    None if !self.native_menu => {
+                        self.object_clip_text = Some(self.copied_objects_text());
+                        self.object_clip_text.clone()
+                    }
+                    None => None,
+                };
+                if let (Some(t), Some(ctx)) = (text, &self.egui_ctx) {
+                    ctx.copy_text(t);
                     ctx.request_repaint();
                 }
             }
@@ -534,15 +549,53 @@ impl DesignApp {
     /// Paste into text without the clipboard's text (a menu, not the paste keys): read it here.
     fn with_system_clipboard(&mut self, id: &str, mut params: Value) -> Value {
         let typing = self.session.active().is_some_and(|d| d.selection.text.is_some());
-        if typing
-            && matches!(id, "edit.paste" | "edit.pasteWithoutFormatting")
-            && params.get("text").is_none()
+        if !typing || !matches!(id, "edit.paste" | "edit.pasteWithoutFormatting") {
+            return params;
+        }
+        if params.get("text").is_none()
             && let Some(text) = self.services.clipboard_text.as_mut().and_then(|f| f())
             && let Some(o) = params.as_object_mut()
         {
             o.insert("text".into(), Value::String(text));
         }
+        // Still what an object copy put there: paste those objects, not the placeholder text.
+        let norm = |t: &str| t.replace("\r\n", "\n");
+        if let Some(copied) = &self.object_clip_text
+            && params.get("text").and_then(Value::as_str).is_some_and(|t| norm(t) == norm(copied))
+            && let Some(o) = params.as_object_mut()
+        {
+            o.remove("text");
+        }
         params
+    }
+
+    /// Plain text for the system clipboard after copying objects: the copied text frames' stories,
+    /// or U+FFFC (object replacement character) when none has text.
+    fn copied_objects_text(&self) -> String {
+        let mut stories = Vec::new();
+        if let Some(clip) = &self.session.clipboard
+            && let Some(sp) = clip.spreads.first()
+        {
+            for it in &sp.items {
+                it.walk(&mut |i| {
+                    if let Some(tf) = i.text_frame()
+                        && !stories.contains(&tf.story)
+                    {
+                        stories.push(tf.story);
+                    }
+                });
+            }
+        }
+        let text = stories
+            .iter()
+            .filter_map(|id| self.session.clipboard.as_ref()?.story(*id))
+            .map(|st| {
+                st.text.chars().filter(|c| !('\u{E000}'..='\u{E1FF}').contains(c)).map(|c| if c == '\u{2028}' { '\n' } else { c }).collect::<String>()
+            })
+            .filter(|t| !t.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
+        if text.is_empty() { '\u{FFFC}'.to_string() } else { text }
     }
 
     /// Handle requests produced by tools/commands (dialogs, view changes, file pickers).

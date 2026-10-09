@@ -2416,6 +2416,56 @@ mod tests {
     }
 
     #[test]
+    fn copy_and_paste_keys_work_for_objects_without_a_native_menu() {
+        // Without a native menu the paste key arrives only as a paste event, which needs text on
+        // the system clipboard (#164, #185).
+        let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.session.execute("file.new", &json!({})).unwrap();
+        let ctx = egui::Context::default();
+        let frame = |app: &mut crate::DesignApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))),
+                events,
+                ..Default::default()
+            };
+            let mut out = ctx.run_ui(input, |ui| {
+                app.logic(&ui.ctx().clone());
+                app.ui(ui);
+            });
+            out.textures_delta.clear();
+            out.platform_output.commands
+        };
+        let count = |app: &crate::DesignApp| app.session.active().unwrap().doc.spreads[0].items.len();
+        frame(&mut app, vec![]);
+        frame(&mut app, vec![]);
+        let id = app.session.execute("frame.create", &json!({"rect": [72, 72, 200, 160]})).unwrap()["id"].clone();
+        app.session.execute("selection.set", &json!({"ids": [id]})).unwrap();
+        let n = count(&app);
+        let copied = frame(&mut app, vec![egui::Event::Copy])
+            .into_iter()
+            .find_map(|c| match c {
+                egui::OutputCommand::CopyText(t) => Some(t),
+                _ => None,
+            })
+            .expect("copying objects puts text on the system clipboard");
+        assert!(!copied.is_empty());
+        frame(&mut app, vec![egui::Event::Paste(copied.clone())]);
+        assert_eq!(count(&app), n + 1, "the paste key pastes the copied rectangle");
+
+        // Pasting into text anchors the copied object; the clipboard placeholder isn't typed.
+        let r = app.session.execute("frame.create", &json!({"rect": [72, 300, 400, 400], "content": "text", "text": "Hello"})).unwrap();
+        let story = r["story"].as_u64().unwrap();
+        app.session.execute("tool.select", &json!({"tool": "type"})).unwrap();
+        app.session.execute("text.select", &json!({"story": story, "anchor": 5, "focus": 5})).unwrap();
+        frame(&mut app, vec![egui::Event::Paste(copied.clone())]);
+        // Shift pastes without formatting.
+        frame(&mut app, vec![egui::Event::ModifiersChanged(egui::Modifiers::SHIFT), egui::Event::Paste(copied)]);
+        let text = app.session.active().unwrap().doc.story(designcraft_doc::StoryId(story)).unwrap().text.clone();
+        assert!(text.starts_with("Hello") && !text.contains('\u{FFFC}'), "{text:?}");
+        assert!(text.contains(designcraft_doc::OBJECT_MARK), "{text:?}");
+    }
+
+    #[test]
     fn sample_scripts_run() {
         let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
         app.session.execute("file.new", &json!({})).unwrap();
