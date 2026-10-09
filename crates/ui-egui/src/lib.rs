@@ -977,5 +977,10 @@ mod tests {
         assert!(app.run("file.open", json!({"path": "/nonexistent/x.designcraft"})).is_err());
         assert!(app.ui.dialog.is_none(), "a scripted file.open doesn't raise an alert");
         assert!(!app.ui.status.is_empty());
+        // The control channel's app.open answers with the error; no alert waits for a click.
+        let (req, _rx) = control::ControlRequest::new("app.open", json!({"path": "/nonexistent/x.designcraft"}));
+        let control::Outcome::Done(r) = control::handle(&mut app, &egui::Context::default(), &req) else { panic!("app.open answers") };
+        assert_eq!(r["ok"], json!(false), "{r}");
+        assert!(app.ui.dialog.is_none(), "a control-channel app.open doesn't raise an alert");
     }
 }
