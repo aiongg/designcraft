@@ -1918,7 +1918,7 @@ fn step_and_repeat(s: &mut Session, p: &Value) -> Result<Value> {
     let cols = p.get("columns").and_then(Value::as_u64).map(|v| v as usize);
     let count = p.get("count").and_then(Value::as_u64).unwrap_or(1).clamp(1, 1000) as usize;
     let offsets: Vec<Vec2> = match (rows, cols) {
-        (Some(r), Some(c)) if r * c <= 1000 => (0..r)
+        (Some(r), Some(c)) if r.checked_mul(c).is_some_and(|n| n <= 1000) => (0..r)
             .flat_map(|i| (0..c).map(move |j| (i, j)))
             .filter(|&(i, j)| i + j > 0)
             .map(|(i, j)| Vec2::new(j as f64 * dx, i as f64 * dy))
