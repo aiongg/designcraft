@@ -868,9 +868,41 @@ pub fn now_ms() -> f64 {
     }
 }
 
+/// Is `text` the name of a key ("AltGraph", "Dead", "AudioVolumeUp") instead of typed text?
+/// Browsers report a key press as a string: the character it types, or a name made of ASCII
+/// letters and digits that starts with a capital. One key press never types such a word.
+pub fn is_key_name(text: &str) -> bool {
+    text.len() > 1 && text.starts_with(|c: char| c.is_ascii_uppercase()) && text.chars().all(|c| c.is_ascii_alphanumeric())
+}
+
+/// Drop text events that are key names. eframe's web backend sends the name of every key it
+/// doesn't know as text, so AltGr typed "AltGraph" into the story. `text_field_focused`: an
+/// egui text field has the keyboard; its text comes from the browser's input events, which can
+/// hold whole words, and is left alone.
+pub fn drop_key_name_text(raw: &mut egui::RawInput, text_field_focused: bool) {
+    if !text_field_focused {
+        raw.events.retain(|e| !matches!(e, egui::Event::Text(t) if is_key_name(t)));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn key_names_sent_as_text_are_dropped() {
+        let text = |t: &str| egui::Event::Text(t.to_string());
+        let events = || {
+            vec![text("AltGraph"), text("é"), text("Dead"), text("A"), text("Unidentified"), text("ß"), text("AudioVolumeUp"), text("ab"), text("Æ")]
+        };
+        let mut raw = egui::RawInput { events: events(), ..Default::default() };
+        drop_key_name_text(&mut raw, false);
+        assert_eq!(raw.events, vec![text("é"), text("A"), text("ß"), text("ab"), text("Æ")]);
+        // A focused text field gets its text from input events, which can be whole words.
+        let mut raw = egui::RawInput { events: events(), ..Default::default() };
+        drop_key_name_text(&mut raw, true);
+        assert_eq!(raw.events, events());
+    }
 
     #[test]
     fn snap_view_uses_the_saved_switches() {
