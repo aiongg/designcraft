@@ -648,7 +648,7 @@ pub fn start_screen(app: &mut DesignApp, ui: &mut egui::Ui) {
             ));
             ui.add_space(8.0);
             ui.horizontal_wrapped(|ui| {
-                for p in designcraft_doc::build::PRESETS.iter().take(10) {
+                for p in designcraft_doc::build::PRESETS.iter().filter(|p| p.intent == designcraft_doc::Intent::Print) {
                     let (cr, resp) = ui.allocate_exact_size(vec2(120.0, 150.0), Sense::click());
                     let hov = resp.hovered();
                     ui.painter().rect_filled(cr, 6.0, if hov { t.hover } else { t.panel });
