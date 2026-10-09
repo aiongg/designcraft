@@ -889,6 +889,30 @@ pub fn drop_key_name_text(raw: &mut egui::RawInput, text_field_focused: bool) {
 mod tests {
     use super::*;
 
+    /// The Control panel's two-row groups were centred as if they were one row tall, so the second
+    /// row hung below the panel and was cut off.
+    #[test]
+    fn control_bar_shows_its_second_row() {
+        use egui_kittest::kittest::Queryable as _;
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), Services::default());
+        app.run("file.newSample", json!({})).unwrap();
+        app.ui.control_bar = true;
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1440.0, 900.0)).build_ui_state(
+            |ui, app: &mut DesignApp| {
+                let ctx = ui.ctx().clone();
+                app.logic(&ctx);
+                app.ui(ui);
+            },
+            app,
+        );
+        h.run_steps(4);
+        let bar = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("control_bar")).unwrap().outer_rect;
+        assert!(bar.height() > 40.0, "{bar:?}");
+        let rows: Vec<egui::Rect> = h.query_all_by_label("Y:").map(|n| n.rect()).filter(|r| bar.contains(r.left_top())).collect();
+        assert_eq!(rows.len(), 1, "the Y: caption of the Control panel");
+        assert!(rows[0].bottom() <= bar.bottom(), "Y: caption {:?} hangs below the Control panel {bar:?}", rows[0]);
+    }
+
     #[test]
     fn key_names_sent_as_text_are_dropped() {
         let text = |t: &str| egui::Event::Text(t.to_string());
