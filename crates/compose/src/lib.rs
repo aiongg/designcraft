@@ -36,9 +36,9 @@ use designcraft_geom::{Point, Rect};
 use crate::breaker::{Break, Spacing};
 pub use crate::cache::Cache;
 use crate::notes::Notes;
-pub use crate::notes::{find_note, hit_note, note_caret};
+pub use crate::notes::{find_note, hit_note, hit_note_with, note_caret};
 use crate::shape::{Glyph, StyleTable, SubstCtx};
-pub use crate::table::{PlacedCell, StrokeSeg, TableFrag, cell_caret, find_cell, hit_cell};
+pub use crate::table::{PlacedCell, StrokeSeg, TableFrag, cell_caret, find_cell, hit_cell, hit_cell_with};
 
 /// Character appearance shared by many glyphs (indexed from [`PlacedGlyph::style`]).
 #[derive(Clone, Debug, PartialEq)]
@@ -912,6 +912,15 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                 let last = k + 1 == breaks.len();
                 let (mut placed, end_x, ratio) =
                     layout_line(&glyphs, s, e, b.hyphen, lx0, lx1, col.x0, &pp, &spacing, last, b.forced && !last, f.left_page, &bidi_info);
+                // The spaces the break trimmed off the end follow the line undrawn, so the caret
+                // and the selection reach them; alignment and justification ignore them.
+                if pp.direction != designcraft_doc::TextDirection::RightToLeft && !placed.iter().any(|g| g.rtl) {
+                    let mut x = end_x;
+                    for g in glyphs.get(e..(g0 + b.next).min(glyphs.len())).unwrap_or(&[]).iter().filter(|g| g.is_space()) {
+                        placed.push(PlacedGlyph { visible: false, ..place(g, x) });
+                        x += g.adv;
+                    }
+                }
                 let mut drop_box = None;
                 if line_no == 0
                     && let Some(dc) = &drop_cap
@@ -2523,6 +2532,8 @@ pub fn caret_x(l: &Line, pos: usize) -> f64 {
     }
     match l.glyphs.iter().rev().find(|g| g.len > 0) {
         Some(g) if g.rtl => g.x,
+        // After the spaces that end the line.
+        Some(g) if !g.visible && g.x >= l.end_x - 1e-9 => g.x + g.adv,
         _ => l.end_x,
     }
 }
@@ -2556,6 +2567,40 @@ pub fn line_rtl(cs: &ComposedStory, pos: usize) -> bool {
     caret_line(cs, pos).and_then(|(_, l)| l.glyphs.iter().find(|g| g.len > 0)).is_some_and(|g| g.rtl)
 }
 
+/// The line of frame `ft` closest to point `p` vertically (within its column).
+fn hit_line(ft: &FrameText, p: Point) -> Option<&Line> {
+    ft.lines
+        .iter()
+        .filter(|l| p.x >= l.x0 - 20.0 && p.x <= l.x1 + 20.0 || ft.columns.len() <= 1)
+        .min_by(|a, b| line_dist(a, p.y).total_cmp(&line_dist(b, p.y)))
+        .or_else(|| ft.lines.first())
+}
+
+/// Story byte of the character drawn under point `p` (frame inner space) in frame `fi`: the
+/// glyph whose advance spans `p.x` on the closest line, else the one nearest it. For selecting
+/// the word (or the spaces) under a double click; [`hit`] finds a caret position instead.
+pub fn hit_char(cs: &ComposedStory, fi: usize, p: Point) -> Option<usize> {
+    let ft = cs.frames.get(fi)?;
+    let Some(l) = hit_line(ft, p) else { return Some(ft.range.start) };
+    let dist = |g: &&PlacedGlyph| {
+        let (a, b) = (g.x.min(g.x + g.adv), g.x.max(g.x + g.adv));
+        if p.x < a {
+            a - p.x
+        } else if p.x >= b {
+            p.x - b
+        } else {
+            0.0
+        }
+    };
+    // On a drop cap (it reaches down beside the lines after its own): its character under `p`.
+    for dl in &ft.lines {
+        let Some(dc) = dl.drop_cap.filter(|dc| dc.rect.contains(p)) else { continue };
+        return dl.glyphs.iter().filter(|g| g.len > 0 && g.byte < dc.end).min_by(|a, b| dist(a).total_cmp(&dist(b))).map(|g| g.byte);
+    }
+    let under = l.glyphs.iter().filter(|g| g.len > 0).min_by(|a, b| dist(a).total_cmp(&dist(b)));
+    Some(under.map_or(l.range.start, |g| g.byte))
+}
+
 /// Story byte nearest to point `p` (frame inner space) in frame `fi`.
 pub fn hit(cs: &ComposedStory, fi: usize, p: Point) -> Option<usize> {
     let ft = cs.frames.get(fi)?;
@@ -2572,13 +2617,7 @@ pub fn hit(cs: &ComposedStory, fi: usize, p: Point) -> Option<usize> {
             .flat_map(|g| [g.byte, g.byte + g.len])
             .min_by(|a, b| (caret_x(l, *a) - p.x).abs().total_cmp(&(caret_x(l, *b) - p.x).abs()));
     }
-    // Closest line vertically (within its column).
-    let l = ft
-        .lines
-        .iter()
-        .filter(|l| p.x >= l.x0 - 20.0 && p.x <= l.x1 + 20.0 || ft.columns.len() <= 1)
-        .min_by(|a, b| line_dist(a, p.y).total_cmp(&line_dist(b, p.y)))
-        .or_else(|| ft.lines.first())?;
+    let l = hit_line(ft, p)?;
     if l.glyphs.iter().any(|g| g.rtl) {
         // Bidi: the caret position drawn nearest the point.
         return caret_stops(l).into_iter().min_by(|a, b| (a.1 - p.x).abs().total_cmp(&(b.1 - p.x).abs())).map(|s| s.0);

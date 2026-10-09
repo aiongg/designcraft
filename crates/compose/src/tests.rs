@@ -1847,6 +1847,8 @@ fn drop_cap_caret_and_hit_testing() {
     let y = lines[2].baseline - 2.0;
     assert_eq!(hit(&cs, 0, Point::new(dc.x + dc.adv * 0.25, y)), Some(0));
     assert_eq!(hit(&cs, 0, Point::new(dc.x + dc.adv * 0.75, y)), Some(1));
+    // A double click there is on the drop cap's character, not on line 3's text.
+    assert_eq!(hit_char(&cs, 0, Point::new(dc.x + dc.adv * 0.5, y)), Some(0));
     // The caret before the drop cap is as tall as it; after it, beside line 1's text.
     let (_, x, bl, asc, _) = caret(&cs, 0).unwrap();
     assert!((x - dc.x).abs() < 1e-6 && (bl - lines[2].baseline).abs() < 1e-6 && asc > 24.0, "{x} {bl} {asc}");
@@ -1929,6 +1931,32 @@ fn drop_cap_aligns_its_left_edge() {
             assert!((text_x(l, 1) - (dc.x + dc.adv)).abs() < 1e-6, "{align:?}: {} vs {}", text_x(l, 1), dc.x + dc.adv);
         }
         assert!((text_x(lines[2], 1) - 10.0).abs() < 1e-6);
+    }
+}
+
+#[test]
+fn caret_follows_spaces_typed_at_the_end() {
+    let x_at_end = |text: &str| {
+        let (d, sid, _) = doc_with(text, Rect::new(0.0, 0.0, 300.0, 100.0), ParaAttrs::default());
+        let cs = compose_story(&d, sid, &ComposeOptions::default());
+        let end_x = cs.frames[0].lines[0].end_x;
+        (caret(&cs, text.len()).unwrap().1, end_x)
+    };
+    let (word, word_end) = x_at_end("Word");
+    let (one, one_end) = x_at_end("Word ");
+    let (two, _) = x_at_end("Word  ");
+    assert!(one > word + 1.0 && two > one + 1.0, "{word} {one} {two}");
+    // The spaces don't count for the line's own length (alignment, justification).
+    assert!((one_end - word_end).abs() < 1e-9);
+    // Wrapped lines keep their spaces too: a caret between two spaces at a line end sits after
+    // the first one.
+    let text = "Lorem ipsum dolor sit amet  consectetur";
+    let (d, sid, _) = doc_with(text, Rect::new(0.0, 0.0, 140.0, 100.0), ParaAttrs::default());
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let l0 = &cs.frames[0].lines[0];
+    if l0.range.end == text.find("consectetur").unwrap() {
+        let mid = text.find("  ").unwrap() + 1;
+        assert!(caret(&cs, mid).unwrap().1 > l0.end_x, "between the trailing spaces");
     }
 }
 

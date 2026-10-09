@@ -855,6 +855,16 @@ impl FontDb {
         self.scoped(0).styles(family)
     }
 
+    /// The shared fonts' weight and italic of a style of `family` (see [`ScopedFonts::traits_of`]).
+    pub fn traits_of(&self, family: &str, style: &str) -> (f32, bool) {
+        self.scoped(0).traits_of(family, style)
+    }
+
+    /// Style linking among the shared fonts (see [`ScopedFonts::linked_style`]).
+    pub fn linked_style(&self, family: &str, current: &str, bold: Option<bool>, italic: Option<bool>) -> Option<String> {
+        self.scoped(0).linked_style(family, current, bold, italic)
+    }
+
     /// Add a user font (TTF/OTF/TTC bytes). Returns the number of faces added (0 if unparseable or
     /// every face was already present).
     pub fn add_font(&self, bytes: Vec<u8>) -> usize {
@@ -1248,6 +1258,51 @@ impl ScopedFonts<'_> {
 
     /// Style names available for `family` (Regular first, then by weight).
     pub fn styles(&self, family: &str) -> Vec<String> {
+        self.style_traits(family).into_iter().map(|t| t.2).collect()
+    }
+
+    /// Weight and italic of a style of `family`: from the font when it is known, else from the
+    /// style's name.
+    pub fn traits_of(&self, family: &str, style: &str) -> (f32, bool) {
+        let base = base_style(style);
+        self.style_traits(family)
+            .into_iter()
+            .find(|t| t.2.eq_ignore_ascii_case(base))
+            .map_or((style_weight(base), style_italic(base)), |(italic, weight, _)| (weight, italic))
+    }
+
+    /// Style linking: the style of `family` that sets bold (`bold`) and italic (`italic`) as asked
+    /// and keeps the other from `current` (Bold from Italic is Bold Italic). `None` when the
+    /// family has no such style.
+    pub fn linked_style(&self, family: &str, current: &str, bold: Option<bool>, italic: Option<bool>) -> Option<String> {
+        let (weight, cur_italic) = self.traits_of(family, current);
+        let want_italic = italic.unwrap_or(cur_italic);
+        let want_weight = match bold {
+            Some(true) => 700.0,
+            Some(false) => 400.0,
+            None => weight,
+        };
+        // Width words (Condensed, Extended…) of the current style are kept when the family allows.
+        const WIDTHS: &[&str] = &["condensed", "compressed", "narrow", "extended", "expanded", "wide"];
+        let widths = |s: &str| {
+            let n = norm(s);
+            WIDTHS.iter().filter(|w| n.contains(*w)).count()
+        };
+        let cur_widths = widths(current);
+        self.style_traits(family)
+            .into_iter()
+            .filter(|(i, w, _)| *i == want_italic && bold.is_none_or(|b| b == (*w >= 600.0)))
+            .min_by(|a, b| {
+                let key = |t: &(bool, f32, String)| ((t.1 - want_weight).abs(), usize::from(widths(&t.2) != cur_widths), t.2.len());
+                let (ka, kb) = (key(a), key(b));
+                ka.0.total_cmp(&kb.0).then(ka.1.cmp(&kb.1)).then(ka.2.cmp(&kb.2))
+            })
+            .map(|t| t.2)
+    }
+
+    /// `(italic, weight, name)` of each style of `family` (the document's, loaded, or installed),
+    /// Regular first, then by weight.
+    fn style_traits(&self, family: &str) -> Vec<(bool, f32, String)> {
         let mut v: Vec<(bool, f32, String)> = self
             .own()
             .iter()
@@ -1263,7 +1318,7 @@ impl ScopedFonts<'_> {
         }
         v.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)).then(a.2.cmp(&b.2)));
         v.dedup_by(|a, b| a.2 == b.2);
-        v.into_iter().map(|t| t.2).collect()
+        v
     }
 
     /// Resolve a family + style to a face, falling back to the closest style of the family, then to
