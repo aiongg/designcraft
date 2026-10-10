@@ -562,6 +562,32 @@ fn column_break_moves_following_text() {
 }
 
 #[test]
+fn line_before_a_break_character_is_a_last_line() {
+    // As in InDesign: column, frame and page breaks end the paragraph's last line (set with the
+    // last-line alignment), while a forced line break inside a justified paragraph is justified.
+    use designcraft_doc::story::{COLUMN_BREAK, FORCED_LINE_BREAK, FRAME_BREAK, PAGE_BREAK};
+    for (brk, align, justified) in [
+        (COLUMN_BREAK, Align::LeftJustified, false),
+        (FRAME_BREAK, Align::LeftJustified, false),
+        (PAGE_BREAK, Align::LeftJustified, false),
+        (PAGE_BREAK, Align::FullyJustified, true),
+        (FORCED_LINE_BREAK, Align::LeftJustified, true),
+    ] {
+        // A space after the break is skipped and does not keep the break from moving the text.
+        let text = format!("one two three{brk} four five six");
+        let (mut d, sid, fid) = doc_with(&text, Rect::new(0.0, 0.0, 400.0, 300.0), ParaAttrs { align: Some(align), ..Default::default() });
+        d.item_mut(fid).unwrap().text_frame_mut().unwrap().options.columns = 2;
+        let cs = compose_story(&d, sid, &ComposeOptions::default());
+        let l = &cs.frames[0].lines[0];
+        let full = (l.end_x - l.x1).abs() < 0.6;
+        assert_eq!(full, justified, "{brk:?} {align:?}: line ends at {} of {}", l.end_x, l.x1);
+        if brk == COLUMN_BREAK {
+            assert_eq!(all_lines(&cs)[1].column, 1, "the text after a column break starts the next column");
+        }
+    }
+}
+
+#[test]
 fn tabs_without_stops_use_default_half_inch() {
     let (d, sid, _) = doc_with("A\tB", Rect::new(0.0, 0.0, 300.0, 100.0), ParaAttrs::default());
     let cs = compose_story(&d, sid, &ComposeOptions::default());
