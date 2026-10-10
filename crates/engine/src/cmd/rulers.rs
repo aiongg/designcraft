@@ -178,6 +178,7 @@ mod tests {
             s.execute("transform.set", &json!({"ids": [right], "x": r, "ref": 0})).unwrap();
         }
         // A page origin restarts the horizontal ruler on each page.
+        s.execute("document.preferences", &json!({"rulerOrigin": "page"})).unwrap();
         let pieces = s.doc().unwrap().doc.ruler_pieces(SpreadRef::Doc(1));
         let starts: Vec<f64> = pieces.iter().map(|p| p.2.x).collect();
         assert_eq!(starts, [0.0, 612.0]);
