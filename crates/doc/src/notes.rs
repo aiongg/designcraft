@@ -235,9 +235,9 @@ impl crate::Document {
         before.sort_by_key(|st| key(st));
         let mut n = 0u32;
         for st in before {
-            for p in &st.paras {
+            for (p, r) in st.paras.iter().zip(st.para_ranges()) {
                 let (pp, _) = self.styles.resolve_para(p);
-                if pp.list_type == crate::ListType::Numbers && pp.list_name == name {
+                if pp.list_type == crate::ListType::Numbers && pp.list_name == name && !r.is_empty() {
                     n = pp.start_at.map_or(n.saturating_add(1), |s| s.max(1));
                 }
             }
