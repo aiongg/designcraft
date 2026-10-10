@@ -262,6 +262,7 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Misspelled word → Correction (one per line):", "Falsch geschriebenes Wort → Korrektur (eins pro Zeile):"),
     ("Mobile", "Mobil"),
     ("Move Selection Here", "Auswahl hierher verschieben"),
+    ("Select; drag to move the selection to another layer", "Auswählen; ziehen, um die Auswahl auf eine andere Ebene zu verschieben"),
     ("Move to Color Group", "In Farbgruppe verschieben"),
     ("Move to Group", "In Gruppe verschieben"),
     ("Multiline", "Mehrzeilig"),
