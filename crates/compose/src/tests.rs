@@ -1156,6 +1156,105 @@ fn ruby_is_half_size_by_default_and_can_sit_below_in_its_own_colour() {
 }
 
 #[test]
+fn ruby_moves_out_past_kenten_on_the_same_side() {
+    use designcraft_doc::cjk_settings::KentenPosition;
+    use designcraft_doc::ruby::RubyPosition;
+    let kanji = 0.."漢字".len();
+    // The ruby glyphs' baseline, and the outer edge of the kenten's em box (y down).
+    let compose = |ruby: RubyPosition, kenten: Option<KentenPosition>| {
+        let (plain, l, cs) = ruby_compose("漢字です", kanji.clone(), |a| {
+            a.ruby = Some("かんじ".into());
+            a.ruby_position = Some(ruby);
+            if let Some(k) = kenten {
+                a.kenten = Some(true);
+                a.kenten_size = Some(Some(6.0));
+                a.kenten_distance = Some(1.0);
+                a.kenten_position = Some(k);
+            }
+        });
+        let parent = &l.glyphs[0];
+        let marks = cs.styles[parent.style as usize].kenten_mark.as_ref().map(|m| m.style);
+        let ruby: Vec<PlacedGlyph> = l.glyphs[plain.len()..].iter().filter(|g| Some(g.style) != marks).cloned().collect();
+        assert_eq!(ruby.len(), 3);
+        let (top, bottom) = parent.face.em_box();
+        let edge = match kenten {
+            Some(KentenPosition::BelowLeft) => parent.y - bottom * parent.sy + 1.0 + 6.0,
+            _ => parent.y - top * parent.sy - 1.0 - 6.0,
+        };
+        (ruby, edge)
+    };
+    for (position, kenten) in [(RubyPosition::AboveRight, KentenPosition::AboveRight), (RubyPosition::BelowLeft, KentenPosition::BelowLeft)] {
+        let (alone, _) = compose(position, None);
+        let (ruby, edge) = compose(position, Some(kenten));
+        for (r, a) in ruby.iter().zip(&alone) {
+            let (top, bottom) = r.face.em_box();
+            if position == RubyPosition::AboveRight {
+                assert!(r.y - bottom * r.sy <= edge + 1e-6, "the ruby's em box ends where the marks' starts");
+                assert!(r.y < a.y, "moved up");
+            } else {
+                assert!(r.y - top * r.sy >= edge - 1e-6, "the ruby's em box starts where the marks' ends");
+                assert!(r.y > a.y, "moved down");
+            }
+        }
+    }
+    // Kenten on the other side leave the ruby where it was.
+    let (alone, _) = compose(RubyPosition::AboveRight, None);
+    let (ruby, _) = compose(RubyPosition::AboveRight, Some(KentenPosition::BelowLeft));
+    assert!(ruby.iter().zip(&alone).all(|(r, a)| (r.y - a.y).abs() < 1e-9));
+}
+
+#[test]
+fn ruby_and_kenten_overprint_their_own_run_styles() {
+    use designcraft_doc::cjk_settings::AdornmentOverprint as O;
+    let kanji = 0.."漢字".len();
+    let (plain, l, cs) = ruby_compose("漢字です", kanji, |a| {
+        a.ruby = Some("かんじ".into());
+        a.ruby_overprint_stroke = Some(O::On);
+        a.kenten = Some(true);
+        a.kenten_overprint_fill = Some(O::On);
+    });
+    let parent = &cs.styles[l.glyphs[0].style as usize];
+    assert!(!parent.overprint_fill && !parent.overprint_stroke, "the text itself doesn't overprint");
+    let marks = parent.kenten_mark.as_ref().unwrap().style;
+    let mark = &cs.styles[marks as usize];
+    assert!(mark.overprint_fill && !mark.overprint_stroke);
+    let ruby = l.glyphs[plain.len()..].iter().find(|g| g.style != marks).unwrap();
+    let ruby = &cs.styles[ruby.style as usize];
+    assert!(!ruby.overprint_fill && ruby.overprint_stroke);
+}
+
+#[test]
+fn longer_ruby_never_overhangs_a_line_edge_or_more_than_its_neighbours_take() {
+    // Four 6 pt ruby characters over one 12 pt kanji: 12 pt longer, which the kana on each side
+    // take (one ruby character, 6 pt, each). A line edge takes none, so the group stays on the
+    // line of each kana it overhangs.
+    let text = "かな字".repeat(12);
+    let mut d = Document::new(&designcraft_doc::build::NewDocument::default());
+    let lid = d.default_layer();
+    let (_, sid) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(100.0, 100.0, 190.0, 500.0), lid, &text, ParaFormat::default()).unwrap();
+    for (k, _) in text.match_indices('字') {
+        d.story_mut(sid).unwrap().format_chars(k..k + "字".len(), |f| f.over.ruby = Some("じじじじ".into()));
+    }
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let lines = &cs.frames[0].lines;
+    assert!(lines.len() > 2, "the text wraps");
+    for l in lines {
+        let parents: Vec<&PlacedGlyph> = l.glyphs.iter().filter(|g| g.len > 0 && g.visible).collect();
+        let x0 = parents.iter().map(|g| g.x - g.dx).fold(f64::MAX, f64::min);
+        let x1 = parents.iter().map(|g| g.x - g.dx + g.adv).fold(f64::MIN, f64::max);
+        for p in parents.iter().filter(|g| text.get(g.byte..).is_some_and(|t| t.starts_with('字'))) {
+            let ruby: Vec<&PlacedGlyph> = l.glyphs.iter().filter(|g| g.len == 0 && g.byte == p.byte).collect();
+            assert_eq!(ruby.len(), 4);
+            let r0 = ruby.iter().map(|g| g.x).fold(f64::MAX, f64::min);
+            let r1 = ruby.iter().map(|g| g.x + g.adv).fold(f64::MIN, f64::max);
+            assert!(r0 >= x0 - 1e-6 && r1 <= x1 + 1e-6, "inside the line: {r0}..{r1} in {x0}..{x1}");
+            let (p0, p1) = (p.x - p.dx, p.x - p.dx + p.adv);
+            assert!(p0 - r0 <= 6.0 + 1e-6 && r1 - p1 <= 6.0 + 1e-6, "at most one ruby character over each kana: {r0}..{r1} over {p0}..{p1}");
+        }
+    }
+}
+
+#[test]
 fn warichu_stacks_the_run_inside_the_line_and_closes_up() {
     let text = "ABCDEFGHZ";
     let mut d = Document::new(&designcraft_doc::build::NewDocument::default());

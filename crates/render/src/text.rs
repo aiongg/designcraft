@@ -383,9 +383,22 @@ impl Renderer {
                     if st.stroke != designcraft_color::swatch::NONE
                         && let Some(c) = doc.resolve_color(&st.stroke, st.stroke_tint)
                     {
+                        let op = crate::overprints(f, &st.stroke, st.stroke_tint, st.overprint_stroke);
+                        if op {
+                            ctx.push_layer(
+                                None,
+                                Some(vello_cpu::peniko::BlendMode::new(vello_cpu::peniko::Mix::Multiply, vello_cpu::peniko::Compose::SrcOver)),
+                                None,
+                                None,
+                                None,
+                            );
+                        }
                         ctx.set_paint(color_of(&c, 1.0));
                         ctx.set_stroke(kurbo::Stroke::new(st.stroke_weight));
                         ctx.stroke_path(bp);
+                        if op {
+                            ctx.pop_layer();
+                        }
                     }
                 }
             }

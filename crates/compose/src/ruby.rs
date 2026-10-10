@@ -450,6 +450,24 @@ pub(crate) fn reserve(db: &ScopedFonts<'_>, styles: &mut Vec<RunStyle>, glyphs: 
                 g.adv += trail;
             }
         }
+        // The overhang this relies on needs the neighbour on the same line: at a line edge the
+        // edge takes none (auto-align) or only the overhang amount, so the group stays with each
+        // neighbour its ruby overhangs and the spacing reserved here is what `annotate` places.
+        let spaced: f64 = glyphs.get(i..j).unwrap_or_default().iter().map(|g| g.adv).sum();
+        let excess = w - spaced;
+        if excess > 1e-9 {
+            let lead = lead_overhang(spec.alignment, excess, before, after);
+            if lead > 1e-9
+                && let Some(g) = i.checked_sub(1).and_then(|k| glyphs.get_mut(k))
+            {
+                g.break_after = Some(false);
+            }
+            if excess - lead > 1e-9
+                && let Some(g) = j.checked_sub(1).and_then(|k| glyphs.get_mut(k))
+            {
+                g.break_after = Some(false);
+            }
+        }
         // Group ruby keeps its parent on one line (JLReq 3.3).
         if !mono {
             for g in glyphs.get_mut(first..last).unwrap_or_default() {
@@ -501,6 +519,31 @@ fn ruby_style(styles: &mut Vec<RunStyle>, base: &RunStyle, spec: &RubySpec, size
     rs.kenten_mark = None;
     rs.warichu = false;
     intern(styles, rs)
+}
+
+/// How far the ruby must move away from its parent (down for ruby below, up for ruby above: the
+/// result is signed along y) so that it clears kenten set on the same side of the parent
+/// characters. Kenten sit next to the parent (JIS X 4051, JLReq: emphasis dots go between the
+/// base characters and ruby on the same side); the ruby's em box then starts where the marks' em
+/// box ends. `y` is the ruby's baseline without kenten and `tall` its em height.
+fn kenten_clearance(styles: &[RunStyle], base: &[&PlacedGlyph], shaped: &Shaped, tall: f64, position: RubyPosition, y: f64) -> f64 {
+    let below = position == RubyPosition::BelowLeft;
+    let (ruby_top, ruby_bottom) = shaped.face.em_box();
+    let k = tall / shaped.face.units_per_em().max(1.0);
+    let overlap = base
+        .iter()
+        .filter_map(|b| {
+            let m = styles.get(b.style as usize)?.kenten_mark.as_ref().filter(|m| m.below == below)?;
+            let (top, bottom) = b.face.em_box();
+            let h = m.size * m.y_scale;
+            Some(if below {
+                (b.y - bottom * b.sy + m.distance + h) - (y - ruby_top * k)
+            } else {
+                (y - ruby_bottom * k) - (b.y - top * b.sy - m.distance - h)
+            })
+        })
+        .fold(0.0, f64::max);
+    if below { overlap } else { -overlap }
 }
 
 /// Add the ruby of a laid-out line's glyphs. `text` is the story text the glyphs'
@@ -594,6 +637,7 @@ pub(crate) fn annotate(
             RubyPosition::AboveRight => -(st.size * 0.88 + tall * 0.2) - spec.y_offset,
             RubyPosition::BelowLeft => st.size * 0.12 + tall * 0.96 + spec.y_offset,
         };
+        let y = y + kenten_clearance(styles, &base, &shaped, tall, spec.position, y);
         let missing = if spec.font_family.is_empty() { st.missing_font } else { !db.has_family(&spec.font_family) };
         let style = ruby_style(styles, &st, &spec, shaped.size, missing);
         for (r, off) in shaped.glyphs.iter().zip(offsets) {

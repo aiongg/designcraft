@@ -297,6 +297,9 @@ impl Exporter<'_> {
         if fill.is_none() && stroke.is_none() {
             return;
         }
+        if st.overprint_fill || st.overprint_stroke {
+            self.warn("overprint is not exported yet");
+        }
         let face = g0.face;
         let size = g0.sy * face.upem;
         let hs = g0.sx / g0.sy;

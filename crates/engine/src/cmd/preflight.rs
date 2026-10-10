@@ -118,8 +118,11 @@ pub fn check(s: &Session, min_ppi: f64) -> Vec<Issue> {
                 let props = d.styles.resolve_char(&base, f);
                 {
                     use designcraft_doc::cjk_settings::AdornmentOverprint as O;
-                    if props.kenten && (props.kenten_overprint_fill != O::Auto || props.kenten_overprint_stroke != O::Auto) {
-                        unsupported_typography.insert("Kenten overprint is preserved, but not applied".to_string());
+                    let kenten = props.kenten && (props.kenten_overprint_fill == O::On || props.kenten_overprint_stroke == O::On);
+                    let ruby = !props.ruby.is_empty() && (props.ruby_overprint_fill == O::On || props.ruby_overprint_stroke == O::On);
+                    if kenten || ruby {
+                        unsupported_typography
+                            .insert("Ruby and kenten overprint show in Overprint Preview, but PDF export doesn't write overprint".to_string());
                     }
                 }
                 if has_rtl

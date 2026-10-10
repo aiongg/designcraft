@@ -157,7 +157,15 @@ impl StyleTable<'_> {
     fn intern(&mut self, db: &ScopedFonts<'_>, p: &CharProps) -> u32 {
         // Kenten are drawn in a run style of their own (Kenten Color); it has no kenten itself.
         let kenten_mark = if p.kenten {
-            let style = self.intern(db, &crate::kenten::mark_props(p));
+            use designcraft_doc::cjk_settings::AdornmentOverprint as O;
+            let mut style = self.intern(db, &crate::kenten::mark_props(p));
+            // Text has no overprint of its own, so `Auto` is off.
+            let (fill, stroke) = (p.kenten_overprint_fill == O::On, p.kenten_overprint_stroke == O::On);
+            if (fill || stroke)
+                && let Some(base) = self.styles.get(style as usize)
+            {
+                style = self.push_unique(RunStyle { overprint_fill: fill, overprint_stroke: stroke, ..base.clone() });
+            }
             Some(crate::kenten::KentenMark::of(p, style))
         } else {
             None
@@ -204,6 +212,11 @@ impl StyleTable<'_> {
             kenten_mark,
             shatai: crate::shatai::Shatai::of(p),
         };
+        self.push_unique(rs)
+    }
+
+    /// The index of `rs` in the table, added if it isn't there yet.
+    fn push_unique(&mut self, rs: RunStyle) -> u32 {
         if let Some(i) = self.styles.iter().rposition(|s| *s == rs) {
             return i as u32;
         }
