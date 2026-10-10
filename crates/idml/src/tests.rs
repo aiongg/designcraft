@@ -572,7 +572,9 @@ fn absent_item_and_document_attributes_take_indesign_defaults() {
     let cols = t.options.alt_cols.as_ref().unwrap();
     assert_eq!((fills(cols), cols.first), (want.clone(), 2));
     let banded = d.styles.table.iter().find(|s| s.name == "Banded").unwrap();
-    assert_eq!(fills(banded.alt_rows.as_ref().unwrap()), want);
+    let mut bt = designcraft_doc::Table::new(0, 1, 1, 0, 0, 100.0);
+    d.styles.resolve_table_style(&banded.name).apply_to(&mut bt, &d.styles.cell);
+    assert_eq!(fills(bt.options.alt_rows.as_ref().unwrap()), want);
     let c = t.cell(0, 0).unwrap();
     assert_eq!((c.insets, c.vj, c.fill.as_str()), ([4.0; 4], VerticalJustification::Top, "[None]"));
     for e in &c.strokes {
