@@ -1380,12 +1380,13 @@ fn arabic_story_and_table_directions_survive_idml_export() {
     assert_eq!(st.tables.values().next().unwrap().options.direction, designcraft_doc::TextDirection::RightToLeft);
 }
 
+/// IDML has no attribute for a drop cap's character style: it is the nested style list's leading
+/// "through 1 Dropcap" entry, read into the drop cap style and written back from it.
 #[test]
 fn drop_caps_import_and_round_trip() {
-    // A style with a drop cap, its character style and a nested style through it; a paragraph
-    // overriding it locally.
+    // A style with a drop cap and its character style; a paragraph overriding both locally.
     let opener = r#"<ParagraphStyle Self="ParagraphStyle/Opener" Name="Opener" DropCapCharacters="1" DropCapLines="3">
-        <Properties><DropCapStyle type="object">CharacterStyle/Strong</DropCapStyle><AllNestedStyles type="list"><ListItem type="record">
+        <Properties><AllNestedStyles type="list"><ListItem type="record">
           <AppliedCharacterStyle type="object">CharacterStyle/Strong</AppliedCharacterStyle><Delimiter type="enumeration">Dropcap</Delimiter>
           <Repetition type="long">1</Repetition><Inclusive type="boolean">true</Inclusive></ListItem></AllNestedStyles></Properties>
       </ParagraphStyle>
@@ -1394,7 +1395,10 @@ fn drop_caps_import_and_round_trip() {
     let story = r#"<?xml version="1.0" encoding="UTF-8"?>
 <idPkg:Story xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="16.0">
   <Story Self="s1">
-    <ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/Opener" DropCapCharacters="2" DropCapLines="2" DropCapStyle="CharacterStyle/$ID/[No character style]">
+    <ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/Opener" DropCapCharacters="2" DropCapLines="2">
+      <Properties><AllNestedStyles type="list"><ListItem type="record">
+        <AppliedCharacterStyle type="object">CharacterStyle/$ID/[No character style]</AppliedCharacterStyle><Delimiter type="enumeration">Dropcap</Delimiter>
+        <Repetition type="long">1</Repetition><Inclusive type="boolean">true</Inclusive></ListItem></AllNestedStyles></Properties>
       <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]"><Content>Once upon a time</Content></CharacterStyleRange>
     </ParagraphStyleRange>
   </Story>
@@ -1412,18 +1416,21 @@ fn drop_caps_import_and_round_trip() {
         let st = d.styles.para("Opener").unwrap();
         assert_eq!((st.para.drop_cap_chars, st.para.drop_cap_lines), (Some(1), Some(3)));
         assert_eq!(st.para.drop_cap_style.as_deref(), Some("Strong"));
-        let ns = st.para.nested_styles.clone().unwrap();
-        assert_eq!((ns[0].style.as_str(), &ns[0].until), ("Strong", &designcraft_doc::NestedUntil::Dropcap));
+        assert_eq!(st.para.nested_styles, Some(vec![designcraft_doc::NestedStyle::drop_cap("Strong")]), "one entry, not duplicated");
         let p = &d.stories.values().find(|s| s.text.starts_with("Once")).unwrap().paras[0];
         assert_eq!((p.para.drop_cap_chars, p.para.drop_cap_lines), (Some(2), Some(2)));
         assert_eq!(p.para.drop_cap_style.as_deref(), Some(st::NO_CHAR_STYLE));
     };
     let d = import_idml_with(&bytes, &|_| None).unwrap();
     check(&d);
-    // The drop cap's character style isn't written to IDML (InDesign sets it through a Dropcap
-    // nested style); Align Left Edge and Scale for Descenders are, as DropcapDetail.
+    let bytes = export_idml(&d);
+    assert!(!zip_text(&bytes, "").contains("DropCapStyle"), "not an IDML attribute");
+    check(&import_idml(&bytes).unwrap());
+    // A drop cap style set without nested styles is written as one; Align Left Edge and Scale for
+    // Descenders as DropcapDetail.
     let mut d = d;
     if let Some(s) = d.styles_mut().para_mut("Opener") {
+        s.para.nested_styles = None;
         s.para.drop_cap_align_left = Some(false);
         s.para.drop_cap_scale_descenders = Some(true);
     }
@@ -1432,9 +1439,124 @@ fn drop_caps_import_and_round_trip() {
     assert!(zip_text(&bytes, "Resources/Styles.xml").contains(r#"DropcapDetail="2""#));
     let back = import_idml(&bytes).unwrap();
     let st = back.styles.para("Opener").unwrap();
-    assert_eq!((st.para.drop_cap_chars, st.para.drop_cap_lines, st.para.drop_cap_style.as_deref()), (Some(1), Some(3), None));
+    assert_eq!((st.para.drop_cap_chars, st.para.drop_cap_lines, st.para.drop_cap_style.as_deref()), (Some(1), Some(3), Some("Strong")));
     assert_eq!((st.para.drop_cap_align_left, st.para.drop_cap_scale_descenders), (Some(false), Some(true)));
-    assert_eq!(st.para.nested_styles.as_ref().map(|n| n[0].until.clone()), Some(designcraft_doc::NestedUntil::Dropcap));
+    assert_eq!(st.para.nested_styles, Some(vec![designcraft_doc::NestedStyle::drop_cap("Strong")]));
+}
+
+/// IDML styles and stories with an `Opener` style whose drop cap style is `Strong`, plus `styles`
+/// (more paragraph styles) and `paras` (the story's paragraph ranges). `WORDS` in them stands for
+/// a nested style list of `Strong` through 1 word.
+fn drop_cap_fixture(styles: &str, paras: &str) -> Vec<u8> {
+    let nested = |style: &str, delim: &str| {
+        format!(
+            r#"<AllNestedStyles type="list"><ListItem type="record"><AppliedCharacterStyle type="object">CharacterStyle/{style}</AppliedCharacterStyle><Delimiter type="enumeration">{delim}</Delimiter><Repetition type="long">1</Repetition><Inclusive type="boolean">true</Inclusive></ListItem></AllNestedStyles>"#
+        )
+    };
+    let words = nested("Strong", "AnyWord");
+    let opener = format!(
+        r#"<ParagraphStyle Self="ParagraphStyle/Opener" Name="Opener" DropCapCharacters="1" DropCapLines="3"><Properties>{}</Properties></ParagraphStyle>
+    {}
+    </RootParagraphStyleGroup>"#,
+        nested("Strong", "Dropcap"),
+        styles.replace("WORDS", &words)
+    );
+    let styles = STYLES.replace("</RootParagraphStyleGroup>", &opener);
+    let story = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<idPkg:Story xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="16.0">
+  <Story Self="s1">{}</Story>
+</idPkg:Story>"#,
+        paras.replace("WORDS", &words)
+    );
+    zip_files(&[
+        ("designmap.xml", DESIGNMAP),
+        ("Resources/Graphic.xml", GRAPHIC),
+        ("Resources/Styles.xml", &styles),
+        ("Resources/Preferences.xml", PREFS),
+        ("MasterSpreads/MasterSpread_m1.xml", MASTER),
+        ("Spreads/Spread_sp1.xml", SPREAD),
+        ("Stories/Story_s1.xml", &story),
+    ])
+}
+
+/// A nested style list replaces the inherited one, drop cap style entry included: a style or
+/// paragraph with a list of its own and no Dropcap entry has no drop cap style.
+#[test]
+fn own_nested_styles_clear_an_inherited_drop_cap_style() {
+    let styles = r#"<ParagraphStyle Self="ParagraphStyle/Child" Name="Child"><Properties><BasedOn type="object">ParagraphStyle/Opener</BasedOn>WORDS</Properties></ParagraphStyle>
+    <ParagraphStyle Self="ParagraphStyle/Plain" Name="Plain"><Properties>WORDS</Properties></ParagraphStyle>"#;
+    let paras = r#"<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/Opener"><Properties>WORDS</Properties>
+      <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]"><Content>Cleared</Content><Br/></CharacterStyleRange>
+    </ParagraphStyleRange>
+    <ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/Opener">
+      <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]"><Content>Inherited</Content></CharacterStyleRange>
+    </ParagraphStyleRange>"#;
+    let d = import_idml_with(&drop_cap_fixture(styles, paras), &|_| None).unwrap();
+    let cap = |name: &str| d.styles.para(name).unwrap().para.drop_cap_style.clone();
+    assert_eq!(cap("Opener").as_deref(), Some("Strong"));
+    assert_eq!(cap("Child").as_deref(), Some(st::NO_CHAR_STYLE), "its own list replaces Opener's");
+    assert_eq!(cap("Plain"), None, "nothing to clear");
+    let story = d.stories.values().find(|s| s.text.starts_with("Cleared")).unwrap();
+    assert_eq!(story.paras[0].para.drop_cap_style.as_deref(), Some(st::NO_CHAR_STYLE));
+    assert_eq!(story.paras[1].para.drop_cap_style, None);
+    assert_eq!(d.styles.resolve_para(&story.paras[1]).0.drop_cap_style, "Strong");
+}
+
+/// Paragraphs in table cells and footnotes are cleared like story paragraphs.
+#[test]
+fn own_nested_styles_clear_an_inherited_drop_cap_style_in_cells_and_notes() {
+    let opener = |text: &str| {
+        format!(
+            r#"<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/Opener"><Properties>WORDS</Properties><CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]"><Content>{text}</Content></CharacterStyleRange></ParagraphStyleRange>"#
+        )
+    };
+    let paras = format!(
+        r#"<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/$ID/NormalParagraphStyle"><CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]">
+<Content>Body</Content><Footnote>{}</Footnote>
+<Table HeaderRowCount="0" FooterRowCount="0"><Row Name="0" MinimumHeight="24"/><Column Name="0" SingleColumnWidth="60"/><Cell Name="0:0">{}</Cell></Table>
+</CharacterStyleRange></ParagraphStyleRange>"#,
+        opener("Note"),
+        opener("Cell")
+    );
+    let d = import_idml_with(&drop_cap_fixture("", &paras), &|_| None).unwrap();
+    let story = d.stories.values().find(|s| !s.notes.is_empty()).expect("story with a footnote");
+    let note = &story.notes[0].text;
+    assert_eq!(note.paras[0].para.drop_cap_style.as_deref(), Some(st::NO_CHAR_STYLE), "{:?}", note.text);
+    let cell = &story.tables.values().next().expect("a table").cell(0, 0).unwrap().text;
+    assert_eq!(cell.paras[0].para.drop_cap_style.as_deref(), Some(st::NO_CHAR_STYLE), "{:?}", cell.text);
+}
+
+/// A paragraph that clears its style's drop cap style without nested styles of its own round-trips:
+/// it is written with the style's list, the Dropcap entry set to [None].
+#[test]
+fn a_cleared_drop_cap_style_round_trips() {
+    let paras = r#"<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/Opener">
+      <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]"><Content>Once upon a time</Content></CharacterStyleRange>
+    </ParagraphStyleRange>"#;
+    let mut d = import_idml_with(&drop_cap_fixture("", paras), &|_| None).unwrap();
+    let sid = *d.stories.keys().next().unwrap();
+    let clear = |d: &mut Document| d.story_mut(sid).unwrap().paras[0].para.drop_cap_style = Some(st::NO_CHAR_STYLE.into());
+    let resolved = |d: &Document| {
+        let st = d.stories.values().find(|s| s.text.starts_with("Once")).unwrap();
+        d.styles.resolve_para(&st.paras[0]).0
+    };
+    clear(&mut d);
+    let back = import_idml(&export_idml(&d)).unwrap();
+    let pp = resolved(&back);
+    assert_eq!(pp.drop_cap_style, st::NO_CHAR_STYLE);
+    assert_eq!(pp.nested_styles, vec![designcraft_doc::NestedStyle::drop_cap(st::NO_CHAR_STYLE)]);
+    // The style's drop cap style without nested styles: the paragraph is written with an empty
+    // list, which clears it on import.
+    if let Some(s) = d.styles_mut().para_mut("Opener") {
+        s.para.nested_styles = None;
+    }
+    assert_eq!(resolved(&d).drop_cap_style, st::NO_CHAR_STYLE);
+    let back = import_idml(&export_idml(&d)).unwrap();
+    assert_eq!(back.styles.para("Opener").unwrap().para.drop_cap_style.as_deref(), Some("Strong"));
+    let pp = resolved(&back);
+    assert_eq!(pp.drop_cap_style, st::NO_CHAR_STYLE);
+    assert!(pp.nested_styles.iter().all(|ns| ns.style != "Strong"), "{:?}", pp.nested_styles);
 }
 
 /// Frames take the corners and Text Frame Options they don't write from their object style chain,

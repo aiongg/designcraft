@@ -1406,6 +1406,9 @@ impl<'r> Importer<'r> {
                     }
                 })
                 .collect();
+            // IDML has no drop cap style attribute: the drop cap's character style is the list's
+            // leading "through 1 Dropcap" nested style.
+            a.drop_cap_style = v.first().filter(|ns| ns.is_drop_cap()).map(|ns| ns.style.clone());
             a.nested_styles = Some(v);
         }
         if let Some(l) = e.prop_el("AllNestedLineStyles") {
@@ -1434,7 +1437,6 @@ impl<'r> Importer<'r> {
         a.space_after = e.num("SpaceAfter");
         a.drop_cap_lines = u("DropCapLines");
         a.drop_cap_chars = u("DropCapCharacters");
-        a.drop_cap_style = e.prop("DropCapStyle").map(|r| self.char_style_ref(r.trim()));
         // DropcapDetail bits: 1 = Align Left Edge, 2 = Scale for Descenders.
         if let Some(v) = e.num("DropcapDetail").filter(|v| v.is_finite() && *v >= 0.0) {
             let bits = v as u32;
@@ -2486,12 +2488,35 @@ impl<'r> Importer<'r> {
         self.spreads.iter().chain(self.parents.iter()).find_map(|s| find(&s.items, id))
     }
 
+    /// A nested style list replaces the one a style or paragraph inherits, and with it the drop
+    /// cap style (the list's leading "through 1 Dropcap" entry, read into the drop cap style). A
+    /// list of its own without that entry clears an inherited drop cap style.
+    fn clear_inherited_drop_cap_styles(&mut self) {
+        let clears = |a: &designcraft_doc::ParaAttrs| a.drop_cap_style.is_none() && a.nested_styles.is_some();
+        let cleared: Vec<String> = self
+            .styles
+            .paragraph
+            .iter()
+            .filter(|s| clears(&s.para) && inherits_drop_cap_style(&self.styles, s.based_on.as_deref()))
+            .map(|s| s.name.clone())
+            .collect();
+        for name in cleared {
+            if let Some(s) = self.styles.para_mut(&name) {
+                s.para.drop_cap_style = Some(st::NO_CHAR_STYLE.into());
+            }
+        }
+        for story in self.stories.values_mut() {
+            clear_story_drop_cap_styles(&self.styles, story, 0);
+        }
+    }
+
     fn finish(mut self, root: &El) -> Result<Document> {
         let title = root.get("Name").map(|n| n.trim_end_matches(".indd").to_string()).filter(|n| !n.is_empty()).unwrap_or_else(|| "Untitled".into());
         if self.spreads.is_empty() {
             return Err(IdmlError::Invalid("document has no spreads".into()));
         }
         self.settings.lists = std::mem::take(&mut self.lists);
+        self.clear_inherited_drop_cap_styles();
         // Make sure built-in paragraph styles exist and are first.
         let d = Document {
             title,
@@ -2693,6 +2718,47 @@ fn text_frame_options(prefs: &[&El]) -> TextFrameOptions {
         }
     }
     o
+}
+
+/// Deepest table-in-cell or note nesting the drop cap pass walks into.
+const MAX_STORY_NESTING: usize = 32;
+
+/// [`Importer::clear_inherited_drop_cap_styles`] for one story's paragraphs and those of the table
+/// cells, footnotes and endnotes in it.
+fn clear_story_drop_cap_styles(styles: &Styles, story: &mut Story, depth: usize) {
+    for p in &mut story.paras {
+        if p.para.drop_cap_style.is_none() && p.para.nested_styles.is_some() && inherits_drop_cap_style(styles, Some(&p.style)) {
+            p.para.drop_cap_style = Some(st::NO_CHAR_STYLE.into());
+        }
+    }
+    if depth >= MAX_STORY_NESTING {
+        return;
+    }
+    for table in story.tables.values_mut() {
+        for cell in &mut Arc::make_mut(table).cells {
+            clear_story_drop_cap_styles(styles, &mut cell.text, depth + 1);
+        }
+    }
+    for note in story.notes.iter_mut().chain(story.endnotes.iter_mut()) {
+        clear_story_drop_cap_styles(styles, &mut Arc::make_mut(note).text, depth + 1);
+    }
+}
+
+/// Does paragraph style `name` (and its based-on chain) set a drop cap character style? A style
+/// with a nested style list of its own and no drop cap style has none.
+fn inherits_drop_cap_style<'a>(styles: &'a Styles, mut name: Option<&'a str>) -> bool {
+    let mut seen = HashSet::new();
+    while let Some(n) = name {
+        let Some(s) = styles.para(n).filter(|_| seen.insert(n)) else { break };
+        if let Some(c) = s.para.drop_cap_style.as_deref() {
+            return !c.is_empty() && c != st::NO_CHAR_STYLE;
+        }
+        if s.para.nested_styles.is_some() {
+            return false;
+        }
+        name = s.based_on.as_deref();
+    }
+    false
 }
 
 /// Attribute lookup over several elements: the first that has it.

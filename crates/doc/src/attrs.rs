@@ -497,6 +497,18 @@ impl Default for NestedStyle {
     }
 }
 
+impl NestedStyle {
+    /// The drop cap's character style as a nested style: `style` through 1 drop cap.
+    pub fn drop_cap(style: &str) -> Self {
+        NestedStyle { style: style.into(), through: true, count: 1, until: NestedUntil::Dropcap }
+    }
+
+    /// Is this the form a drop cap's character style takes at the start of a nested style list?
+    pub fn is_drop_cap(&self) -> bool {
+        self.until == NestedUntil::Dropcap && self.through && self.count == 1
+    }
+}
+
 /// A character style applied to every match of a regular expression in the paragraph.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
