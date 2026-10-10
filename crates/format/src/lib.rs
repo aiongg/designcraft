@@ -479,10 +479,15 @@ mod tests {
             strikethrough_offset: Some(Some(1.0)),
             ..Default::default()
         };
+        // Legacy JSON loads as format 1, whose upgrade pins Keep Lines Together and Align Left
+        // Edge where a style chain leaves them unset; the base style sets them so both
+        // formats resolve the same.
         let para = ParaAttrs {
             start_at: Some(Some(7)),
             paragraph_kashida_width: Some(Some(0.5)),
             kinsoku: Some(Some(Default::default())),
+            keep_all_lines: Some(true),
+            drop_cap_align_left: Some(true),
             ..Default::default()
         };
         let style = std::sync::Arc::make_mut(&mut d.styles).paragraph.iter_mut().find(|s| s.name == base).unwrap();
@@ -533,10 +538,14 @@ mod tests {
         assert_eq!(expected.0.paragraph_kashida_width, None);
         assert_eq!(expected.0.kinsoku, None);
         assert_eq!(expected.1.leading_aki, None);
-        for bytes in [save(d).unwrap(), serde_json::to_vec(d).unwrap()] {
+        // Legacy JSON is format 1: its upgrade pins older defaults on the other styles, so only
+        // the native ZIP compares as the whole document.
+        for (bytes, native) in [(save(d).unwrap(), true), (serde_json::to_vec(d).unwrap(), false)] {
             let back = load(&bytes).unwrap();
             assert_eq!(r7a_nullable_resolution(&back), expected, "saved explicit defaults must not become inherited values");
-            assert_eq!(back, *d, "native ZIP and legacy JSON preserve the complete document");
+            if native {
+                assert_eq!(back, *d, "the native ZIP preserves the complete document");
+            }
         }
     }
 
@@ -555,10 +564,12 @@ mod tests {
         let d = r7a_nullable_document(false, false);
         assert_eq!(r7a_nullable_resolution(&d).0.start_at, Some(7));
         assert_eq!(r7a_nullable_resolution(&d).1.leading_aki, Some(4.0));
-        for bytes in [save(&d).unwrap(), serde_json::to_vec(&d).unwrap()] {
+        for (bytes, native) in [(save(&d).unwrap(), true), (serde_json::to_vec(&d).unwrap(), false)] {
             let back = load(&bytes).unwrap();
             assert_eq!(r7a_nullable_resolution(&back), r7a_nullable_resolution(&d));
-            assert_eq!(back, d);
+            if native {
+                assert_eq!(back, d);
+            }
         }
         let attrs: designcraft_doc::CharAttrs = serde_json::from_value(json!({"size":null})).unwrap();
         assert!(attrs.size.is_none(), "nonnullable fields retain their existing null contract");
