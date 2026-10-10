@@ -166,3 +166,27 @@ fn exported_frames_keep_their_own_values_over_their_object_style() {
     let got = back.spreads[0].items.iter().find(|i| i.object_style == "Ruled").and_then(|i| i.text_frame()).unwrap();
     assert_eq!(got.options, want);
 }
+
+#[test]
+fn text_wrap_side_and_contour_come_from_the_style_for_frames_and_placed_graphics() {
+    let styles = r#"<ObjectStyle Self="ObjectStyle/Contour" Name="Contour">
+          <Properties><BasedOn type="string">$ID/[None]</BasedOn></Properties>
+          <TextWrapPreference TextWrapMode="Contour" TextWrapSide="LeftSide">
+            <Properties><TextWrapOffset Top="3" Left="3" Bottom="3" Right="3"/></Properties>
+            <ContourOption ContourType="BoundingBox"/>
+          </TextWrapPreference>
+        </ObjectStyle>"#;
+    let image = r#"<Image Self="g" AppliedObjectStyle="ObjectStyle/Contour">
+          <TextWrapPreference TextWrapSide="RightSide"/>
+        </Image>"#;
+    let d = fixture(styles, &[(r#"AppliedObjectStyle="ObjectStyle/Contour""#, ""), ("", image)]);
+    let frame = &d.spreads[0].items[0].wrap;
+    assert_eq!(frame.mode, designcraft_doc::WrapMode::Contour);
+    assert_eq!(frame.side, designcraft_doc::WrapSide::LeftSide);
+    assert_eq!(frame.contour, designcraft_doc::ContourType::BoundingBox);
+    assert_eq!(frame.offsets, [3.0; 4]);
+    let designcraft_doc::Content::Graphic(g) = &d.spreads[0].items[1].content else { panic!("{:?}", d.spreads[0].items[1].content) };
+    assert_eq!(g.wrap.mode, designcraft_doc::WrapMode::Contour);
+    assert_eq!(g.wrap.side, designcraft_doc::WrapSide::RightSide, "the graphic's own side wins");
+    assert_eq!(g.wrap.contour, designcraft_doc::ContourType::BoundingBox);
+}

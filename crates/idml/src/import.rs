@@ -890,7 +890,6 @@ impl<'r> Importer<'r> {
         Color::BLACK
     }
 
-    /// A swatch reference (Self id) → our swatch name; unnamed colours become value-named swatches.
     /// A `TextFramePreference`, with its column rule colour resolved to a swatch.
     fn frame_options(&mut self, prefs: &[&El]) -> TextFrameOptions {
         let mut o = text_frame_options(prefs);
@@ -900,6 +899,7 @@ impl<'r> Importer<'r> {
         o
     }
 
+    /// A swatch reference (Self id) → our swatch name; unnamed colours become value-named swatches.
     fn swatch_ref(&mut self, r: &str) -> String {
         if let Some(n) = self.swatch_names.get(r) {
             return n.clone();
@@ -2590,6 +2590,8 @@ impl<'r> Importer<'r> {
             None => (0.0, 0.0, 0.0, 0.0),
         };
         let size = ((r - l).abs(), (b - t).abs());
+        let wrap = if g.get("AppliedObjectStyle").is_some() { self.with_style(g, "TextWrapPreference") } else { g.find("TextWrapPreference").cloned() };
+        let wrap = wrap.map(|w| text_wrap(&w)).unwrap_or_default();
         let link = g.find("Link");
         let uri = link.and_then(|k| k.get("LinkResourceURI")).map(uri_to_path);
         let mut data = g.prop_el("Contents").map(|c| base64_decode(&c.text_content())).unwrap_or_default();
@@ -2627,8 +2629,9 @@ impl<'r> Importer<'r> {
             auto_fit: Default::default(),
             fit_align: 4,
             crop: [0.0; 4],
-            // A wrap set on the placed graphic (Direct Selection) is stored on the graphic element.
-            wrap: g.find("TextWrapPreference").map(text_wrap).unwrap_or_default(),
+            // A wrap set on the placed graphic (Direct Selection) is stored on the graphic element, over
+            // the graphic's own object style when it names one.
+            wrap,
         })
     }
 
