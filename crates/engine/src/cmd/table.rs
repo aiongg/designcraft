@@ -29,7 +29,7 @@ fn style_specs() -> Vec<CommandSpec> {
             "New Cell Style…",
             [],
             None,
-            "{name, fromSelection?: bool (the target cell's look), fill?, tint?, insets?: n|[t,l,b,r], vj?: top|center|bottom|justify, stroke?: {weight, color, tint?}, paragraphStyle?} → {name}",
+            "{name, fromSelection?: bool (the target cell's look), fill?, tint?, insets?: n|[t,l,b,r], vj?: top|center|bottom|justify, stroke?: {weight?, color?, tint?, type?, gapColor?, gapTint?} (all four edges; values as table.setCell's stroke), paragraphStyle?} → {name}",
             has_doc,
             |s, p| cell_style_create(s, p)
         ),
@@ -56,7 +56,7 @@ fn style_specs() -> Vec<CommandSpec> {
             "New Table Style…",
             [],
             None,
-            "{name, header?, body?, footer?, leftColumn?, rightColumn?: cell style names, border?: {weight, color}, altRows?: {first, firstColor, next, nextColor}, spaceBefore?, spaceAfter?} → {name}",
+            "{name, header?, body?, footer?, leftColumn?, rightColumn?: cell style names, border?: {weight?, color?, tint?, type?, gapColor?, gapTint?}, altRows?: {first, firstColor, next, nextColor}, spaceBefore?, spaceAfter?} → {name}",
             has_doc,
             table_style_create
         ),
@@ -1242,23 +1242,17 @@ fn get(s: &mut Session, p: &Value) -> Result<Value> {
 
 // ---------- cell and table styles ----------
 
-fn stroke_param(v: Option<&Value>) -> Option<designcraft_doc::CellStroke> {
-    let o = v?.as_object()?;
-    let mut st = designcraft_doc::CellStroke::default();
-    if let Some(w) = o.get("weight").and_then(Value::as_f64) {
-        st.weight = w.max(0.0);
+/// A style's uniform edge stroke from `stroke`/`border`: the given values over the default
+/// edge, validated like `table.setCell`'s stroke.
+fn stroke_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<Option<CellStroke>> {
+    match v.filter(|v| !v.is_null()) {
+        Some(v) => Ok(Some(StrokeEdit::parse(&s.doc()?.doc, v, cmd)?.apply(CellStroke::default()))),
+        None => Ok(None),
     }
-    if let Some(c) = o.get("color").and_then(Value::as_str) {
-        st.color = c.to_string();
-    }
-    if let Some(t) = o.get("tint").and_then(Value::as_f64) {
-        st.tint = t.clamp(0.0, 1.0) as f32;
-    }
-    Some(st)
 }
 
 /// Fill in the cell style fields given in `p`.
-fn cell_style_fields(cs: &mut designcraft_doc::CellStyle, p: &Value, cmd: &str) -> Result<()> {
+fn cell_style_fields(cs: &mut designcraft_doc::CellStyle, p: &Value, stroke: Option<CellStroke>, cmd: &str) -> Result<()> {
     if let Some(v) = p.get("basedOn") {
         cs.based_on = v.as_str().map(str::to_string);
     }
@@ -1283,7 +1277,7 @@ fn cell_style_fields(cs: &mut designcraft_doc::CellStyle, p: &Value, cmd: &str) 
     if let Some(v) = p.get("vj") {
         cs.vj = Some(serde_json::from_value(v.clone()).map_err(|e| bad(cmd, format!("vj: {e}")))?);
     }
-    if let Some(st) = stroke_param(p.get("stroke")) {
+    if let Some(st) = stroke {
         cs.stroke = Some(st);
         cs.strokes = Default::default();
     }
@@ -1311,7 +1305,8 @@ fn cell_style_create(s: &mut Session, p: &Value) -> Result<Value> {
         cs.stroke = Some(cell.strokes[0].clone());
         cs.paragraph_style = cell.text.paras.first().map(|p| p.style.clone());
     }
-    cell_style_fields(&mut cs, p, "style.cell.create")?;
+    let stroke = stroke_param(s, p.get("stroke"), "style.cell.create")?;
+    cell_style_fields(&mut cs, p, stroke, "style.cell.create")?;
     s.edit(|d, _| {
         let name = designcraft_doc::Styles::unique_name(|n| d.styles.cell.iter().any(|c| c.name == n), &base);
         cs.name = name.clone();
@@ -1389,17 +1384,18 @@ fn dependent_styles<'a>(name: &str, styles: impl Iterator<Item = (&'a str, Optio
 
 fn cell_style_edit(s: &mut Session, p: &Value) -> Result<Value> {
     let name = str_param(p, "name").ok_or_else(|| bad("style.cell.edit", "missing name"))?.to_string();
+    let stroke = stroke_param(s, p.get("stroke"), "style.cell.edit")?;
     let p = p.clone();
     s.edit(|d, _| {
         let cs = d.styles_mut().cell.iter_mut().find(|c| c.name == name).ok_or_else(|| bad("style.cell.edit", format!("no cell style `{name}`")))?;
-        cell_style_fields(cs, &p, "style.cell.edit")?;
+        cell_style_fields(cs, &p, stroke, "style.cell.edit")?;
         let names = dependent_styles(&name, d.styles.cell.iter().map(|cs| (cs.name.as_str(), cs.based_on.as_deref())));
         reapply_cell_styles(d, &names);
         ok()
     })
 }
 
-fn table_style_fields(ts: &mut designcraft_doc::TableStyle, p: &Value) {
+fn table_style_fields(ts: &mut designcraft_doc::TableStyle, p: &Value, border: Option<CellStroke>) {
     if let Some(v) = p.get("basedOn") {
         ts.based_on = v.as_str().map(str::to_string);
     }
@@ -1414,7 +1410,7 @@ fn table_style_fields(ts: &mut designcraft_doc::TableStyle, p: &Value) {
             *f = v.as_str().map(str::to_string);
         }
     }
-    if let Some(b) = stroke_param(p.get("border")) {
+    if let Some(b) = border {
         ts.border = Some(b);
         ts.borders = Default::default();
     }
@@ -1444,7 +1440,8 @@ fn table_style_fields(ts: &mut designcraft_doc::TableStyle, p: &Value) {
 fn table_style_create(s: &mut Session, p: &Value) -> Result<Value> {
     let base = str_param(p, "name").unwrap_or("Table Style 1").to_string();
     let mut ts = designcraft_doc::TableStyle::default();
-    table_style_fields(&mut ts, p);
+    let border = stroke_param(s, p.get("border"), "style.table.create")?;
+    table_style_fields(&mut ts, p, border);
     s.edit(|d, _| {
         let name = designcraft_doc::Styles::unique_name(|n| d.styles.table.iter().any(|c| c.name == n), &base);
         ts.name = name.clone();
@@ -1470,11 +1467,12 @@ fn table_style_apply(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn table_style_edit(s: &mut Session, p: &Value) -> Result<Value> {
     let name = str_param(p, "name").ok_or_else(|| bad("style.table.edit", "missing name"))?.to_string();
+    let border = stroke_param(s, p.get("border"), "style.table.edit")?;
     let p = p.clone();
     s.edit(|d, _| {
         let ts =
             d.styles_mut().table.iter_mut().find(|c| c.name == name).ok_or_else(|| bad("style.table.edit", format!("no table style `{name}`")))?;
-        table_style_fields(ts, &p);
+        table_style_fields(ts, &p, border);
         let names = dependent_styles(&name, d.styles.table.iter().map(|ts| (ts.name.as_str(), ts.based_on.as_deref())));
         let styles: Vec<_> = names.iter().map(|name| d.styles.resolve_table_style(name)).collect();
         let cells = d.styles.cell.clone();

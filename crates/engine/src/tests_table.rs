@@ -437,3 +437,30 @@ fn cell_stroke_gap_colour_on_inner_horizontal_edges_of_a_selection_undoes_and_sa
     s.execute("edit.undo", &json!({})).unwrap();
     assert_eq!(table_for(&s, sid, tid), &before);
 }
+
+#[test]
+fn cell_and_table_style_strokes_take_type_and_gap_colour_with_validation() {
+    let (mut s, sid, _) = session_with_frame();
+    let tid = s.execute("table.insert", &json!({"rows": 2, "cols": 2})).unwrap()["table"].as_u64().unwrap();
+    let stroke = json!({"weight": 2, "type": "dotted", "gapColor": "[Paper]", "gapTint": 0.4});
+    s.execute("style.cell.create", &json!({"name": "Dotted", "stroke": stroke})).unwrap();
+    s.execute("style.cell.apply", &json!({"name": "Dotted", "table": tid})).unwrap();
+    let edges = s.execute("table.getCellStroke", &json!({"table": tid})).unwrap();
+    assert_eq!((edges["weight"].as_f64(), edges["type"]["kind"].as_str()), (Some(2.0), Some("dotted")));
+    assert_eq!((edges["gapColor"].as_str(), edges["gapTint"].as_f64().map(|t| (t * 10.0).round())), (Some("[Paper]"), Some(4.0)));
+    s.execute("style.table.create", &json!({"name": "Framed", "border": {"type": "thickThin", "gapSwatch": "[Black]"}})).unwrap();
+    let framed = s.doc().unwrap().doc.styles.table.iter().find(|t| t.name == "Framed").unwrap().border.clone().unwrap();
+    assert_eq!((framed.kind, framed.gap_color.as_str()), (doc::StrokeType::ThickThin, "[Black]"));
+    let styles = s.doc().unwrap().doc.styles.clone();
+    let table = table_for(&s, sid, tid).clone();
+    for (cmd, p) in [
+        ("style.cell.edit", json!({"name": "Dotted", "stroke": {"gapTint": 3}})),
+        ("style.cell.create", json!({"name": "Bad", "stroke": {"type": "zigzag"}})),
+        ("style.table.edit", json!({"name": "Framed", "border": {"gapColor": "No Such Swatch"}})),
+        ("style.table.create", json!({"name": "Bad", "border": {"weight": -2}})),
+    ] {
+        assert!(s.execute(cmd, &p).is_err(), "{cmd} {p}");
+        assert_eq!(s.doc().unwrap().doc.styles, styles, "{cmd} changed the styles");
+        assert_eq!(table_for(&s, sid, tid), &table);
+    }
+}
