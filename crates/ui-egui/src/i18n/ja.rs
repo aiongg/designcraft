@@ -1701,6 +1701,18 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Save Preset", "プリセットを保存"),
     ("Start #", "開始ページ番号"),
     ("Column Gutter", "列間隔"),
+    ("Start Section", "セクション開始"),
+    ("Automatic Page Numbering", "自動ページ番号"),
+    ("Start Page Numbering at:", "開始ページ番号:"),
+    ("Section Prefix:", "セクションプレフィックス:"),
+    ("Section Marker:", "セクションマーカー:"),
+    ("Include Prefix when Numbering Pages", "ページ番号にプレフィックスを含める"),
+    ("Document Chapter Numbering", "ドキュメントの章番号"),
+    ("Automatic Chapter Numbering", "自動章番号"),
+    ("Start Chapter Numbering at:", "開始章番号:"),
+    ("Same as Previous Document in the Book", "ブック内の前のドキュメントと同じ"),
+    ("Book Name:", "ブック名:"),
+    ("N/A", "なし"),
 ];
 
 #[cfg(test)]

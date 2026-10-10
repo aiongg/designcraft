@@ -1752,6 +1752,18 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Save Preset", "Vorgabe speichern"),
     ("Start #", "Startseitennr."),
     ("Column Gutter", "Spaltenabstand"),
+    ("Start Section", "Abschnittsanfang"),
+    ("Automatic Page Numbering", "Automatische Seitennummerierung"),
+    ("Start Page Numbering at:", "Seitennummerierung beginnen bei:"),
+    ("Section Prefix:", "Abschnittspräfix:"),
+    ("Section Marker:", "Abschnittsmarke:"),
+    ("Include Prefix when Numbering Pages", "Präfix in Seitennummerierung einschließen"),
+    ("Document Chapter Numbering", "Kapitelnummerierung des Dokuments"),
+    ("Automatic Chapter Numbering", "Automatische Kapitelnummerierung"),
+    ("Start Chapter Numbering at:", "Kapitelnummerierung beginnen bei:"),
+    ("Same as Previous Document in the Book", "Wie vorheriges Dokument im Buch"),
+    ("Book Name:", "Buchname:"),
+    ("N/A", "–"),
 ];
 
 #[cfg(test)]
