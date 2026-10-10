@@ -1683,6 +1683,24 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Vertical:", "垂直方向:"),
     ("Working CMYK", "作業用 CMYK"),
     ("Yellow", "イエロー"),
+    ("Recent", "最近使用"),
+    ("Saved", "保存済み"),
+    ("[Default]", "[初期設定]"),
+    ("Your Recent Items", "最近使用した項目"),
+    ("Saved Presets", "保存済みプリセット"),
+    ("Blank Document Presets", "空のドキュメントプリセット"),
+    (
+        "No saved presets yet. Set the details, then click Save Document Preset.",
+        "保存済みのプリセットはありません。詳細を設定してから「ドキュメントプリセットを保存」をクリックしてください。",
+    ),
+    ("Delete Preset", "プリセットを削除"),
+    ("Preset Details", "プリセットの詳細"),
+    ("Document Name", "ドキュメント名"),
+    ("Save Document Preset", "ドキュメントプリセットを保存"),
+    ("Save Document Preset As:", "ドキュメントプリセットの保存名:"),
+    ("Save Preset", "プリセットを保存"),
+    ("Start #", "開始ページ番号"),
+    ("Column Gutter", "列間隔"),
 ];
 
 #[cfg(test)]
