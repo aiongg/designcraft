@@ -142,7 +142,6 @@ The file stops growing at 16 MiB. `--version` writes no file.
 | `WGPU_POWER_PREF` | The kind of GPU that draws the window: `low` (integrated), `high` (discrete) or `none` (the system's order). Default: the GPU that drives the primary display, then `low` on Windows and macOS and `none` elsewhere. |
 | `WGPU_ADAPTER_NAME` | The graphics adapter by (part of) its name, any case (`nvidia`, `radv`, `intel`); the log lists the names. |
 | `WGPU_VALIDATION_INDIRECT_CALL` | `1` turns wgpu's check of indirect draw arguments back on. DesignCraft draws nothing indirectly and turns it off: the compute shader it needs failed to compile on an Intel Mac and lost the graphics device (#334). |
-| `DESIGNCRAFT_GPU_SKIP` | Set by the app when it starts again without a graphics adapter or backend that failed (see below). |
 
 The logger is `apps/designcraft/src/logging.rs`; the web build logs to the browser console instead.
 
@@ -182,15 +181,22 @@ and `apps/designcraft/src/gpu/backend.rs` (the backend).
   device, or a panic inside wgpu, egui-wgpu or naga during the first frames), the app starts
   again without that adapter and tries the next one, telling which in the status bar; the run that
   failed keeps its log as `designcraft.1.log`. When no adapter of the start's backends is left, it
-  starts again with the next backend. On Unix the new app replaces the process (an AppImage stays
-  mounted); on Windows it starts beside it. Adapters are told apart by backend and PCI ids, or by
-  name where the backend reports no ids (Metal lists every GPU of a dual-GPU Mac as `0000:0000`).
-  What was left out travels in `DESIGNCRAFT_GPU_SKIP` (`Vulkan:1002:164e`, `Metal:Intel Iris Pro
-  Graphics`, or a whole backend such as `Dx12`), one more on each restart, so the restarts end.
-  When nothing is left, the app logs why and exits with an error.
-- **If the window's first frame never reaches the screen** within 20 seconds of the app being
-  created (the files named at the start opened), the adapter counts as hanging and the app starts
-  again without it in the same way. A window minimized at the start isn't counted.
+  starts again with the next backend. Software renderers (WARP, llvmpipe) come last: they are
+  passed over while another backend is left to try, and allowed once no graphics processor could
+  show the window. On Unix the new app replaces the process (an AppImage stays mounted); on
+  Windows it starts beside it. Adapters are told apart by backend and PCI ids, or by name where the
+  backend reports no ids (Metal lists every GPU of a dual-GPU Mac as `0000:0000`). What was left
+  out travels in the restarted app's `--gpu-skip=` argument (`Vulkan:1002:164e`, `Metal:Intel
+  Iris Pro Graphics`, or a whole backend such as `Dx12`), one more on each restart, so the
+  restarts end. When nothing is left, the app logs why and exits with an error. Documents
+  recovered after a crash stay in the recovery folder until they are saved or closed, so a restart
+  never loses them.
+- **If the window's first frame is late** (20 seconds after the app was created and the files
+  named at the start opened), the log and the status bar say so. The adapter counts as hanging,
+  and the app starts again without it, only when the UI thread has been stuck in the graphics
+  stack, outside DesignCraft's own code, for 60 seconds while the window wasn't known to be
+  minimized, covered or in the background. A large document composing on a slow machine never
+  counts.
 - **The log** lists the GPUs that drive a display (`display GPUs (PCI vendor:device): 10de:2204
   (primary)`), every adapter with whether it drives a display, the one drawn on and why (`drawing
   on NVIDIA GeForce RTX 3090 (Dx12, DiscreteGpu): it drives the primary display`), and the driver

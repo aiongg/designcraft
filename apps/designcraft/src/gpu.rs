@@ -28,28 +28,39 @@
 //! off, [`instance_flags`]). Nothing in the process can show a window after that, so when the
 //! graphics fail while the window is starting up, [`finish`] starts the app again without that
 //! adapter, as the next one in the order would be tried. When no adapter of the start's backends
-//! is left, it starts again with the next backend ([`backend::Fallback::next_after`]). Each restart
-//! leaves out one more adapter or backend, so it ends when none is left.
+//! is left, it starts again with the next backend ([`backend::Fallback::next_after`]). Software
+//! renderers (WARP, llvmpipe) come last of all: while a backend is left to try, a start passes
+//! over them, and only once no hardware adapter of any backend could show the window does the app
+//! start again with them allowed. Each restart leaves out one more adapter or backend, or allows
+//! software once, so it ends when none is left.
 //!
 //! An adapter can also hang instead of failing: on a hybrid laptop, the discrete GPU never put the
 //! window's first frame on the screen, with no error and no panic, and the app stayed in the
-//! background without a window. [`watch_first_frame`] gives the first frame
-//! [`FIRST_FRAME_TIMEOUT`] once the app is created and, when it doesn't come, starts the app again
+//! background without a window. [`watch_first_frame`] notices a first frame that is late and,
+//! when the UI thread is stuck in the graphics stack for [`HANG_TIMEOUT`], starts the app again
 //! without that adapter in the same way.
 
 pub mod backend;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 use eframe::egui_wgpu::NativeAdapterSelectorMethod;
 use eframe::wgpu::{self, Backend, DeviceType, PowerPreference};
 
-/// The adapters and backends a restart leaves out, those the window failed on, as comma-separated
-/// [`key`]s (`Vulkan:1002:164e`, `Metal:Intel Iris Pro Graphics`) and [`backend::Backend::key`]s
-/// (`Dx12`). Set by the app itself when it starts again.
-pub const SKIP_ENV: &str = "DESIGNCRAFT_GPU_SKIP";
+/// The argument that tells a restarted app what the window failed on: comma-separated adapter
+/// [`key`]s (`Vulkan:1002:164e`, `Metal:Intel Iris Pro Graphics`), [`backend::Backend::key`]s
+/// (`Dx12`), [`SOFTWARE_LEFT`] and [`SOFTWARE`]. Added by the app itself when it starts again; an
+/// argument rather than an environment variable, so the processes the app starts (a browser for a
+/// link, `lpr`) don't inherit it.
+pub const SKIP_ARG: &str = "--gpu-skip=";
+
+/// In a skip list: a start passed over a software renderer, so one is left to try.
+const SOFTWARE_LEFT: &str = "software-left";
+
+/// In a skip list: no hardware adapter could show the window, so software renderers may draw it.
+const SOFTWARE: &str = "software";
 
 /// wgpu's variable for choosing an adapter by (part of) its name, any case.
 const NAME_ENV: &str = "WGPU_ADAPTER_NAME";
@@ -63,10 +74,15 @@ const HELP: &str =
 /// something else (such as the compositor restarting).
 pub const STARTUP_FRAMES: u64 = 10;
 
-/// How long the window's first frame may take to reach the screen, from the app's creation,
-/// before its adapter counts as hanging ([`watch_first_frame`]). The first frame draws the whole
+/// How long the window's first frame may take to reach the screen, from the app's creation, before
+/// [`watch_first_frame`] logs it and says so in the status bar. The first frame draws the whole
 /// interface and compiles its shaders, a second at most on a slow machine.
 pub const FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// How long the UI thread may be stuck in the graphics stack before the window's first frame,
+/// with the window not known to be hidden, before its adapter counts as hanging
+/// ([`watch_first_frame`]).
+pub const HANG_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// The preference used unless `WGPU_POWER_PREF` sets one. Windows and macOS show frames from any
 /// GPU (the integrated one avoids the flicker of presenting a discrete GPU's frames through it).
@@ -253,7 +269,7 @@ fn is_internal_panel(connector: &str) -> bool {
 /// `backend:vendor:device`, e.g. `Vulkan:1002:164e` (PCI ids, as `MESA_VK_DEVICE_SELECT` takes them).
 /// Metal reports no ids (`0000:0000` for every GPU), so an adapter without them is `backend:name`
 /// (`Metal:Intel Iris Pro Graphics`): otherwise leaving out the one that failed would leave out
-/// every GPU of a dual-GPU Mac. Commas, which separate [`SKIP_ENV`]'s keys, become spaces.
+/// every GPU of a dual-GPU Mac. Commas, which separate [`SKIP_ARG`]'s keys, become spaces.
 fn key(backend: Backend, vendor: u32, device: u32, name: &str) -> String {
     if vendor == 0 && device == 0 {
         format!("{backend:?}:{}", name.replace(',', " ").trim())
@@ -306,9 +322,9 @@ fn power_rank(t: DeviceType, power: PowerPreference) -> u8 {
     }
 }
 
-/// The adapters and backends [`SKIP_ENV`] lists.
-pub fn skipped() -> Vec<String> {
-    std::env::var(SKIP_ENV).map(|v| parse_skip(&v)).unwrap_or_default()
+/// The skip list of a [`SKIP_ARG`] argument; `None` for any other argument.
+pub fn skip_arg(arg: &str) -> Option<Vec<String>> {
+    arg.strip_prefix(SKIP_ARG).map(parse_skip)
 }
 
 fn parse_skip(v: &str) -> Vec<String> {
@@ -318,19 +334,51 @@ fn parse_skip(v: &str) -> Vec<String> {
 /// The window's start, shared by [`selector`], [`watch_first_frame`], the app and [`finish`].
 #[derive(Default)]
 pub struct Startup {
+    /// What the restart that began this start left out ([`SKIP_ARG`]).
+    skip: Vec<String>,
     /// The key of the adapter [`selector`] picked.
     adapter: OnceLock<String>,
+    /// [`selector`] passed over a software renderer.
+    software_left: AtomicBool,
     /// The UI's context, which counts the frames run.
     ui: OnceLock<egui::Context>,
     /// When the app was created, the files named at the start opened: the first frame is due.
     ready: OnceLock<Instant>,
+    /// The UI thread is in the app's own code ([`Startup::enter`]).
+    busy: AtomicBool,
+    /// How often the UI thread left the app's code: it moves while the thread is alive.
+    leaves: AtomicU64,
+    /// A note for the status bar from [`watch_first_frame`].
+    notice: Mutex<Option<String>>,
     /// The backend fallback of this start (`gpu.json`); `None` when `WGPU_BACKEND` chooses.
     fallback: Mutex<Option<backend::Fallback>>,
 }
 
 impl Startup {
-    pub fn new(fallback: Option<backend::Fallback>) -> Self {
-        Self { fallback: Mutex::new(fallback), ..Self::default() }
+    pub fn new(fallback: Option<backend::Fallback>, skip: Vec<String>) -> Self {
+        Self { skip, fallback: Mutex::new(fallback), ..Self::default() }
+    }
+
+    /// The UI thread runs the app's code (`logic`, `ui`): a long wait now is the app being busy,
+    /// never a graphics hang.
+    pub fn enter(&self) {
+        self.busy.store(true, Ordering::Relaxed);
+    }
+
+    /// The UI thread leaves the app's code, to eframe and the graphics stack.
+    pub fn leave(&self) {
+        self.busy.store(false, Ordering::Relaxed);
+        self.leaves.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// The note [`watch_first_frame`] left for the status bar, once.
+    pub fn take_notice(&self) -> Option<String> {
+        self.notice.lock().unwrap_or_else(PoisonError::into_inner).take()
+    }
+
+    /// While a backend is left to try, software renderers are passed over ([`SOFTWARE`]).
+    fn software_last(&self) -> bool {
+        !self.skip.iter().any(|k| k == SOFTWARE) && self.with_fallback(|_| ()).is_some()
     }
 
     /// The app was created on `ctx`.
@@ -351,6 +399,17 @@ impl Startup {
         self.with_fallback(|f| f.finished());
     }
 
+    /// Clear the record of the backend being tried before starting again (the failure was caught),
+    /// returning it for [`Startup::retry`].
+    fn caught(&self) -> Option<backend::Backend> {
+        self.with_fallback(|f| f.finished()).flatten()
+    }
+
+    /// Starting again failed: the record says this start is still trying `trying`.
+    fn retry(&self, trying: Option<backend::Backend>) {
+        self.with_fallback(|f| f.retry(trying));
+    }
+
     /// wgpu picked an adapter of `backend` ([`backend::Fallback::started_with`]).
     pub fn started_with(&self, backend: wgpu::Backend) {
         if let Some(b) = backend::Backend::of(backend) {
@@ -368,59 +427,138 @@ impl Startup {
     }
 }
 
-/// What [`watch_first_frame`] makes of the window's start.
+/// One look at the window's start, every [`WATCH_TICK`].
+#[derive(Clone, Copy, Debug)]
+struct Sample {
+    /// Passes the UI ran; from 2 on, the first frame was presented.
+    frames: u64,
+    /// The UI thread is in the app's own code.
+    busy: bool,
+    /// [`Startup::leaves`].
+    leaves: u64,
+    /// The window is known to be minimized, occluded or without focus: a compositor may hold its
+    /// frames back (a Wayland surface that isn't shown blocks the next frame).
+    hidden: bool,
+}
+
+/// What [`Watch::step`] makes of the window's start.
 #[derive(Debug, PartialEq, Eq)]
-enum FirstFrame {
-    /// Not due yet.
+enum Verdict {
     Wait,
-    /// On the screen (the second frame began, so the first was presented), or the window was
-    /// minimized at the start: nothing to watch.
+    /// The first frame was presented: nothing more to watch.
     Shown,
-    /// Overdue.
+    /// The first frame is late: log it and say so, once.
+    Late,
+    /// The UI thread has been stuck in the graphics stack for [`HANG_TIMEOUT`].
     Hung,
 }
 
-/// The window's start after `frames` frames run, `since` its first frame was due.
-fn first_frame(frames: u64, since: Duration, minimized: bool) -> FirstFrame {
-    if frames >= 2 || minimized {
-        FirstFrame::Shown
-    } else if since >= FIRST_FRAME_TIMEOUT {
-        FirstFrame::Hung
-    } else {
-        FirstFrame::Wait
+/// The first-frame watch. VectorCraft gives up on an adapter once the first frame is
+/// [`FIRST_FRAME_TIMEOUT`] late. That also fired on healthy starts: a window on a locked screen or
+/// another workspace whose compositor holds its frames back, or a large document composing on a
+/// slow machine. So here a late frame is only reported; the adapter counts as hanging only when the
+/// UI thread is stuck outside the app's code (in eframe, wgpu or the driver), makes no progress at
+/// all for [`HANG_TIMEOUT`], and the window isn't known to be hidden. A busy UI thread, however
+/// long, never counts.
+#[derive(Debug, Default)]
+struct Watch {
+    /// Time waited for the first frame, the window not known to be hidden.
+    waited: Duration,
+    /// Time the UI thread has been stuck outside the app's code without progress.
+    stuck: Duration,
+    leaves: u64,
+    late: bool,
+}
+
+impl Watch {
+    fn step(&mut self, s: Sample, dt: Duration) -> Verdict {
+        if s.frames >= 2 {
+            return Verdict::Shown;
+        }
+        if s.hidden {
+            self.stuck = Duration::ZERO;
+            return Verdict::Wait;
+        }
+        self.waited = self.waited.saturating_add(dt);
+        if s.busy || s.leaves != self.leaves {
+            self.leaves = s.leaves;
+            self.stuck = Duration::ZERO;
+        } else {
+            self.stuck = self.stuck.saturating_add(dt);
+        }
+        if self.stuck >= HANG_TIMEOUT {
+            Verdict::Hung
+        } else if self.waited >= FIRST_FRAME_TIMEOUT && !self.late {
+            self.late = true;
+            Verdict::Late
+        } else {
+            Verdict::Wait
+        }
     }
 }
 
-/// Watch the window's first frame from another thread: when it hasn't reached the screen
-/// [`FIRST_FRAME_TIMEOUT`] after the app was created ([`Startup::ready`]), start the app again
-/// without the adapter, as [`finish`] does for one that failed, and end this process, whose UI
-/// thread is stuck in the graphics driver.
+/// How often [`watch_first_frame`] looks.
+const WATCH_TICK: Duration = Duration::from_millis(250);
+
+/// Watch the window's first frame from another thread, from the app's creation
+/// ([`Startup::ready`]); see [`Watch`]. Each look also asks for a repaint, so a UI thread that is
+/// only idle draws its second frame and ends the watch. When the adapter hangs, start the app again
+/// without it, as [`finish`] does for one that failed, and end this process, whose UI thread is
+/// stuck in the graphics driver.
 pub fn watch_first_frame(startup: Arc<Startup>) {
-    let watch = move || loop {
-        std::thread::sleep(Duration::from_millis(250));
-        let Some(due) = startup.ready.get() else { continue };
-        let ui = startup.ui.get();
-        let frames = ui.map_or(0, egui::Context::cumulative_frame_nr);
-        let minimized = ui.and_then(|c| c.input(|i| i.viewport().minimized)).unwrap_or(false);
-        match first_frame(frames, due.elapsed(), minimized) {
-            FirstFrame::Wait => continue,
-            FirstFrame::Shown => return,
-            FirstFrame::Hung => {}
-        }
-        let mut skip = skipped();
-        let Some(failed) = restart_without(true, frames, startup.adapter.get().map(String::as_str), &skip) else { return };
-        log::error!(
-            "the window's first frame didn't reach the screen in {}s on graphics adapter {failed}: starting again without it",
-            FIRST_FRAME_TIMEOUT.as_secs()
-        );
-        // The hang is the adapter's, handled by leaving it out: the next start keeps the backend.
-        startup.presented();
-        skip.push(failed.to_string());
-        match restart(&skip.join(",")) {
-            Ok(()) => std::process::exit(0),
-            Err(e) => {
-                log::error!("starting again failed: {e}");
-                return;
+    let watch = move || {
+        let mut watch = Watch::default();
+        loop {
+            std::thread::sleep(WATCH_TICK);
+            if startup.ready.get().is_none() {
+                continue;
+            }
+            let ui = startup.ui.get();
+            let hidden = ui.is_some_and(|c| {
+                c.input(|i| {
+                    let v = i.viewport();
+                    v.minimized == Some(true) || v.occluded == Some(true) || v.focused == Some(false)
+                })
+            });
+            let sample = Sample {
+                frames: ui.map_or(0, egui::Context::cumulative_frame_nr),
+                busy: startup.busy.load(Ordering::Relaxed),
+                leaves: startup.leaves.load(Ordering::Relaxed),
+                hidden,
+            };
+            if let Some(c) = ui {
+                c.request_repaint();
+            }
+            let adapter = startup.adapter.get().map_or("(none)", String::as_str);
+            match watch.step(sample, WATCH_TICK) {
+                Verdict::Wait => continue,
+                Verdict::Shown => return,
+                Verdict::Late => {
+                    log::warn!(
+                        "the window's first frame hasn't reached the screen in {}s on graphics adapter {adapter}",
+                        FIRST_FRAME_TIMEOUT.as_secs()
+                    );
+                    *startup.notice.lock().unwrap_or_else(PoisonError::into_inner) = Some(format!(
+                        "The window took over {} s to show on {adapter}. If it stays black, see the log; WGPU_ADAPTER_NAME or WGPU_POWER_PREF chooses another graphics processor.",
+                        FIRST_FRAME_TIMEOUT.as_secs()
+                    ));
+                    continue;
+                }
+                Verdict::Hung => {}
+            }
+            let mut skip = startup.skip.clone();
+            let Some(failed) = restart_without(true, sample.frames, startup.adapter.get().map(String::as_str), &skip) else { return };
+            log::error!(
+                "the window's first frame didn't reach the screen and the UI thread was stuck in the graphics stack for {}s on graphics adapter {failed}: starting again without it",
+                HANG_TIMEOUT.as_secs()
+            );
+            skip.push(failed.to_string());
+            match restart(&skip, &startup) {
+                Ok(()) => end_hung_process(),
+                Err(e) => {
+                    log::error!("starting again failed: {e}");
+                    return;
+                }
             }
         }
     };
@@ -429,15 +567,32 @@ pub fn watch_first_frame(startup: Arc<Startup>) {
     }
 }
 
+/// End this process from the watch thread while its UI thread is stuck in the graphics driver.
+/// On Windows `exit` runs the DLLs' detach code, which can wait on that thread forever and leave an
+/// invisible process holding the log and the control port, so the process is terminated.
+fn end_hung_process() {
+    log::logger().flush();
+    #[cfg(windows)]
+    if let Err(e) = winsafe::HPROCESS::GetCurrentProcess().TerminateProcess(0) {
+        log::error!("ending the process failed: {e}");
+    }
+    std::process::exit(0);
+}
+
 /// eframe's adapter choice: the first of [`adapter_order`] for `power`, the GPUs that drive a
 /// `displays`, `WGPU_ADAPTER_NAME` and the adapters a restart left out. Every adapter, the displays
 /// and the choice are logged: which GPU draws is the first question in every black-window report.
 pub fn selector(power: PowerPreference, displays: Vec<DisplayGpu>, startup: Arc<Startup>) -> NativeAdapterSelectorMethod {
     let named = std::env::var(NAME_ENV).ok();
-    let skip = skipped();
+    let skip = startup.skip.clone();
     Arc::new(move |adapters, surface| {
         let candidates: Vec<Candidate> = adapters.iter().map(|a| Candidate::new(a, surface)).collect();
         let order = adapter_order(&candidates, power, &displays, named.as_deref(), &skip);
+        let (order, passed_over) = without_software(order, &candidates, startup.software_last());
+        if passed_over {
+            startup.software_left.store(true, Ordering::Relaxed);
+            log::info!("software renderers passed over while another backend is left to try");
+        }
         let listed: Vec<String> = candidates
             .iter()
             .map(|c| {
@@ -472,6 +627,17 @@ pub fn selector(power: PowerPreference, displays: Vec<DisplayGpu>, startup: Arc<
         let _ = startup.adapter.set(chosen.key.clone());
         Ok(adapter.clone())
     })
+}
+
+/// `order` without software renderers when `software_last`, and whether it dropped any.
+fn without_software(order: Vec<usize>, candidates: &[Candidate], software_last: bool) -> (Vec<usize>, bool) {
+    if !software_last {
+        return (order, false);
+    }
+    let before = order.len();
+    let order: Vec<usize> = order.into_iter().filter(|&i| candidates.get(i).is_some_and(|c| c.device_type != DeviceType::Cpu)).collect();
+    let dropped = order.len() != before;
+    (order, dropped)
 }
 
 /// The last panic came from the graphics stack (see [`watch_panics`]).
@@ -509,44 +675,75 @@ pub fn finish(outcome: Result<eframe::Result, String>, startup: &Startup) -> Res
         Err(panic) => (panic, GRAPHICS_PANIC.load(Ordering::Relaxed)),
     };
     let frames = startup.ui.get().map_or(0, egui::Context::cumulative_frame_nr);
-    let mut skip = skipped();
-    if let Some(failed) = restart_without(graphics_failed, frames, startup.adapter.get().map(String::as_str), &skip) {
-        log::error!("the window failed on graphics adapter {failed} ({why}): starting again without it");
-        // The failure was caught here, not a driver fault: the next start keeps the backend and
-        // leaves out only the adapter.
-        startup.presented();
-        skip.push(failed.to_string());
-        return restart(&skip.join(",")).map_err(|e| format!("{why}; starting again failed: {e}"));
-    }
-    // No adapter left on this start's backends (or none could show the window): the next backend.
-    let next = if graphics_failed && frames < STARTUP_FRAMES {
-        startup.with_fallback(|f| f.next_after(&backend::skipped_backends(&skip)).map(|next| (f.backend, next))).flatten()
+    let starting = graphics_failed && frames < STARTUP_FRAMES;
+    let next = if starting {
+        let fallback = startup.with_fallback(|f| (f.backend, f.next_after(&backend::skipped_backends(&startup.skip))));
+        next_start(&startup.skip, startup.adapter.get().map(String::as_str), fallback, startup.software_left.load(Ordering::Relaxed))
     } else {
         None
     };
-    let Some((from, to)) = next else {
+    let Some((skip, what)) = next else {
         return Err(if graphics_failed { format!("{why} ({HELP})") } else { why });
     };
-    log::error!("no {} graphics adapter could show the window ({why}): starting again with {}", from.name(), to.name());
-    skip.push(from.key().to_string());
-    restart(&skip.join(",")).map_err(|e| format!("{why}; starting again failed: {e}"))
+    log::error!("the window failed ({why}): starting again {what}");
+    restart(&skip, startup).map_err(|e| format!("{why}; starting again failed: {e}"))
 }
 
-/// Start the app again with the same arguments, leaving out the adapters and backends in `skip`.
-/// On Unix the new app replaces this process (same process id, so an AppImage keeps its files
-/// mounted), and this returns only on failure; on Windows it starts beside this one, which then
-/// exits.
-fn restart(skip: &str) -> std::io::Result<()> {
+/// The skip list to start again with after the graphics failed while the window was starting up,
+/// and what it changes (for the log); `None` when nothing is left to try. In this order: without the
+/// adapter `picked`; on the next backend (`fallback`: this start's backend and the next one, see
+/// [`backend::Fallback::next_after`]); with software renderers allowed, once, when a start passed
+/// one over (`software_left`, or [`SOFTWARE_LEFT`] in `skip`).
+fn next_start(
+    skip: &[String],
+    picked: Option<&str>,
+    fallback: Option<(backend::Backend, Option<backend::Backend>)>,
+    software_left: bool,
+) -> Option<(Vec<String>, String)> {
+    let mut next = skip.to_vec();
+    if let Some(failed) = restart_without(true, 0, picked, skip) {
+        next.push(failed.to_string());
+        return Some((next, format!("without graphics adapter {failed}")));
+    }
+    let software_left = software_left || skip.iter().any(|k| k == SOFTWARE_LEFT);
+    if let Some((from, Some(to))) = fallback {
+        next.push(from.key().to_string());
+        if software_left && !next.iter().any(|k| k == SOFTWARE_LEFT) {
+            next.push(SOFTWARE_LEFT.to_string());
+        }
+        return Some((next, format!("with {} (no {} graphics adapter could show the window)", to.name(), from.name())));
+    }
+    if software_left && !skip.iter().any(|k| k == SOFTWARE) {
+        // Every backend again, now with their software renderers; the adapters that failed stay out.
+        next.retain(|k| k != SOFTWARE_LEFT && backend::Backend::from_key(k).is_none());
+        next.push(SOFTWARE.to_string());
+        return Some((next, "on a software renderer (no graphics processor could show the window)".to_string()));
+    }
+    None
+}
+
+/// Start the app again with the same arguments and the skip list `skip` ([`SKIP_ARG`]). On Unix
+/// the new app replaces this process (same process id, so an AppImage keeps its files mounted),
+/// and this returns only on failure; on Windows it starts beside this one, which then exits. The
+/// failure was caught, so `gpu.json` stops blaming the backend first, and blames it again when
+/// starting again fails.
+fn restart(skip: &[String], startup: &Startup) -> std::io::Result<()> {
     log::logger().flush();
     let mut c = std::process::Command::new(std::env::current_exe()?);
-    c.args(std::env::args_os().skip(1)).env(SKIP_ENV, skip);
+    c.args(std::env::args_os().skip(1).filter(|a| a.to_str().is_none_or(|a| skip_arg(a).is_none())));
+    c.arg(format!("{SKIP_ARG}{}", skip.join(",")));
+    let trying = startup.caught();
     #[cfg(unix)]
-    {
+    let result = {
         use std::os::unix::process::CommandExt as _;
         Err(c.exec())
-    }
+    };
     #[cfg(not(unix))]
-    c.spawn().map(|_| ())
+    let result = c.spawn().map(|_| ());
+    if result.is_err() {
+        startup.retry(trying);
+    }
+    result
 }
 
 #[cfg(test)]
@@ -847,22 +1044,103 @@ mod tests {
         assert_eq!(parse_skip(&key(Backend::Gl, 0, 0, "Mesa, llvmpipe")), ["Gl:Mesa  llvmpipe"]);
     }
 
+    fn sample(frames: u64, busy: bool, leaves: u64, hidden: bool) -> Sample {
+        Sample { frames, busy, leaves, hidden }
+    }
+
+    /// Runs `ticks` looks with the same sample; the verdicts other than `Wait`.
+    fn run(w: &mut Watch, s: Sample, ticks: u32) -> Vec<(u32, Verdict)> {
+        (1..=ticks).filter_map(|t| Some((t, w.step(s, WATCH_TICK))).filter(|(_, v)| *v != Verdict::Wait)).collect()
+    }
+
+    const TICKS_PER_S: u32 = 4;
+
+    /// The UI thread stuck in the graphics stack (not in the app's code, no progress) with the
+    /// window not known to be hidden: late after 20 s, hung after 60 s.
     #[test]
-    fn a_first_frame_that_never_reaches_the_screen_hangs_its_adapter() {
-        let s = Duration::from_secs;
+    fn a_ui_thread_stuck_in_the_graphics_stack_hangs_its_adapter() {
+        let mut w = Watch::default();
+        let v = run(&mut w, sample(1, false, 1, false), 61 * TICKS_PER_S);
+        assert_eq!(v.first(), Some(&(20 * TICKS_PER_S, Verdict::Late)));
+        // `leaves` moved from 0 to 1 on the first look, so the stuck time starts one look later.
+        assert_eq!(v.get(1), Some(&(60 * TICKS_PER_S + 1, Verdict::Hung)));
         // The second frame began: the first was presented.
-        assert_eq!(first_frame(2, s(60), false), FirstFrame::Shown);
-        // Still drawing (or presenting) the first frame: waited for, then given up on.
-        for frames in [0, 1] {
-            assert_eq!(first_frame(frames, s(3), false), FirstFrame::Wait);
-            assert_eq!(first_frame(frames, FIRST_FRAME_TIMEOUT, false), FirstFrame::Hung);
+        assert_eq!(Watch::default().step(sample(2, false, 9, false), WATCH_TICK), Verdict::Shown);
+    }
+
+    /// A busy UI thread (a large document composing on a slow machine) is only ever late.
+    #[test]
+    fn a_busy_ui_thread_never_hangs_its_adapter() {
+        let mut w = Watch::default();
+        let v = run(&mut w, sample(0, true, 0, false), 600 * TICKS_PER_S);
+        assert_eq!(v, [(20 * TICKS_PER_S, Verdict::Late)]);
+        // Nor does one that keeps coming back from the graphics stack.
+        let mut w = Watch::default();
+        for t in 0..(600 * TICKS_PER_S) {
+            assert_ne!(w.step(sample(1, false, u64::from(t), false), WATCH_TICK), Verdict::Hung);
         }
-        // A window minimized at the start may not draw again until restored.
-        assert_eq!(first_frame(1, s(60), true), FirstFrame::Shown);
-        // A hung adapter is left out once, like one that failed.
+    }
+
+    /// A window known to be hidden (locked screen, another workspace, minimized) may have its frames
+    /// held back by the compositor: that time counts for nothing and starts the stuck time over.
+    #[test]
+    fn time_while_the_window_is_hidden_does_not_count() {
+        let mut w = Watch::default();
+        assert!(run(&mut w, sample(1, false, 0, true), 600 * TICKS_PER_S).is_empty());
+        assert!(run(&mut w, sample(1, false, 0, false), 50 * TICKS_PER_S).iter().all(|(_, v)| *v == Verdict::Late));
+        assert!(run(&mut w, sample(1, false, 0, true), 10 * TICKS_PER_S).is_empty());
+        assert!(run(&mut w, sample(1, false, 0, false), 59 * TICKS_PER_S).is_empty());
+        assert_eq!(run(&mut w, sample(1, false, 0, false), TICKS_PER_S), [(TICKS_PER_S, Verdict::Hung)]);
+    }
+
+    #[test]
+    fn a_hung_adapter_is_left_out_once() {
         let skip = vec!["Dx12:10de:28a0".to_string()];
         assert_eq!(restart_without(true, 1, Some("Dx12:10de:28a0"), &skip), None);
         assert_eq!(restart_without(true, 1, Some("Dx12:8086:a7a8"), &skip), Some("Dx12:8086:a7a8"));
+    }
+
+    /// Windows, a hardware DX12 adapter failing: the software renderer (WARP) is passed over while
+    /// another backend is left, the restarts go through OpenGL and Vulkan, and only then back to
+    /// every backend with software allowed. The chain ends.
+    #[test]
+    fn software_renderers_come_after_every_backends_hardware() {
+        use backend::Backend as B;
+        let c = ryzen_desktop();
+        let order = adapter_order(&c, PowerPreference::LowPower, &[], None, &[]);
+        assert_eq!(without_software(order.clone(), &c, false), (order.clone(), false));
+        let (hardware, dropped) = without_software(order, &c, true);
+        assert!(dropped && !hardware.contains(&4), "{hardware:?}");
+
+        let dx12 = "Dx12:10de:2204".to_string();
+        // The adapter that failed first.
+        let (skip, _) = next_start(&[], Some(&dx12), Some((B::Dx12, Some(B::Gl))), true).unwrap();
+        assert_eq!(skip, [dx12.as_str()]);
+        // Only WARP left on DX12 (passed over, nothing picked): OpenGL next.
+        let (skip, what) = next_start(&skip, None, Some((B::Dx12, Some(B::Gl))), true).unwrap();
+        assert_eq!(skip, [dx12.as_str(), "Dx12", SOFTWARE_LEFT]);
+        assert!(what.contains("OpenGL"), "{what}");
+        // OpenGL has no adapter, Vulkan next; then Vulkan has none and no backend is left.
+        let (skip, _) = next_start(&skip, None, Some((B::Gl, Some(B::Vulkan))), false).unwrap();
+        assert_eq!(skip, [dx12.as_str(), "Dx12", SOFTWARE_LEFT, "Gl"]);
+        let (skip, what) = next_start(&skip, None, Some((B::Vulkan, None)), false).unwrap();
+        assert_eq!(skip, [dx12.as_str(), SOFTWARE], "{what}");
+        assert!(backend::skipped_backends(&skip).is_empty());
+        // With software allowed and nothing left: the end.
+        assert_eq!(next_start(&skip, None, Some((B::Dx12, None)), false), None);
+        // Nothing was passed over (a Mac whose GPUs all failed): no software round.
+        assert_eq!(next_start(&[], None, Some((B::Metal, None)), false), None);
+        // Without the backend fallback (`WGPU_BACKEND`), only adapters.
+        assert_eq!(next_start(&[], None, None, false), None);
+    }
+
+    /// The skip list travels as an argument, which processes the app starts don't inherit.
+    #[test]
+    fn the_skip_list_is_an_argument() {
+        assert_eq!(skip_arg("--gpu-skip=Dx12:10de:2204,Dx12"), Some(vec!["Dx12:10de:2204".to_string(), "Dx12".to_string()]));
+        assert_eq!(skip_arg("--gpu-skip="), Some(vec![]));
+        assert_eq!(skip_arg("--gpu-skip"), None);
+        assert_eq!(skip_arg("layout.designcraft"), None);
     }
 
     #[test]
@@ -1031,7 +1309,7 @@ mod tests {
     /// adapter to leave out ends with the error and the hint; a bug ends with its message.
     #[test]
     fn a_normal_exit_or_another_failure_does_not_restart() {
-        let startup = Startup::new(None);
+        let startup = Startup::new(None, Vec::new());
         assert_eq!(finish(Ok(Ok(())), &startup), Ok(()));
         // No adapter was picked (none can show the window): the error is returned, nothing restarts.
         let none =
