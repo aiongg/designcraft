@@ -325,8 +325,7 @@ fn edit(
     match style {
         Some(name) => s.edit(|d, _| {
             let st = d.styles_mut().para_mut(&name).ok_or_else(|| bad(c, format!("no paragraph style `{name}`")))?;
-            st.para.tabs = Some(tabs);
-            Ok(())
+            st.para.set_json_over("tabs", &list, &designcraft_doc::ParaProps::default()).map_err(|e| bad(c, e))
         })?,
         None => {
             format_paras(s, &json!({ "tabs": list }))?;
@@ -337,6 +336,7 @@ fn edit(
 
 #[cfg(test)]
 mod tests {
+    use designcraft_doc::{TabAlign, TabStop};
     use serde_json::{Value, json};
 
     use crate::Session;
@@ -425,6 +425,26 @@ mod tests {
         let story = d.story(designcraft_doc::StoryId(sid)).unwrap();
         assert_eq!(story.paras[0].para.tabs, None, "no paragraph override");
         assert!(s.execute("type.tabs.add", &json!({"style": "Nope", "position": 1})).is_err());
+    }
+
+    /// A style's stored list that was never checked (an older file) is checked when a Tabs
+    /// command rewrites it, as a paragraph's is.
+    #[test]
+    fn style_tab_lists_are_checked_when_edited() {
+        let (mut s, _) = session("x");
+        s.execute("style.paragraph.create", &json!({"name": "Old"})).unwrap();
+        let stop = |position, align| TabStop { position, align, leader: String::new(), align_on: String::new() };
+        s.edit(|d, _| {
+            let st = d.styles_mut().para_mut("Old").unwrap();
+            st.para.tabs = Some(vec![stop(50.0, TabAlign::Char), stop(72.0, TabAlign::Left), stop(72.001, TabAlign::Right)]);
+            Ok(())
+        })
+        .unwrap();
+        s.execute("type.tabs.add", &json!({"style": "Old", "position": 120})).unwrap();
+        let d = s.doc().unwrap().doc.clone();
+        let tabs = d.styles.para("Old").unwrap().para.tabs.clone().unwrap();
+        let at: Vec<(f64, TabAlign, &str)> = tabs.iter().map(|t| (t.position, t.align, t.align_on.as_str())).collect();
+        assert_eq!(at, [(50.0, TabAlign::Char, "."), (72.001, TabAlign::Right, ""), (120.0, TabAlign::Left, "")]);
     }
 
     /// `type.para` and the paragraph style commands take a whole `tabs` list; it gets the checks
