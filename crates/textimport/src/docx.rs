@@ -276,7 +276,9 @@ impl Ctx {
         for e in p.els() {
             match e.name.as_str() {
                 "r" => self.run(e, st, allow_notes),
-                "hyperlink" | "smartTag" | "ins" | "fldSimple" | "customXml" => self.inline(e, st, allow_notes),
+                // Tracked changes import as accepted: insertions and move destinations are kept,
+                // deletions (`del`) and move sources (`moveFrom`) are dropped.
+                "hyperlink" | "smartTag" | "ins" | "moveTo" | "fldSimple" | "customXml" => self.inline(e, st, allow_notes),
                 _ => {}
             }
         }
@@ -488,5 +490,24 @@ mod tests {
         assert_eq!(st.text, format!("End of one{pb}\n{pb}\nTwo{cb}\n"));
         let styles: Vec<&str> = st.paras.iter().map(|p| p.style.as_str()).collect();
         assert_eq!(styles, [BASIC_PARAGRAPH, "Chapter", "Chapter", "Chapter"]);
+    }
+
+    #[test]
+    fn tracked_changes_import_as_accepted_including_moves() {
+        // Regression (#256): text in a tracked move destination (`w:moveTo`) vanished on import.
+        let document = format!(
+            r#"<w:document {W}><w:body>
+              <w:p><w:r><w:t xml:space="preserve">Kept text. </w:t></w:r>
+                <w:moveTo w:id="1" w:author="A"><w:r><w:t xml:space="preserve">MOVED HERE.</w:t></w:r>
+                  <w:del w:id="5" w:author="A"><w:r><w:delText>MOVED THEN DELETED</w:delText></w:r></w:del></w:moveTo>
+                <w:r><w:t xml:space="preserve"> Plain </w:t></w:r>
+                <w:ins w:id="2" w:author="A"><w:r><w:t>INSERTED</w:t></w:r></w:ins>
+                <w:del w:id="3" w:author="A"><w:r><w:delText>DELETED</w:delText></w:r></w:del></w:p>
+              <w:p><w:moveFrom w:id="4" w:author="A"><w:r><w:t>MOVED HERE.</w:t></w:r></w:moveFrom><w:r><w:t>End.</w:t></w:r></w:p>
+            </w:body></w:document>"#
+        );
+        let i = import(&docx(&document, "", "")).unwrap();
+        i.story.check().unwrap();
+        assert_eq!(i.story.text, "Kept text. MOVED HERE. Plain INSERTED\nEnd.");
     }
 }
