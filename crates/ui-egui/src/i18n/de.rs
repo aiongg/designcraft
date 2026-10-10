@@ -1131,6 +1131,7 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Release to Objects", "In Objekte umwandeln"),
     ("Remove", "Entfernen"),
     ("Rotate 90° Counterclockwise", "90° gegen den Uhrzeigersinn drehen"),
+    ("Rotate 180°", "180° drehen"),
     ("Rotation Angle", "Drehwinkel"),
     ("Rows", "Zeilen"),
     ("Run", "Ausführen"),
