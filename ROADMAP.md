@@ -9,10 +9,6 @@
 
 DesignCraft aims at full Adobe InDesign parity — and to be better: faster, open (documented JSON format + IDML), scriptable by agents (MCP), and available on the web.
 
-## Recent improvements (2026-10-08)
-
-- QA1: Explicit default text overrides survive native ZIP and legacy JSON reopening
-
 ## Status (2026-10-01)
 
 **Working today**
