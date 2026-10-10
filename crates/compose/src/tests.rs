@@ -2182,6 +2182,24 @@ fn space_after_a_drop_cap_does_not_widen_the_indent() {
     assert_eq!(lines[0].drop_cap.unwrap().end, 3);
 }
 
+/// A one-line drop cap keeps its characters' own size (a smaller verse number stays smaller), and
+/// the tabs in it advance to the paragraph's tab stops.
+#[test]
+fn one_line_drop_cap_keeps_its_size_and_sets_its_tabs() {
+    let stop = |position, align| designcraft_doc::TabStop { position, align, leader: String::new(), align_on: String::new() };
+    let para = ParaAttrs { tabs: Some(vec![stop(30.0, TabAlign::Right), stop(40.0, TabAlign::Left)]), ..drop_cap(1, 3) };
+    let (mut d, sid, _) = drop_doc(&format!("\t7\t{LOREM}"), para);
+    d.story_mut(sid).unwrap().format_chars(0..3, |f| f.over.size = Some(8.0));
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let l = &cs.frames[0].lines[0];
+    let at = |b: usize| l.glyphs.iter().find(|g| g.byte == b).unwrap();
+    let (seven, body) = (at(1), at(3));
+    assert!((seven.sy / body.sy - 0.8).abs() < 1e-9, "{} vs {}", seven.sy, body.sy);
+    assert!(seven.y.abs() < 1e-9);
+    assert!((seven.x + seven.adv - 30.0).abs() < 1e-6, "the number ends at the right tab: {}", seven.x + seven.adv);
+    assert!((text_x(l, 3) - 40.0).abs() < 1e-6, "the text starts at the left tab: {}", text_x(l, 3));
+}
+
 /// A rule in Text Color takes the colour of the paragraph's text: the first character's for the
 /// rule above, the last character's for the rule below. A swatch colour is used as is.
 #[test]
