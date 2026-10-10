@@ -875,6 +875,18 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
             designcraft_doc::Leading::Auto => mark_chars.size * pp.auto_leading,
             designcraft_doc::Leading::Points(v) => v,
         };
+        // The paragraph mark is a character of the last line: its leading counts there like any
+        // other character's. It doesn't set the line's ascent or descent. A hidden or deleted
+        // mark takes no room.
+        let last_line_mark = story.text.get(prange.end..).filter(|t| t.starts_with('\n')).and_then(|_| {
+            let props = doc.styles.resolve_char(&base_chars, story.format_after(prange.end));
+            let hidden = props.change == designcraft_doc::ChangeMark::Deleted
+                || (!props.conditions.is_empty() && props.conditions.iter().all(|c| sub.hidden_conditions.contains(c)));
+            (!hidden).then_some(match props.leading {
+                designcraft_doc::Leading::Auto => props.size * pp.auto_leading,
+                designcraft_doc::Leading::Points(v) => v,
+            })
+        });
         // A paragraph set across the columns moves on to the next frame where others move on to
         // the next column.
         let spanning = matches!(pp.span_columns, SpanColumns::Span(n) if n != 1);
@@ -1045,6 +1057,10 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                 let (s, e) = (g0 + b.start, g0 + b.end);
                 let line_glyphs = &glyphs[s..e.max(s)];
                 let (asc, tops, desc, lead) = line_metrics(line_glyphs, &glyphs, s, mark_leading, mark_chars.size, db, &mark_chars);
+                let lead = match last_line_mark {
+                    Some(m) if k + 1 == breaks.len() => lead.max(m),
+                    _ => lead,
+                };
                 let reference = cjk_line_reference(line_glyphs);
                 // Baseline grid: the next grid line at or below.
                 let grid = f.grid.filter(|&(_, inc)| {
