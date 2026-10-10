@@ -300,18 +300,13 @@ pub(crate) fn clip_doc(s: &Session) -> Result<designcraft_doc::Document> {
     for sp in d.spreads.iter_mut() {
         Arc::make_mut(sp).items.clear();
     }
-    // Kept frames and graphics (including inside groups).
+    // Kept frames (including inside groups).
     let mut frames = std::collections::HashSet::new();
-    let mut assets = std::collections::HashSet::new();
     for it in &items {
-        it.walk(&mut |i| match &i.content {
-            designcraft_doc::Content::Text(_) => {
+        it.walk(&mut |i| {
+            if let designcraft_doc::Content::Text(_) = &i.content {
                 frames.insert(i.id);
             }
-            designcraft_doc::Content::Graphic(g) => {
-                assets.insert(g.asset);
-            }
-            _ => {}
         });
     }
     if let Some(sp) = d.spreads.first_mut() {
@@ -325,6 +320,8 @@ pub(crate) fn clip_doc(s: &Session) -> Result<designcraft_doc::Document> {
     for st in d.stories.values_mut() {
         Arc::make_mut(st).frames.retain(|f| frames.contains(f));
     }
+    // Graphics on the items and in the kept stories (anchored objects, graphic cells, notes).
+    let assets = d.used_assets();
     d.assets.retain(|k, _| assets.contains(k));
     d.hyperlinks.clear();
     d.bookmarks.clear();
@@ -543,6 +540,28 @@ mod paste_tests {
         let w = s.doc().unwrap().doc.settings.page_width;
         assert_eq!(pasted(&mut s, "edit.pasteInPlace", json!({})), (SpreadRef::Doc(0), Rect::new(36.0, 36.0, 136.0, 136.0)));
         assert_eq!(pasted(&mut s, "edit.pasteInPlace", json!({"spread": 1})), (SpreadRef::Doc(1), Rect::new(w + 36.0, 36.0, w + 136.0, 136.0)));
+    }
+
+    /// A copied text frame's clipping holds the files its anchored graphics show.
+    #[test]
+    fn copied_text_frames_keep_the_graphics_anchored_in_their_text() {
+        let mut s = Session::new();
+        s.execute("file.new", &json!({})).unwrap();
+        let png = designcraft_render::Rendered { width: 4, height: 4, pixels: vec![200u8; 64] }.to_png();
+        let placed = s.execute("file.place", &json!({"base64": super::super::file::base64_encode(&png), "name": "a.png", "x": 72, "y": 72})).unwrap();
+        let (g, aid) = (ItemId(placed["id"].as_u64().unwrap()), designcraft_doc::AssetId(placed["asset"].as_u64().unwrap()));
+        let f = ItemId(s.execute("frame.create", &json!({"rect": [36, 200, 300, 400], "content": "text"})).unwrap()["id"].as_u64().unwrap());
+        s.edit(|d, _| {
+            let it = d.item(g).cloned().ok_or(designcraft_doc::DocError::NoItem(g))?;
+            let sid = d.item(f).and_then(|i| i.text_frame()).map(|t| t.story).ok_or(designcraft_doc::DocError::NoItem(f))?;
+            super::super::anchored::anchor_items(d, sid, 0, vec![it], &Default::default())?;
+            Ok(())
+        })
+        .unwrap();
+        s.execute("selection.set", &json!({"ids": [f.0]})).unwrap();
+        s.execute("edit.copy", &json!({})).unwrap();
+        let clip = s.clipboard.clone().unwrap();
+        assert_eq!(clip.assets.keys().copied().collect::<Vec<_>>(), [aid]);
     }
 
     /// Undo leaves the id of the copy it removed in the selection. Copy measures from the spread

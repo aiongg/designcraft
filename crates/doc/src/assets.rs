@@ -15,10 +15,11 @@ use crate::{Asset, AssetId, Content, Document, Item};
 const MAX_DEPTH: usize = 64;
 
 impl Asset {
-    /// Whether `other` holds the same file: the same type, page and bytes. Assets without bytes
-    /// (a link that couldn't be read) are the same only when they link to the same path.
+    /// Whether `other` holds the same file: the same type, page, PDF crop box and bytes. Assets
+    /// without bytes (a link that couldn't be read) are the same only when they link to the same
+    /// path.
     pub fn same_file(&self, other: &Asset) -> bool {
-        if self.mime != other.mime || self.page != other.page {
+        if self.mime != other.mime || self.page != other.page || self.pdf_crop != other.pdf_crop {
             return false;
         }
         match (self.data.is_empty(), other.data.is_empty()) {
@@ -306,6 +307,13 @@ mod tests {
         let b = d.add_asset(Asset { link: Some("/x/p.png".into()), ..asset(2, b"same") });
         let c = d.add_asset(asset(3, b"diff"));
         let p = d.add_asset(Asset { page: 1, ..asset(4, b"same") });
+        // One PDF page shown with two crop boxes: two assets (the box is the asset's).
+        let pdf = |id, pdf_crop| Asset { mime: "application/pdf".into(), pdf_crop, ..asset(id, b"%PDF") };
+        let crop = d.add_asset(pdf(9, crate::PdfCrop::Crop));
+        let art = d.add_asset(pdf(10, crate::PdfCrop::Art));
+        assert_ne!(crop, art);
+        assert_eq!(d.add_asset(pdf(11, crate::PdfCrop::Art)), art);
+        d.assets.retain(|id, _| ![crop, art].contains(id));
         assert_eq!(a, b);
         assert_ne!(a, c);
         assert_ne!(a, p);
