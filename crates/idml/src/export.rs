@@ -1511,6 +1511,80 @@ impl<'a> Ex<'a> {
                 el.set(&format!("ParagraphBorder{side}Offset"), num(o[i]));
             }
         }
+        if let Some(t) = &a.border_type {
+            props.push(p("ParagraphBorderType", "object", names::stroke_type_out(t)));
+        }
+        if let Some(c) = a.border_cap {
+            el.set("ParagraphBorderStrokeEndCap", names::cap_out(c));
+        }
+        if let Some(j) = a.border_join {
+            el.set("ParagraphBorderStrokeEndJoin", names::join_out(j));
+        }
+        const CORNERS: [&str; 4] = ["TopLeft", "TopRight", "BottomRight", "BottomLeft"];
+        for (prefix, corners) in [("ParagraphBorder", a.border_corners), ("ParagraphShading", a.shading_corners)] {
+            if let Some(cs) = corners {
+                for (c, k) in cs.iter().zip(CORNERS) {
+                    el.set(&format!("{prefix}{k}CornerOption"), names::corner_out(c.shape));
+                    el.set(&format!("{prefix}{k}CornerRadius"), num(c.size));
+                }
+            }
+        }
+        if let Some(w) = a.border_width {
+            el.set("ParagraphBorderWidth", names::box_width_out(w));
+        }
+        if let Some(t) = a.border_top {
+            el.set("ParagraphBorderTopOrigin", names::box_top_out(t));
+        }
+        if let Some(b) = a.border_bottom {
+            el.set("ParagraphBorderBottomOrigin", names::box_bottom_out(b));
+        }
+        b!(border_display_if_splits, "ParagraphBorderDisplayIfSplits");
+        b!(border_merge, "MergeConsecutiveParaBorders");
+        if let Some(c) = &a.border_gap_color {
+            props.push(p("ParagraphBorderGapColor", "object", self.sw(c)));
+        }
+        n!(border_gap_tint, "ParagraphBorderGapTint", pct);
+        if let Some(w) = a.shading_width {
+            el.set("ParagraphShadingWidth", names::box_width_out(w));
+        }
+        if let Some(t) = a.shading_top {
+            el.set("ParagraphShadingTopOrigin", names::box_top_out(t));
+        }
+        if let Some(b) = a.shading_bottom {
+            el.set("ParagraphShadingBottomOrigin", names::box_bottom_out(b));
+        }
+        b!(shading_clip, "ParagraphShadingClipToFrame");
+        b!(shading_nonprinting, "ParagraphShadingSuppressPrinting");
+        n!(span_space_before, "SpanColumnMinSpaceBefore");
+        n!(span_space_after, "SpanColumnMinSpaceAfter");
+        n!(list_level, "NumberingLevel");
+        for (k, style) in [("BulletsCharacterStyle", &a.bullet_char_style), ("NumberingCharacterStyle", &a.number_char_style)] {
+            if let Some(st) = style {
+                props.push(p(k, "object", names::style_self("CharacterStyle", CHAR_BUILTINS, st)));
+            }
+        }
+        if let Some(v) = a.bullet_align {
+            el.set("BulletsAlignment", names::list_align_out(v));
+        }
+        if let Some(v) = a.number_align {
+            el.set("NumberingAlignment", names::list_align_out(v));
+        }
+        b!(restart_numbers, "NumberingApplyRestartPolicy");
+        if let Some(level) = a.restart_after_level {
+            let (policy, level) = if level == 0 { ("AnyPreviousLevel", 0) } else { ("SpecificPreviousLevel", level) };
+            props.push(
+                El::new("NumberingRestartPolicies")
+                    .attr("RestartPolicy", policy)
+                    .attr("LowerLevel", level.to_string())
+                    .attr("UpperLevel", level.to_string()),
+            );
+        }
+        if let Some(f) = &a.bullet_font {
+            props.push(p("BulletsFont", "string", if f.is_empty() { "$ID/".to_string() } else { f.clone() }));
+        }
+        if let Some(f) = a.bullet_font_style.as_ref().filter(|f| !f.is_empty()) {
+            props.push(p("BulletsFontStyle", "string", f.clone()));
+        }
     }
 
     fn rule(&mut self, el: &mut El, props: &mut Vec<El>, k: &str, r: &Rule) {
