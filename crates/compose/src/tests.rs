@@ -1917,6 +1917,24 @@ fn drop_cap_spans_lines_and_indents_them() {
 }
 
 #[test]
+fn tab_beside_a_drop_cap_is_measured_from_the_drop_cap() {
+    // The line breaker measures a tab from where the line starts, which beside a drop cap is
+    // after the drop cap: measured from the frame edge, the tab looks wider and the line breaks
+    // a word early.
+    let stop = designcraft_doc::TabStop { position: 100.0, align: TabAlign::Left, leader: String::new(), align_on: String::new() };
+    let para = ParaAttrs { tabs: Some(vec![stop]), hyphenate: Some(false), ..drop_cap(3, 1) };
+    let text = format!("Wort\t{LOREM}");
+    let (d, sid, _) = drop_doc(&text, para);
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let lines = all_lines(&cs);
+    let space = |g: &PlacedGlyph| g.len > 0 && text.get(g.byte..).and_then(|s| s.chars().next()).is_some_and(char::is_whitespace);
+    let right = lines[0].glyphs.iter().filter(|g| g.visible && !space(g)).map(|g| g.x + g.adv).fold(0.0, f64::max);
+    assert!(right <= lines[0].x1 + 0.01, "line 1 ends at {right}, past {}", lines[0].x1);
+    let word: f64 = lines[1].glyphs.iter().filter(|g| g.len > 0).take_while(|g| !space(g)).map(|g| g.adv).sum();
+    assert!(right + word + 4.0 > lines[0].x1, "line 2's first word ({word} pt) fits after line 1's end at {right} (edge {})", lines[0].x1);
+}
+
+#[test]
 fn drop_cap_of_two_characters_as_a_local_override() {
     let (d, sid, _) = drop_doc(LOREM, drop_cap(2, 2));
     let cs = compose_story(&d, sid, &ComposeOptions::default());

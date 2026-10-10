@@ -924,7 +924,19 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                 // Where each line starts relative to the tab origin, as `layout_line` places it.
                 let tab = |j: usize, x: f64, i: usize| {
                     let x0 = slots.get(j).map_or(col.x0, |s| s.0);
-                    let ind = pp.left_indent + if line_no + j == 0 { pp.first_line_indent } else { 0.0 };
+                    let ind = pp.left_indent
+                        + match &drop_cap {
+                            // Beside a drop cap: at its start-side indent (the right side in RTL).
+                            Some(dc) if line_no + j < dc.lines && col_first_line == 0 => {
+                                if rtl {
+                                    0.0
+                                } else {
+                                    dc.indent()
+                                }
+                            }
+                            _ if line_no + j == 0 => pp.first_line_indent,
+                            _ => 0.0,
+                        };
                     tab_advance(&pp.tabs, x0 + ind + x - col.x0, rest.get(i + 1..).unwrap_or_default()).0
                 };
                 breaker::greedy(rest, rest_h, &spacing, &width, &tab)
