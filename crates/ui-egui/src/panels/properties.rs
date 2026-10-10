@@ -1442,7 +1442,7 @@ pub fn paragraph_panel(app: &mut DesignApp, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         crate::rtl::label(ui, egui::RichText::new(crate::i18n::tr(&app.ui.language, "Paragraph")).strong());
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            crate::menus::menu_button(ui, "☰", |ui| {
+            ui.menu_button("☰", |ui| {
                 if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Paragraph Rules…"))).clicked() {
                     let _ = app.run("app.paragraphRulesDialog", json!({}));
                     ui.close();
