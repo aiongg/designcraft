@@ -62,6 +62,12 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("app.insertTableDialog", "Create Table…", None, "{} — Insert Table dialog (body/header/footer rows, columns)"),
     ("app.footnoteOptionsDialog", "Document Footnote Options…", None, "{} — numbering, formatting and layout of footnotes"),
     ("app.rubyDialog", "Ruby…", None, "{} — the reading set over the selected text"),
+    (
+        "app.paragraphRulesDialog",
+        "Paragraph Rules…",
+        None,
+        "{rule?: ruleAbove|ruleBelow} — Rule Above / Rule Below of the selected paragraphs (type.para)",
+    ),
     ("app.findFontDialog", "Find/Replace Font…", None, "{} — fonts used (missing ones flagged) and replacing them"),
     ("app.insertXrefDialog", "Insert Cross-Reference…", None, "{} — New Cross-Reference dialog (paragraph or text anchor, format)"),
     ("app.deleteAllGuides", "Delete All Guides on Spread", None, "{} — the spread in view"),
@@ -366,6 +372,7 @@ pub const MENUS: &[(&str, &[&str])] = &[
             "cmd:type.alignCenter",
             "cmd:type.alignRight",
             "cmd:type.justify",
+            "ui:app.paragraphRulesDialog",
             "-",
             "cmd:type.bold",
             "cmd:type.italic",
@@ -912,6 +919,13 @@ pub fn run_ui(app: &mut DesignApp, id: &str, p: &Value) -> Option<Result<Value, 
                 story.char_format_at(at).over.ruby.clone()
             });
             app.ui.dialog = Some(crate::dialogs::Dialog::new("ruby", json!({"text": cur.unwrap_or_default()})));
+            Ok(Value::Null)
+        }
+        "app.paragraphRulesDialog" => {
+            let Some(a) = crate::panels::text_attrs(app) else { return Some(Err("select text or a text frame".into())) };
+            let rule = if p.get("rule").and_then(Value::as_str) == Some("ruleBelow") { "ruleBelow" } else { "ruleAbove" };
+            let current = json!({"ruleAbove": a["para"]["ruleAbove"], "ruleBelow": a["para"]["ruleBelow"]});
+            app.ui.dialog = Some(crate::dialogs::Dialog::new("paragraphRules", json!({"rule": rule, "current": current})));
             Ok(Value::Null)
         }
         "app.footnoteOptionsDialog" => {

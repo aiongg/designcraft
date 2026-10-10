@@ -135,7 +135,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Paragraph Formatting",
             [],
             None,
-            "{attrs: {align?, leftIndent?, firstLineIndent?, spaceBefore?, spaceAfter?, dropCapLines?, hyphenate?, composer?, tabs?, …}}",
+            "{attrs: {align?, leftIndent?, firstLineIndent?, spaceBefore?, spaceAfter?, dropCapLines?, hyphenate?, composer?, tabs?, ruleAbove?/ruleBelow?: {on?, weight?, color?, tint?, columnWidth?, offset?, leftIndent?, rightIndent?} (only the named rule fields change), …}}",
             has_text_or_frames,
             |s, p| format_paras(s, p.get("attrs").unwrap_or(p))
         ),
@@ -772,19 +772,27 @@ pub(crate) fn format_chars(s: &mut Session, attrs: &Value) -> Result<Value> {
 }
 
 pub(crate) fn format_paras(s: &mut Session, attrs: &Value) -> Result<Value> {
+    let empty = serde_json::Map::new();
+    let obj = attrs.as_object().unwrap_or(&empty);
+    // A rule object changes only the rule fields it names, so each paragraph gets its own attrs
+    // over its resolved rule; this pass validates them.
     let mut a = ParaAttrs::default();
-    if let Some(o) = attrs.as_object() {
-        for (k, v) in o {
-            a.set_json(k, v).map_err(|e| bad("type.para", e))?;
-        }
+    for (k, v) in obj {
+        a.set_json_over(k, v, &designcraft_doc::ParaProps::default()).map_err(|e| bad("type.para", e))?;
     }
     // `null` removes the override (back to the style's value).
-    let cleared: Vec<String> = attrs.as_object().map(|o| o.iter().filter(|(_, v)| v.is_null()).map(|(k, _)| k.clone()).collect()).unwrap_or_default();
+    let cleared: Vec<String> = obj.iter().filter(|(_, v)| v.is_null()).map(|(k, _)| k.clone()).collect();
     let targets = format_targets(s);
     s.edit(|d, _| {
+        let styles = d.styles.clone();
         for t in &targets {
             if let Some(st) = d.text_story_mut(t.story, t.cell) {
                 st.format_paras(t.range.clone(), |p| {
+                    let (current, _) = styles.resolve_para(p);
+                    let mut a = a.clone();
+                    for (k, v) in obj {
+                        let _ = a.set_json_over(k, v, &current);
+                    }
                     p.para.merge(&a);
                     for k in &cleared {
                         let _ = p.para.set_json(k, &Value::Null);
@@ -1224,6 +1232,56 @@ mod nested_line_style_tests {
         let nl = st.paras[0].para.nested_line_styles.clone().unwrap_or_default();
         assert_eq!((nl.len(), nl.first().map(|n| n.lines)), (1, Some(1)), "IDML AllNestedLineStyles");
         assert_eq!(nl[0].style, "Lead");
+    }
+}
+
+#[cfg(test)]
+mod rule_tests {
+    use serde_json::json;
+
+    use crate::Session;
+
+    #[test]
+    fn a_partial_rule_edit_keeps_the_other_fields() {
+        let mut s = Session::new();
+        s.execute("file.new", &json!({})).unwrap();
+        let rule = json!({"on": true, "weight": 3.0, "color": "[Black]", "tint": 0.5, "columnWidth": false, "offset": 4.0, "leftIndent": 6.0, "rightIndent": 2.0});
+        s.execute("style.paragraph.create", &json!({"name": "Ruled", "para": {"ruleBelow": rule}})).unwrap();
+        let r = s.execute("frame.create", &json!({"rect": [72, 72, 300, 400], "content": "text", "text": "One\nTwo"})).unwrap();
+        s.execute("text.select", &json!({"story": r["story"], "anchor": 0, "focus": 0})).unwrap();
+        s.execute("style.paragraph.apply", &json!({"name": "Ruled"})).unwrap();
+        // Local: only the colour changes; the rest is inherited from the style.
+        s.execute("type.para", &json!({"attrs": {"ruleBelow": {"color": "[Registration]"}}})).unwrap();
+        let attrs = s.execute("type.selectionAttrs", &json!({})).unwrap();
+        let mut want = rule.clone();
+        want["color"] = json!("[Registration]");
+        assert_eq!(attrs["para"]["ruleBelow"], want);
+        assert_eq!(attrs["para"]["ruleAbove"]["on"], false, "the other rule is untouched");
+        // Style: only the weight changes.
+        s.execute("style.paragraph.edit", &json!({"name": "Ruled", "para": {"ruleBelow": {"weight": 1.5}}})).unwrap();
+        let st = s.doc().unwrap().doc.styles.para("Ruled").cloned().unwrap();
+        let below = serde_json::to_value(st.para.rule_below.unwrap()).unwrap();
+        let mut want = rule.clone();
+        want["weight"] = json!(1.5);
+        assert_eq!(below, want);
+        assert!(s.execute("type.para", &json!({"attrs": {"ruleBelow": {"thickness": 2}}})).is_err(), "unknown rule field");
+    }
+
+    #[test]
+    fn rule_above_width_follows_column_or_text() {
+        let mut s = Session::new();
+        s.execute("file.new", &json!({})).unwrap();
+        let r = s.execute("frame.create", &json!({"rect": [72, 72, 400, 400], "content": "text", "text": "Short"})).unwrap();
+        s.execute("text.select", &json!({"story": r["story"], "anchor": 0, "focus": 0})).unwrap();
+        let sid = designcraft_doc::StoryId(r["story"].as_u64().unwrap());
+        let mut widths = vec![];
+        for column in [true, false] {
+            s.execute("type.para", &json!({"ruleAbove": {"on": true, "columnWidth": column}})).unwrap();
+            let cs = s.cache.get(&s.doc().unwrap().doc, sid, None);
+            widths.push(cs.frames[0].decos[0].rect.width());
+        }
+        assert!((widths[0] - 328.0).abs() < 1e-6, "column: {widths:?}");
+        assert!(widths[1] < 100.0, "text: {widths:?}");
     }
 }
 

@@ -828,6 +828,7 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
         "characterStyleOptions" => crate::i18n::tr(&app.ui.language, "Character Style Options"),
         "deleteCharacterStyle" => crate::i18n::tr(&app.ui.language, "Delete Character Style"),
         "footnoteOptions" => crate::i18n::tr(&app.ui.language, "Footnote Options"),
+        "paragraphRules" => crate::i18n::tr(&app.ui.language, "Paragraph Rules"),
         "insertXref" => crate::i18n::tr(&app.ui.language, "New Cross-Reference"),
         "findFont" => crate::i18n::tr(&app.ui.language, "Find/Replace Font"),
         "polygonSettings" => crate::i18n::tr(&app.ui.language, "Polygon Settings"),
@@ -1075,6 +1076,10 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
             "characterStyleOptions" => character_style_options(app, ui, &mut d),
             "deleteCharacterStyle" => delete_character_style(app, ui, &mut d),
             "footnoteOptions" => footnote_options(app, ui, &mut d),
+            "paragraphRules" => {
+                let current = d.fields.get("current").cloned().unwrap_or_default();
+                paragraph_rules(app, ui, &mut d, "", &current);
+            }
             "insertXref" => insert_xref(app, ui, &mut d),
             "findFont" => find_font(app, ui, &mut d),
             "colorPicker" => color_picker(ui, &mut d),
@@ -1496,7 +1501,17 @@ pub fn confirm(app: &mut DesignApp) -> Result<Value, String> {
             let mut chars = serde_json::Map::new();
             for (k, v) in &d.fields {
                 if let Some(a) = k.strip_prefix("p.") {
-                    para.insert(a.into(), v.clone());
+                    // `p.ruleAbove.weight`: one field of a rule (the command keeps the others).
+                    match a.split_once('.') {
+                        Some((attr, field)) => {
+                            if let Value::Object(m) = para.entry(attr).or_insert_with(|| json!({})) {
+                                m.insert(field.into(), v.clone());
+                            }
+                        }
+                        None => {
+                            para.insert(a.into(), v.clone());
+                        }
+                    }
                 } else if let Some(a) = k.strip_prefix("c.") {
                     chars.insert(a.into(), v.clone());
                 }
@@ -1536,6 +1551,13 @@ pub fn confirm(app: &mut DesignApp) -> Result<Value, String> {
                 "style.paragraph.delete",
                 json!({"name": name, "replaceWith": if replace.is_empty() { json!(designcraft_doc::BASIC_PARAGRAPH) } else { json!(replace) }}),
             )
+        }
+        "paragraphRules" => {
+            let attrs = rule_edits(&d, "");
+            if attrs.is_empty() {
+                return Ok(Value::Null);
+            }
+            app.run("type.para", json!({"attrs": attrs}))
         }
         "characterStyleOptions" => {
             let name = d.s("name");
@@ -1863,6 +1885,7 @@ fn paragraph_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
                 ("general", "General"),
                 ("chars", "Basic Character Formats"),
                 ("indents", "Indents and Spacing"),
+                ("rules", "Paragraph Rules"),
                 ("hyph", "Hyphenation"),
                 ("justify", "Justification"),
                 ("nested", "Drop Caps and Nested Styles"),
@@ -2148,6 +2171,7 @@ fn paragraph_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
                     }
                 });
             }
+            "rules" => paragraph_rules(app, ui, d, "p.", &pv),
             "hyph" => {
                 let mut h = cur(d, "p.hyphenate", &pv["hyphenate"]).as_bool().unwrap_or(true);
                 if ui.checkbox(&mut h, crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Hyphenate"))).changed() {
@@ -2872,6 +2896,131 @@ fn style_combo(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog, key: &str, ch
     combo(ui, d, key, &opts);
 }
 
+const RULES: [(&str, &str); 2] = [("ruleAbove", "Rule Above"), ("ruleBelow", "Rule Below")];
+
+/// A rule as the dialog shows it: `current[which]` (the resolved rule, inherited values included)
+/// with the fields edited in the dialog (`{prefix}{which}.{field}`) on top.
+fn shown_rule(d: &Dialog, prefix: &str, which: &str, current: &Value) -> Value {
+    let mut r = match current.get(which) {
+        Some(Value::Object(m)) => m.clone(),
+        _ => Map::new(),
+    };
+    let edited = format!("{prefix}{which}.");
+    for (k, v) in &d.fields {
+        if let Some(field) = k.strip_prefix(&edited) {
+            r.insert(field.into(), v.clone());
+        }
+    }
+    Value::Object(r)
+}
+
+/// The rule fields edited in the dialog, as `type.para` attrs: `{ruleAbove?: {…}, ruleBelow?: {…}}`.
+fn rule_edits(d: &Dialog, prefix: &str) -> Map<String, Value> {
+    let mut out = Map::new();
+    for (which, _) in RULES {
+        let edited = format!("{prefix}{which}.");
+        let fields: Map<String, Value> = d.fields.iter().filter_map(|(k, v)| k.strip_prefix(&edited).map(|f| (f.to_string(), v.clone()))).collect();
+        if !fields.is_empty() {
+            out.insert(which.into(), Value::Object(fields));
+        }
+    }
+    out
+}
+
+/// Paragraph Rules (the dialog, and the Paragraph Style Options section): Rule Above or Rule Below,
+/// chosen at the top. `current` holds the resolved `ruleAbove` / `ruleBelow`; each edit is stored as
+/// `{prefix}{rule}.{field}`, so OK changes only the fields edited.
+fn paragraph_rules(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog, prefix: &str, current: &Value) {
+    let lang = app.ui.language.as_str();
+    let (swatches, h_units, v_units) = app
+        .session
+        .active()
+        .map(|st| {
+            let sw: Vec<String> = st.doc.swatches.iter().filter(|w| !w.hidden).map(|w| w.name.clone()).collect();
+            (sw, st.doc.settings.horizontal_units, st.doc.settings.vertical_units)
+        })
+        .unwrap_or((Vec::new(), Unit::Points, Unit::Points));
+    let which = if d.s("rule") == "ruleBelow" { "ruleBelow" } else { "ruleAbove" };
+    let rule = shown_rule(d, prefix, which, current);
+    let key = |field: &str| format!("{prefix}{which}.{field}");
+    // A number field takes the rest of the row; keep its grid column to the field's width.
+    let sized = |ui: &mut egui::Ui, add: &mut dyn FnMut(&mut egui::Ui) -> Option<f64>| {
+        ui.allocate_ui_with_layout(egui::vec2(80.0, 22.0), egui::Layout::left_to_right(egui::Align::Center), |ui| add(ui)).inner
+    };
+    ui.horizontal(|ui| {
+        let shown = RULES.iter().find(|r| r.0 == which).map_or(which, |r| r.1);
+        egui::ComboBox::from_id_salt("rule_which").selected_text(crate::rtl::widget(ui, crate::i18n::tr(lang, shown))).width(130.0).show_ui(
+            ui,
+            |ui| {
+                for (v, label) in RULES {
+                    if ui.selectable_label(v == which, crate::rtl::widget(ui, crate::i18n::tr(lang, label))).clicked() {
+                        d.fields.insert("rule".into(), json!(v));
+                    }
+                }
+            },
+        );
+        ui.add_space(12.0);
+        let mut on = rule["on"].as_bool().unwrap_or(false);
+        if ui.checkbox(&mut on, crate::rtl::widget(ui, crate::i18n::tr(lang, "Rule On"))).changed() {
+            d.fields.insert(key("on"), json!(on));
+        }
+    });
+    ui.add_space(6.0);
+    let on = rule["on"].as_bool().unwrap_or(false);
+    ui.add_enabled_ui(on, |ui| {
+        egui::Grid::new(("rules", which)).num_columns(4).spacing([8.0, 6.0]).show(ui, |ui| {
+            crate::rtl::label(ui, crate::i18n::tr(lang, "Weight:"));
+            if let Some(v) = sized(ui, &mut |ui| crate::widgets::number(ui, &key("weight"), rule["weight"].as_f64(), " pt", 80.0, 2)) {
+                d.fields.insert(key("weight"), json!(v.clamp(0.0, 1000.0)));
+            }
+            crate::rtl::label(ui, crate::i18n::tr(lang, "Color:"));
+            let color = rule["color"].as_str().unwrap_or("").to_string();
+            egui::ComboBox::from_id_salt(("rule_color", which)).selected_text(&color).width(130.0).show_ui(ui, |ui| {
+                for w in &swatches {
+                    let (c, g) = app.session.active().map_or((None, None), |st| crate::widgets::swatch_colors(&st.doc, w, 1.0));
+                    ui.horizontal(|ui| {
+                        let (r, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
+                        crate::widgets::paint_chip(ui.painter(), r, c, g);
+                        if ui.selectable_label(*w == color, w).clicked() {
+                            d.fields.insert(key("color"), json!(w));
+                        }
+                    });
+                }
+            });
+            ui.end_row();
+            crate::rtl::label(ui, crate::i18n::tr(lang, "Tint:"));
+            if let Some(v) = sized(ui, &mut |ui| crate::widgets::number(ui, &key("tint"), rule["tint"].as_f64().map(|t| t * 100.0), "%", 80.0, 0)) {
+                d.fields.insert(key("tint"), json!((v / 100.0).clamp(0.0, 1.0)));
+            }
+            crate::rtl::label(ui, crate::i18n::tr(lang, "Width:"));
+            let column = rule["columnWidth"].as_bool().unwrap_or(true);
+            egui::ComboBox::from_id_salt(("rule_width", which))
+                .selected_text(crate::rtl::widget(ui, crate::i18n::tr(lang, if column { "Column" } else { "Text" })))
+                .width(130.0)
+                .show_ui(ui, |ui| {
+                    for (v, label) in [(true, "Column"), (false, "Text")] {
+                        if ui.selectable_label(v == column, crate::rtl::widget(ui, crate::i18n::tr(lang, label))).clicked() {
+                            d.fields.insert(key("columnWidth"), json!(v));
+                        }
+                    }
+                });
+            ui.end_row();
+            crate::rtl::label(ui, crate::i18n::tr(lang, "Offset:"));
+            if let Some(v) = sized(ui, &mut |ui| crate::widgets::measure(ui, &key("offset"), rule["offset"].as_f64(), v_units, 80.0)) {
+                d.fields.insert(key("offset"), json!(v));
+            }
+            ui.end_row();
+            for (label, field) in [("Left Indent:", "leftIndent"), ("Right Indent:", "rightIndent")] {
+                crate::rtl::label(ui, crate::i18n::tr(lang, label));
+                if let Some(v) = sized(ui, &mut |ui| crate::widgets::measure(ui, &key(field), rule[field].as_f64(), h_units, 80.0)) {
+                    d.fields.insert(key(field), json!(v));
+                }
+            }
+            ui.end_row();
+        });
+    });
+}
+
 /// Document Footnote Options: Numbering and Formatting / Layout tabs.
 fn footnote_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
     ui.horizontal(|ui| {
@@ -3316,6 +3465,79 @@ fn find_font(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn draw(app: &mut DesignApp, ctx: &egui::Context) {
+        let input =
+            egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))), ..Default::default() };
+        let mut out = ctx.run_ui(input, |ui| {
+            app.logic(&ui.ctx().clone());
+            app.ui(ui);
+        });
+        out.textures_delta.clear();
+    }
+
+    /// A paragraph styled "Ruled Child", whose Rule Below comes from its parent "Ruled".
+    fn ruled_paragraph() -> (DesignApp, Value) {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({})).unwrap();
+        let rule = json!({"on": true, "weight": 3.0, "color": "[Black]", "tint": 0.5, "columnWidth": false, "offset": 4.0, "leftIndent": 6.0, "rightIndent": 2.0});
+        app.run("style.paragraph.create", json!({"name": "Ruled", "para": {"ruleBelow": rule}})).unwrap();
+        app.run("style.paragraph.create", json!({"name": "Ruled Child", "basedOn": "Ruled"})).unwrap();
+        let r = app.run("frame.create", json!({"rect": [72, 72, 300, 400], "content": "text", "text": "One"})).unwrap();
+        app.run("text.select", json!({"story": r["story"], "anchor": 0, "focus": 0})).unwrap();
+        app.run("style.paragraph.apply", json!({"name": "Ruled Child"})).unwrap();
+        (app, rule)
+    }
+
+    fn undo_steps(app: &DesignApp) -> usize {
+        app.session.doc().map_or(0, |st| st.history.undo.len())
+    }
+
+    #[test]
+    fn paragraph_rules_dialog_shows_the_rule_and_applies_one_field() {
+        let (mut app, rule) = ruled_paragraph();
+        let ctx = egui::Context::default();
+        app.run("app.paragraphRulesDialog", json!({"rule": "ruleBelow"})).unwrap();
+        draw(&mut app, &ctx);
+        let d = app.ui.dialog.clone().unwrap();
+        assert_eq!(d.id, "paragraphRules");
+        let current = d.fields["current"].clone();
+        assert_eq!(shown_rule(&d, "", "ruleBelow", &current), rule, "the inherited rule");
+        assert_eq!(shown_rule(&d, "", "ruleAbove", &current)["on"], false);
+        // Pick a colour, as the Color menu does.
+        app.ui.dialog.as_mut().unwrap().fields.insert("ruleBelow.color".into(), json!("[Registration]"));
+        draw(&mut app, &ctx);
+        let before = undo_steps(&app);
+        confirm(&mut app).unwrap();
+        assert_eq!(undo_steps(&app), before + 1, "one undo step");
+        let mut want = rule.clone();
+        want["color"] = json!("[Registration]");
+        assert_eq!(app.run("type.selectionAttrs", json!({})).unwrap()["para"]["ruleBelow"], want);
+        app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(app.run("type.selectionAttrs", json!({})).unwrap()["para"]["ruleBelow"], rule);
+    }
+
+    #[test]
+    fn paragraph_style_options_edit_one_rule_field() {
+        let (mut app, rule) = ruled_paragraph();
+        let ctx = egui::Context::default();
+        app.ui.dialog = Some(Dialog::new("paragraphStyleOptions", json!({"name": "Ruled Child", "section": "rules", "rule": "ruleBelow"})));
+        draw(&mut app, &ctx);
+        let resolved = |app: &DesignApp| serde_json::to_value(app.session.doc().unwrap().doc.styles.resolve_para_style("Ruled Child").0).unwrap();
+        let d = app.ui.dialog.clone().unwrap();
+        assert_eq!(shown_rule(&d, "p.", "ruleBelow", &resolved(&app)), rule, "inherited from the parent style");
+        app.ui.dialog.as_mut().unwrap().fields.insert("p.ruleBelow.weight".into(), json!(1.5));
+        draw(&mut app, &ctx);
+        let before = undo_steps(&app);
+        confirm(&mut app).unwrap();
+        assert_eq!(undo_steps(&app), before + 1, "one undo step");
+        let mut want = rule.clone();
+        want["weight"] = json!(1.5);
+        assert_eq!(resolved(&app)["ruleBelow"], want);
+        assert_eq!(app.run("type.selectionAttrs", json!({})).unwrap()["para"]["ruleBelow"], want, "the paragraph follows its style");
+        app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(resolved(&app)["ruleBelow"], rule);
+    }
 
     fn command_app(id: &str, fields: Value) -> DesignApp {
         let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
