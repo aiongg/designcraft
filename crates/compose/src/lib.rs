@@ -1767,7 +1767,7 @@ fn apply_desired_spacing(glyphs: &mut [Glyph], pp: &ParaProps) {
         if g.locked_advance {
             continue;
         }
-        if g.ch == ' ' || (g.ch == '\u{3000}' && g.ideographic_space_elastic) {
+        if g.is_word_space() {
             g.adv += g.space * (ws - 1.0);
         } else if !g.is_space() && g.adv > 0.0 {
             g.adv = g.adv * gs + ls * g.space;
@@ -2654,7 +2654,7 @@ fn layout_line(
     // a line whose last tab is a right, centre, character or right-indent tab is not justified.
     let seg = last_tab.map_or(0, |(i, _)| i + 1);
     let seg_justifies = last_tab.is_none_or(|(_, left)| left);
-    let spaces: Vec<usize> = line.iter().enumerate().skip(seg).filter(|(_, g)| g.is_space() && !g.no_break).map(|(i, _)| i).collect();
+    let spaces: Vec<usize> = line.iter().enumerate().skip(seg).filter(|(_, g)| g.is_justify_space()).map(|(i, _)| i).collect();
     let align = match pp.align {
         Align::TowardsSpine => {
             if left_page {
@@ -2761,7 +2761,7 @@ fn layout_line(
     let mut ratio_n = 0usize;
     for &i in &spaces {
         let g = &line[i];
-        if g.ch == ' ' && g.space > 0.0 {
+        if matches!(g.ch, ' ' | shape::NBSP) && g.space > 0.0 {
             ratio_sum += (g.adv + add[i]) / g.space;
             ratio_n += 1;
         }
@@ -2950,7 +2950,7 @@ fn distribute(line: &[Glyph], spaces: &[usize], extra: f64, sp: &Spacing, add: &
         .iter()
         .map(|&i| {
             let g = &line[i];
-            if !breaker::elastic_space(g) {
+            if !g.is_word_space() {
                 0.0
             } else if stretch {
                 g.space * (sp.word_max - sp.word_desired).max(0.0)
@@ -2960,8 +2960,8 @@ fn distribute(line: &[Glyph], spaces: &[usize], extra: f64, sp: &Spacing, add: &
         })
         .collect();
     // Letter gaps: between visible glyphs (not after the line's last glyph).
-    let last_box = line.iter().rposition(|g| !g.is_space() && g.adv > 0.0).unwrap_or(0);
-    let is_box = |i: usize, g: &Glyph| i < last_box && !g.is_space() && g.adv > 0.0 && (!g.locked_advance || g.break_after != Some(false));
+    let last_box = line.iter().rposition(|g| !g.is_justify_space() && g.adv > 0.0).unwrap_or(0);
+    let is_box = |i: usize, g: &Glyph| i < last_box && !g.is_justify_space() && g.adv > 0.0 && (!g.locked_advance || g.break_after != Some(false));
     let letter: Vec<f64> = line
         .iter()
         .enumerate()
@@ -2978,7 +2978,7 @@ fn distribute(line: &[Glyph], spaces: &[usize], extra: f64, sp: &Spacing, add: &
     let glyph: Vec<f64> = line
         .iter()
         .map(|g| {
-            if g.is_space() || g.adv <= 0.0 || g.locked_advance {
+            if g.is_justify_space() || g.adv <= 0.0 || g.locked_advance {
                 0.0
             } else {
                 let natural = g.adv / sp.glyph_desired.max(0.01);
@@ -2998,7 +2998,7 @@ fn distribute(line: &[Glyph], spaces: &[usize], extra: f64, sp: &Spacing, add: &
     // Stretch left over beyond every limit is shared equally by the word spaces (fixed-width spaces
     // keep their width), else by the letter gaps; shrink never goes past the minimums (that would
     // overlap glyphs), so an overfull line stays overfull.
-    let elastic = spaces.iter().filter(|&&i| breaker::elastic_space(&line[i])).count();
+    let elastic = spaces.iter().filter(|&&i| line[i].is_word_space()).count();
     let gaps = line.iter().enumerate().filter(|&(i, g)| is_box(i, g)).count();
     let (over, over_gap) = match (stretch && rem > 0.0, elastic, gaps) {
         (false, _, _) => (0.0, 0.0),
@@ -3008,7 +3008,7 @@ fn distribute(line: &[Glyph], spaces: &[usize], extra: f64, sp: &Spacing, add: &
     };
     for (k, &i) in spaces.iter().enumerate() {
         let share = if yw > 1e-9 { tw * word[k] / yw } else { 0.0 };
-        add[i] += sign * share + if breaker::elastic_space(&line[i]) { over } else { 0.0 };
+        add[i] += sign * share + if line[i].is_word_space() { over } else { 0.0 };
     }
     if yl > 1e-9 && tl > 0.0 {
         for (i, l) in letter.iter().enumerate() {

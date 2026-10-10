@@ -89,15 +89,20 @@ impl Spacing {
         if !self.justify {
             return ([0.0; 3], [moji_shrink, 0.0, 0.0]);
         }
+        // A space that is no break opportunity (No Break, U+00A0) is a box with word-space elasticity.
+        if g.is_justify_space() {
+            let (st, sh) = self.space_elastic(g);
+            return ([moji_stretch + st, 0.0, 0.0], [moji_shrink + sh, 0.0, 0.0]);
+        }
         let natural = g.adv / self.glyph_desired.max(0.01);
         (
             [moji_stretch, g.space * (self.letter_max - self.letter_desired).max(0.0), natural * (self.glyph_max - self.glyph_desired).max(0.0)],
             [moji_shrink, g.space * (self.letter_desired - self.letter_min).max(0.0), natural * (self.glyph_desired - self.glyph_min).max(0.0)],
         )
     }
-    /// Word-space stretch and shrink of space glyph `g` (only U+0020 is elastic).
+    /// Word-space stretch and shrink of space glyph `g` (see [`Glyph::is_word_space`]).
     fn space_elastic(&self, g: &Glyph) -> (f64, f64) {
-        if !elastic_space(g) {
+        if !g.is_word_space() {
             return (0.0, 0.0);
         }
         (g.space * (self.word_max - self.word_desired).max(0.0), g.space * (self.word_desired - self.word_min).max(0.0))
@@ -107,16 +112,11 @@ impl Spacing {
     /// spacing range doesn't make a loose line with several word spaces look worse than a line
     /// letter-spaced across the measure.
     fn space_overflow(&self, g: &Glyph) -> f64 {
-        if !elastic_space(g) {
+        if !g.is_word_space() {
             return 0.0;
         }
         g.space * (self.word_max - self.word_desired).max(OVERFLOW_STRETCH)
     }
-}
-
-/// Does `g` stretch and shrink as a word space? Fixed-width spaces (em, en, thin…) don't.
-pub(crate) fn elastic_space(g: &Glyph) -> bool {
-    g.ch == ' ' || (g.ch == '\u{3000}' && g.ideographic_space_elastic)
 }
 
 /// Minimum stretch of a word space, as a fraction of its width, for rating lines that stretch
