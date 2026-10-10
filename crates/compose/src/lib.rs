@@ -506,15 +506,16 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
         info.truncate(pi);
         let pf = &story.paras[pi];
         let (pp, base_chars) = doc.styles.resolve_para(pf);
+        // A break character that ends the previous paragraph sends this one on, like a start option.
+        let after_break = pi
+            .checked_sub(1)
+            .and_then(|p| para_ranges.get(p))
+            .and_then(|r| story.text.get(r.clone()))
+            .and_then(|t| t.chars().next_back())
+            .and_then(break_start);
         if let Some(t) = story.para_table(pi) {
             if cur.last_baseline.is_some() {
-                match pp.start_paragraph {
-                    StartParagraph::NextColumn => cur.next_column(&cols),
-                    StartParagraph::NextFrame | StartParagraph::NextPage | StartParagraph::NextOddPage | StartParagraph::NextEvenPage => {
-                        cur.next_frame()
-                    }
-                    StartParagraph::Anywhere => {}
-                }
+                cur.start(after_break.unwrap_or(pp.start_paragraph), &cols, frames, doc);
             }
             let at_top = cur.last_baseline.is_none();
             let start_at = (cur.fi, cur.col);
@@ -695,15 +696,16 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
         };
         let spacing = spacing_for(&pp, base_size);
         // Paragraph start options.
+        if let Some(start) = after_break
+            && cur.last_baseline.is_some()
+        {
+            cur.start(start, &cols, frames, doc);
+        }
         if force_col[pi] {
             cur.next_column(&cols);
         }
         if cur.last_baseline.is_some() {
-            match pp.start_paragraph {
-                StartParagraph::NextColumn => cur.next_column(&cols),
-                StartParagraph::NextFrame | StartParagraph::NextPage | StartParagraph::NextOddPage | StartParagraph::NextEvenPage => cur.next_frame(),
-                StartParagraph::Anywhere => {}
-            }
+            cur.start(pp.start_paragraph, &cols, frames, doc);
         }
         if cur.last_baseline.is_some() {
             cur.pending += pp.space_before;
@@ -892,29 +894,18 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                 cur.last_descent = desc;
                 cur.pending = 0.0;
                 line_no += 1;
-                // Column / frame / page break characters.
-                if b.forced && e < glyphs.len() + 1 {
-                    let brk = glyphs.get(g0 + b.next.saturating_sub(1)).map(|g| g.ch);
-                    let jumped = match brk {
-                        Some(story::COLUMN_BREAK) => {
-                            cur.next_column(&cols);
-                            true
-                        }
-                        Some(story::FRAME_BREAK) | Some(story::PAGE_BREAK) => {
-                            cur.next_frame();
-                            true
-                        }
-                        _ => false,
-                    };
-                    if jumped {
-                        // The rest of the paragraph continues in the new column/frame: re-break it there.
-                        col_first_line = line_no;
-                        if k + 1 < breaks.len() {
-                            g0 += b.next;
-                            moved = true;
-                            break;
-                        }
-                    }
+                // A column / frame / page break inside the paragraph: the rest of it continues in the
+                // new column/frame/page, re-broken there. (A break that ends the paragraph moves the
+                // next paragraph instead.)
+                if b.forced
+                    && k + 1 < breaks.len()
+                    && let Some(start) = glyphs.get(g0 + b.next.saturating_sub(1)).and_then(|g| break_start(g.ch))
+                {
+                    cur.start(start, &cols, frames, doc);
+                    col_first_line = line_no;
+                    g0 += b.next;
+                    moved = true;
+                    break;
                 }
             }
             if !moved {
@@ -1343,6 +1334,18 @@ fn keep_violation(ctx: &KeepCtx, pp: &ParaProps, info: &[ParaInfo], force_col: &
     None
 }
 
+/// The start option a column, frame or page break character stands for.
+fn break_start(c: char) -> Option<StartParagraph> {
+    match c {
+        story::COLUMN_BREAK => Some(StartParagraph::NextColumn),
+        story::FRAME_BREAK => Some(StartParagraph::NextFrame),
+        story::PAGE_BREAK => Some(StartParagraph::NextPage),
+        story::ODD_PAGE_BREAK => Some(StartParagraph::NextOddPage),
+        story::EVEN_PAGE_BREAK => Some(StartParagraph::NextEvenPage),
+        _ => None,
+    }
+}
+
 fn ft_prev_end(overset: &Option<usize>, len: usize) -> usize {
     overset.unwrap_or(len)
 }
@@ -1373,6 +1376,30 @@ impl Cursor {
         self.col = 0;
         self.last_baseline = None;
         self.pending = 0.0;
+    }
+    /// Move on as a paragraph start option (or a break character) asks.
+    fn start(&mut self, start: StartParagraph, cols: &[Vec<Rect>], frames: &[FrameSpec], doc: &Document) {
+        match start {
+            StartParagraph::Anywhere => {}
+            StartParagraph::NextColumn => self.next_column(cols),
+            StartParagraph::NextFrame => self.next_frame(),
+            StartParagraph::NextPage => self.next_page(frames, doc, None),
+            StartParagraph::NextOddPage => self.next_page(frames, doc, Some(true)),
+            StartParagraph::NextEvenPage => self.next_page(frames, doc, Some(false)),
+        }
+    }
+    /// Move to the next frame on a later page, one with an odd page number (`odd` true) or an
+    /// even one (false) when asked. Frames without a page (parent pages) qualify; with no frame
+    /// left, the rest of the story is overset.
+    fn next_page(&mut self, frames: &[FrameSpec], doc: &Document, odd: Option<bool>) {
+        let from = frames.get(self.fi).and_then(|f| f.page);
+        let skip = |f: &FrameSpec| f.page.is_some_and(|p| Some(p) == from || odd.is_some_and(|o| (doc.page_number(p) % 2 == 1) != o));
+        let mut fi = self.fi.saturating_add(1);
+        while frames.get(fi).is_some_and(skip) {
+            fi += 1;
+        }
+        self.next_frame();
+        self.fi = fi;
     }
     /// Baseline for the next line with leading `lead` and ascent `asc`.
     fn next_baseline(&self, f: &FrameSpec, col: Rect, lead: f64, asc: f64, _pp: &ParaProps) -> f64 {

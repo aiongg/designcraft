@@ -208,7 +208,7 @@ fn cjk_break(a: &Glyph, b: &Glyph, sp: &Spacing) -> bool {
 
 pub fn is_forced(c: char) -> bool {
     use designcraft_doc::story::*;
-    matches!(c, FORCED_LINE_BREAK | COLUMN_BREAK | FRAME_BREAK | PAGE_BREAK)
+    c == FORCED_LINE_BREAK || is_break_char(c)
 }
 
 /// Optical margin protrusion of `c` as fractions of its advance: (left edge, right edge).
@@ -613,8 +613,9 @@ fn breaks_from_positions(items: &[Item], ig: &[usize], glyphs: &[Glyph], chain: 
     if out.is_empty() {
         out.push(Break { start: 0, end: n, next: n, hyphen: false, forced: true });
     }
-    // Lines produced past the paragraph end (e.g. a trailing forced break) are dropped.
-    let trailing_forced = glyphs.last().is_some_and(|g| is_forced(g.ch));
+    // Lines produced past the paragraph end are dropped, except the empty line after a trailing
+    // forced line break (a trailing column, frame or page break ends the paragraph).
+    let trailing_forced = glyphs.last().is_some_and(|g| g.ch == designcraft_doc::story::FORCED_LINE_BREAK);
     out.retain(|b| b.start < n || (b.start == n && trailing_forced));
     out
 }
@@ -715,9 +716,10 @@ pub fn greedy(glyphs: &[Glyph], hyph_after: &[bool], sp: &Spacing, width: &dyn F
         start = next;
         line += 1;
     }
-    // A forced break as the very last glyph leaves an empty final line (InDesign shows it).
+    // A forced line break as the very last glyph leaves an empty final line (InDesign shows it);
+    // a column, frame or page break there ends the paragraph.
     if let Some(last) = glyphs.last()
-        && is_forced(last.ch)
+        && last.ch == designcraft_doc::story::FORCED_LINE_BREAK
     {
         out.push(Break { start: n, end: n, next: n, hyphen: false, forced: true });
     }

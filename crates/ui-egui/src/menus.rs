@@ -343,6 +343,8 @@ pub const MENUS: &[(&str, &[&str])] = &[
             "cmd:text.insert|Column Break|{\"text\": \"\u{e002}\", \"raw\": true}",
             "cmd:text.insert|Frame Break|{\"text\": \"\u{e003}\", \"raw\": true}",
             "cmd:text.insert|Page Break|{\"text\": \"\u{e004}\", \"raw\": true}",
+            "cmd:text.insert|Odd Page Break|{\"text\": \"\u{e011}\", \"raw\": true}",
+            "cmd:text.insert|Even Page Break|{\"text\": \"\u{e012}\", \"raw\": true}",
             "cmd:text.insert|Paragraph Return|{\"text\": \"\\n\", \"raw\": true}",
             "cmd:text.insert|Forced Line Break|{\"text\": \"\u{2028}\", \"raw\": true}",
             "<",
