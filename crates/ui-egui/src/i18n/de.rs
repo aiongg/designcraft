@@ -1764,6 +1764,13 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Same as Previous Document in the Book", "Wie vorheriges Dokument im Buch"),
     ("Book Name:", "Buchname:"),
     ("N/A", "–"),
+    ("Preset Name", "Vorgabename"),
+    ("Bounding Box (Visible Layers Only)", "Begrenzungsrahmen (nur sichtbare Ebenen)"),
+    ("Bounding Box (All Layers)", "Begrenzungsrahmen (alle Ebenen)"),
+    ("Origin:", "Ursprung:"),
+    ("Spine", "Bund"),
+    ("Lock Zero Point", "Nullpunkt fixieren"),
+    ("Unlock Zero Point", "Nullpunkt lösen"),
 ];
 
 #[cfg(test)]

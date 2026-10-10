@@ -1837,6 +1837,9 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Start At", "開始番号"),
     ("Advanced Character Formats", "詳細文字形式"),
     ("OpenType Features", "OpenType 機能"),
+    ("Preset Name", "プリセット名"),
+    ("Bounding Box (Visible Layers Only)", "バウンディングボックス（表示レイヤーのみ）"),
+    ("Bounding Box (All Layers)", "バウンディングボックス（すべてのレイヤー）"),
 ];
 
 /// Captions whose Japanese depends on where they appear: (English, context, Japanese).
