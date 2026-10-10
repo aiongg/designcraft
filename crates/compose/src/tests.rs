@@ -2124,8 +2124,9 @@ fn drop_cap_caret_and_hit_testing() {
 }
 
 #[test]
-fn drop_cap_sits_on_its_line_as_set() {
-    // Lines on a 15 pt baseline grid (not the 12 pt leading): the drop cap follows line 3.
+fn drop_cap_on_a_baseline_grid_reaches_down_by_grid_steps() {
+    // Lines on a 15 pt baseline grid (not the 12 pt leading): the drop cap reaches down two grid
+    // steps, to line 3.
     let (mut d, sid, _) = drop_doc(LOREM, ParaAttrs { grid_align: Some(designcraft_doc::GridAlign::AllLines), ..drop_cap(3, 1) });
     d.settings.baseline_grid.increment = 15.0;
     d.settings.baseline_grid.start = 0.0;
@@ -2139,6 +2140,28 @@ fn drop_cap_sits_on_its_line_as_set() {
     // Scaled to the grid's line pitch: its cap top is still line 1's.
     let body = lines[0].glyphs.iter().find(|g| g.byte == 1).unwrap();
     assert!((lines[2].baseline - cap_of(dc) - (lines[0].baseline - cap_of(body))).abs() < 0.01);
+}
+
+/// A line with a larger auto leading doesn't move the drop cap: it reaches down `lines − 1`
+/// leadings of the text after it, not to where line N is set.
+#[test]
+fn drop_cap_reaches_down_by_the_text_leading_past_a_line_with_larger_leading() {
+    use designcraft_doc::{CharAttrs, Composer, Leading};
+    let text = [LOREM; 2].join(" ");
+    let para = ParaAttrs { composer: Some(Composer::SingleLine), ..drop_cap(3, 1) };
+    let (mut d, sid, _) = doc_with(&text, Rect::new(0.0, 0.0, 300.0, 1000.0), para);
+    d.story_mut(sid).unwrap().paras[0].chars = CharAttrs { size: Some(12.0), leading: Some(Leading::Auto), ..Default::default() };
+    // A larger word starts line 2, so lines 2 and 3 are set further down than 2 × 14.4 pt.
+    let start2 = all_lines(&compose_story(&d, sid, &ComposeOptions::default()))[1].range.start;
+    d.story_mut(sid).unwrap().format_chars(start2..start2 + 3, |f| f.over.size = Some(20.0));
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let lines = all_lines(&cs);
+    assert_eq!(lines[1].range.start, start2);
+    assert!(lines[2].baseline - lines[0].baseline > 2.0 * 14.4 + 5.0, "{} {}", lines[0].baseline, lines[2].baseline);
+    let dc = &lines[0].glyphs[0];
+    assert!((dc.y - 2.0 * 14.4).abs() < 1e-6, "drop cap baseline {} below line 1", dc.y);
+    let b = lines[0].drop_cap.unwrap();
+    assert!((b.baseline - (lines[0].baseline + 2.0 * 14.4)).abs() < 1e-6, "{}", b.baseline);
 }
 
 /// A rule in Text Color takes the colour of the paragraph's text: the first character's for the

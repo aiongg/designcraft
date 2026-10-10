@@ -1285,10 +1285,19 @@ impl<'a> Ex<'a> {
                 None => el.set("NumberingContinue", "true"),
             }
         }
-        // Nested and GREP styles: property lists of records.
-        if let Some(list) = &a.nested_styles {
+        // Nested and GREP styles: property lists of records. The drop cap's character style is the
+        // nested style list's leading "through 1 Dropcap" entry (IDML has no attribute for it).
+        let cap_style = a.drop_cap_style.as_deref().filter(|s| !s.is_empty() && *s != st::NO_CHAR_STYLE);
+        if a.nested_styles.is_some() || cap_style.is_some() {
+            let mut list = a.nested_styles.clone().unwrap_or_default();
+            if let Some(s) = cap_style {
+                match list.first_mut() {
+                    Some(ns) if ns.is_drop_cap() => ns.style = s.to_string(),
+                    _ => list.insert(0, designcraft_doc::NestedStyle::drop_cap(s)),
+                }
+            }
             let mut l = El::new("AllNestedStyles").attr("type", "list");
-            for ns in list {
+            for ns in &list {
                 let (ty, delim) = names::nested_until_out(&ns.until);
                 l = l.child(
                     El::new("ListItem")
@@ -1370,8 +1379,6 @@ impl<'a> Ex<'a> {
         n!(space_after, "SpaceAfter");
         n!(drop_cap_lines, "DropCapLines");
         n!(drop_cap_chars, "DropCapCharacters");
-        // The drop cap's character style isn't written: IDML has no attribute for it (InDesign
-        // applies one through a Dropcap nested style).
         if a.drop_cap_align_left.is_some() || a.drop_cap_scale_descenders.is_some() {
             let d = designcraft_doc::ParaProps::default();
             let bits = u32::from(a.drop_cap_align_left.unwrap_or(d.drop_cap_align_left))

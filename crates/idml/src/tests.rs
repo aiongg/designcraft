@@ -1784,12 +1784,13 @@ fn absent_item_and_document_attributes_take_indesign_defaults() {
     }
 }
 
+/// IDML has no attribute for a drop cap's character style: it is the nested style list's leading
+/// "through 1 Dropcap" entry, read into the drop cap style and written back from it.
 #[test]
 fn drop_caps_import_and_round_trip() {
-    // A style with a drop cap, its character style and a nested style through it; a paragraph
-    // overriding it locally.
+    // A style with a drop cap and its character style; a paragraph overriding both locally.
     let opener = r#"<ParagraphStyle Self="ParagraphStyle/Opener" Name="Opener" DropCapCharacters="1" DropCapLines="3">
-        <Properties><DropCapStyle type="object">CharacterStyle/Strong</DropCapStyle><AllNestedStyles type="list"><ListItem type="record">
+        <Properties><AllNestedStyles type="list"><ListItem type="record">
           <AppliedCharacterStyle type="object">CharacterStyle/Strong</AppliedCharacterStyle><Delimiter type="enumeration">Dropcap</Delimiter>
           <Repetition type="long">1</Repetition><Inclusive type="boolean">true</Inclusive></ListItem></AllNestedStyles></Properties>
       </ParagraphStyle>
@@ -1798,7 +1799,10 @@ fn drop_caps_import_and_round_trip() {
     let story = r#"<?xml version="1.0" encoding="UTF-8"?>
 <idPkg:Story xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="16.0">
   <Story Self="s1">
-    <ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/Opener" DropCapCharacters="2" DropCapLines="2" DropCapStyle="CharacterStyle/$ID/[No character style]">
+    <ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/Opener" DropCapCharacters="2" DropCapLines="2">
+      <Properties><AllNestedStyles type="list"><ListItem type="record">
+        <AppliedCharacterStyle type="object">CharacterStyle/$ID/[No character style]</AppliedCharacterStyle><Delimiter type="enumeration">Dropcap</Delimiter>
+        <Repetition type="long">1</Repetition><Inclusive type="boolean">true</Inclusive></ListItem></AllNestedStyles></Properties>
       <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]"><Content>Once upon a time</Content></CharacterStyleRange>
     </ParagraphStyleRange>
   </Story>
@@ -1816,18 +1820,21 @@ fn drop_caps_import_and_round_trip() {
         let st = d.styles.para("Opener").unwrap();
         assert_eq!((st.para.drop_cap_chars, st.para.drop_cap_lines), (Some(1), Some(3)));
         assert_eq!(st.para.drop_cap_style.as_deref(), Some("Strong"));
-        let ns = st.para.nested_styles.clone().unwrap();
-        assert_eq!((ns[0].style.as_str(), &ns[0].until), ("Strong", &designcraft_doc::NestedUntil::Dropcap));
+        assert_eq!(st.para.nested_styles, Some(vec![designcraft_doc::NestedStyle::drop_cap("Strong")]), "one entry, not duplicated");
         let p = &d.stories.values().find(|s| s.text.starts_with("Once")).unwrap().paras[0];
         assert_eq!((p.para.drop_cap_chars, p.para.drop_cap_lines), (Some(2), Some(2)));
         assert_eq!(p.para.drop_cap_style.as_deref(), Some(st::NO_CHAR_STYLE));
     };
     let d = import_idml_with(&bytes, &|_| None).unwrap();
     check(&d);
-    // The drop cap's character style isn't written to IDML (InDesign sets it through a Dropcap
-    // nested style); Align Left Edge and Scale for Descenders are, as DropcapDetail.
+    let bytes = export_idml(&d);
+    assert!(!zip_text(&bytes, "").contains("DropCapStyle"), "not an IDML attribute");
+    check(&import_idml(&bytes).unwrap());
+    // A drop cap style set without nested styles is written as one; Align Left Edge and Scale for
+    // Descenders as DropcapDetail.
     let mut d = d;
     if let Some(s) = d.styles_mut().para_mut("Opener") {
+        s.para.nested_styles = None;
         s.para.drop_cap_align_left = Some(false);
         s.para.drop_cap_scale_descenders = Some(true);
     }
@@ -1836,9 +1843,9 @@ fn drop_caps_import_and_round_trip() {
     assert!(zip_text(&bytes, "Resources/Styles.xml").contains(r#"DropcapDetail="2""#));
     let back = import_idml(&bytes).unwrap();
     let st = back.styles.para("Opener").unwrap();
-    assert_eq!((st.para.drop_cap_chars, st.para.drop_cap_lines, st.para.drop_cap_style.as_deref()), (Some(1), Some(3), None));
+    assert_eq!((st.para.drop_cap_chars, st.para.drop_cap_lines, st.para.drop_cap_style.as_deref()), (Some(1), Some(3), Some("Strong")));
     assert_eq!((st.para.drop_cap_align_left, st.para.drop_cap_scale_descenders), (Some(false), Some(true)));
-    assert_eq!(st.para.nested_styles.as_ref().map(|n| n[0].until.clone()), Some(designcraft_doc::NestedUntil::Dropcap));
+    assert_eq!(st.para.nested_styles, Some(vec![designcraft_doc::NestedStyle::drop_cap("Strong")]));
 }
 
 /// Frames take the corners and Text Frame Options they don't write from their object style chain,

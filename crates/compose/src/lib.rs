@@ -916,9 +916,6 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
         let has_tabs = glyphs.iter().any(|g| g.ch == '\t');
         let mut first_line_rect: Option<(usize, f64, f64, f64)> = None; // frame, baseline, ascent, x-span
         let rtl = pp.direction == designcraft_doc::TextDirection::RightToLeft;
-        // The drop cap's line (frame, index) and the baseline it sits on, once that line is set.
-        let mut drop_line: Option<(usize, usize)> = None;
-        let mut drop_baseline: Option<f64> = None;
         loop {
             if cur.fi >= frames.len() {
                 if let Some(j) = trial_failed(&mut trial, &mut limits, balance_runs < balance_budget) {
@@ -1151,15 +1148,6 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                     keep_violation: false,
                     drop_cap: drop_box,
                 });
-                if drop_box.is_some() {
-                    drop_line = Some((cur.fi, ft.lines.len() - 1));
-                }
-                if let Some(dc) = &drop_cap
-                    && line_no + 1 == dc.lines
-                    && col_first_line == 0
-                {
-                    drop_baseline = Some(baseline);
-                }
                 for k in line_notes {
                     notes.place(doc, k, cur.fi, cur.col, col_w, f, opts);
                 }
@@ -1195,19 +1183,6 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
             }
             if !moved {
                 break;
-            }
-        }
-        // The drop cap sits on its last line's baseline as set (it was placed at the leading's).
-        if let (Some((fi, li)), Some(b), Some(n)) = (drop_line, drop_baseline, drop_cap.as_ref().map(|dc| dc.glyphs.len()))
-            && let Some(l) = out.frames.get_mut(fi).and_then(|f| f.lines.get_mut(li))
-            && let Some(dc) = l.drop_cap.as_mut()
-        {
-            let d = b - dc.baseline;
-            dc.baseline = b;
-            dc.rect.y1 += d;
-            // Its glyphs start the line.
-            for g in l.glyphs.iter_mut().take(n) {
-                g.y += d;
             }
         }
         info.push(ParaInfo {
@@ -2884,7 +2859,8 @@ struct DropCap {
     /// How far its origin sits left of the indent: its first letter's left side bearing with
     /// Align Left Edge, else 0.
     lsb: f64,
-    /// Its baseline below the first line's, at the paragraph's leading.
+    /// Its baseline below the first line's: `lines − 1` leadings of the text after it (grid steps
+    /// on a baseline grid), wherever line `lines` is set.
     drop: f64,
 }
 

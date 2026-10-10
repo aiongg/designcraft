@@ -1255,6 +1255,9 @@ impl<'r> Importer<'r> {
                     }
                 })
                 .collect();
+            // IDML has no drop cap style attribute: the drop cap's character style is the list's
+            // leading "through 1 Dropcap" nested style.
+            a.drop_cap_style = v.first().filter(|ns| ns.is_drop_cap()).map(|ns| ns.style.clone());
             a.nested_styles = Some(v);
         }
         if let Some(l) = e.prop_el("AllNestedLineStyles") {
@@ -1283,7 +1286,6 @@ impl<'r> Importer<'r> {
         a.space_after = e.num("SpaceAfter");
         a.drop_cap_lines = u("DropCapLines");
         a.drop_cap_chars = u("DropCapCharacters");
-        a.drop_cap_style = e.prop("DropCapStyle").map(|r| self.char_style_ref(r.trim()));
         // DropcapDetail bits: 1 = Align Left Edge, 2 = Scale for Descenders.
         if let Some(v) = e.num("DropcapDetail").filter(|v| v.is_finite() && *v >= 0.0) {
             let bits = v as u32;
