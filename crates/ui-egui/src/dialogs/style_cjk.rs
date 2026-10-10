@@ -952,6 +952,7 @@ mod tests {
         let mut app = app_with_text();
         app.run("prefs.set", json!({"cjkFeatures": true})).unwrap();
         let ctx = egui::Context::default();
+        crate::theme::install_fonts(&ctx, "");
         for lang in ["", "ja", "ar"] {
             app.run("app.language", json!({"lang": lang})).unwrap();
             for s in SECTIONS {
@@ -991,6 +992,7 @@ mod tests {
         assert_eq!(moji, "MojikumiTable/Body Text");
 
         let ctx = egui::Context::default();
+        crate::theme::install_fonts(&ctx, "");
         app.ui.dialog = Some(Dialog::new("paragraphStyleOptions", json!({"name": "Body", "section": "cjk.kenten"})));
         painted(&mut app, &ctx);
         {
@@ -1044,6 +1046,7 @@ mod tests {
         let mut app = app_with_text();
         app.run("prefs.set", json!({"cjkFeatures": true})).unwrap();
         let ctx = egui::Context::default();
+        crate::theme::install_fonts(&ctx, "");
         app.ui.dialog = Some(Dialog::new("paragraphStyleOptions", json!({"name": "Body", "section": "cjk.rubyPlacement"})));
         painted(&mut app, &ctx);
         {
@@ -1078,6 +1081,7 @@ mod tests {
         app.run("text.select", json!({"story": story, "anchor": 0, "focus": "漢字".len()})).unwrap();
         app.run("app.rubyDialog", json!({})).unwrap();
         let ctx = egui::Context::default();
+        crate::theme::install_fonts(&ctx, "");
         painted(&mut app, &ctx);
         {
             let d = app.ui.dialog.as_mut().unwrap();
