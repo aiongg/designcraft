@@ -109,6 +109,49 @@ fn default_zone() -> f64 {
     4.0
 }
 
+/// File › Export PDF… options: the values persisted in `UiState.pdf_export` and used as the
+/// dialog's defaults. Serialised as `pdfExport` with camelCase field names.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct PdfExportSettings {
+    /// Preset (one of the five presets, or "Custom" after a manual edit).
+    pub preset: String,
+    /// PDF standard (`none`, `x4`, `a2b`).
+    pub standard: String,
+    /// Compression › Compress images (JPEG).
+    pub compress_images: bool,
+    /// Transparency flattener preset (`""` = none, `high`, `medium`, `low`).
+    pub flatten: String,
+    pub spreads: bool,
+    pub bleed: bool,
+    pub marks_crop: bool,
+    pub marks_bleed: bool,
+    pub marks_page_info: bool,
+    pub marks_weight: String,
+    pub marks_offset: String,
+    /// File › Export PDF › Advanced › Tagged PDF.
+    pub tagged: bool,
+}
+
+impl Default for PdfExportSettings {
+    fn default() -> Self {
+        PdfExportSettings {
+            preset: "Desktop Printing".into(),
+            standard: "none".into(),
+            compress_images: false,
+            flatten: "".into(),
+            spreads: false,
+            bleed: true,
+            marks_crop: false,
+            marks_bleed: false,
+            marks_page_info: false,
+            marks_weight: "0.25".into(),
+            marks_offset: "6".into(),
+            tagged: true,
+        }
+    }
+}
+
 /// Persisted UI state.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -149,6 +192,8 @@ pub struct UiState {
     pub language: String,
     /// Edit › Transparency Flattener Presets: "" (none), "high", "medium" or "low" for PDF export.
     pub flattener: String,
+    /// File › Export PDF… options (persisted; see `PdfExportSettings`).
+    pub pdf_export: PdfExportSettings,
     /// View › Separations Preview: a process plate (0–3) and/or an ink limit (total, 0–4).
     #[serde(skip)]
     pub separation: Option<u8>,
@@ -252,6 +297,7 @@ impl Default for UiState {
             dynamic_spelling: false,
             language: String::new(),
             flattener: String::new(),
+            pdf_export: PdfExportSettings::default(),
             separation: None,
             ink_limit: None,
             display_quality: designcraft_render::DisplayQuality::High,
@@ -1001,6 +1047,78 @@ pub fn drop_key_name_text(raw: &mut egui::RawInput, text_field_focused: bool) {
 mod tests {
     use super::*;
 
+    /// An app with one document that has an unsaved edit.
+    fn app_with_unsaved_document() -> DesignApp {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), Services::default());
+        app.run("file.new", json!({})).unwrap();
+        assert!(!app.session.documents()[0].is_dirty(), "a new document has nothing to save");
+        app.run("frame.create", json!({"rect": [36, 36, 136, 136]})).unwrap();
+        assert!(app.session.documents()[0].is_dirty());
+        app
+    }
+
+    /// File ▸ Close (and its shortcut) closed a document with unsaved changes without asking, and
+    /// closing discards the document's recovery data too.
+    #[test]
+    fn closing_an_unsaved_document_asks_first() {
+        let mut app = app_with_unsaved_document();
+        menus::activate(&mut app, "file.close", &Value::Null);
+        assert_eq!(app.session.documents().len(), 1, "the document stays open until the user answers");
+        assert_eq!(app.ui.dialog.as_ref().map(|d| d.id.as_str()), Some("closeDocument"));
+        // Cancel: nothing happens.
+        app.ui.dialog = None;
+        assert!(app.session.documents()[0].is_dirty());
+        // The tab's × asks too.
+        menus::close_document(&mut app, Some(0));
+        assert_eq!(app.ui.dialog.as_ref().map(|d| d.id.as_str()), Some("closeDocument"));
+        assert_eq!(app.session.documents().len(), 1);
+    }
+
+    #[test]
+    fn closing_without_saving_discards_the_document() {
+        let mut app = app_with_unsaved_document();
+        menus::close_document(&mut app, None);
+        app.ui.dialog.as_mut().unwrap().fields.insert("discard".into(), json!(true));
+        dialogs::confirm(&mut app).unwrap();
+        assert!(app.session.documents().is_empty());
+        assert!(app.ui.dialog.is_none());
+    }
+
+    #[test]
+    fn closing_with_save_writes_the_file_then_closes() {
+        let mut app = app_with_unsaved_document();
+        let path = std::env::temp_dir().join(format!("designcraft-close-test-{}.designcraft", std::process::id()));
+        app.run("file.saveAs", json!({"path": path})).unwrap();
+        let saved = std::fs::metadata(&path).unwrap().len();
+        app.run("frame.create", json!({"rect": [200, 200, 300, 300]})).unwrap();
+        menus::close_document(&mut app, None);
+        dialogs::confirm(&mut app).unwrap();
+        assert!(app.session.documents().is_empty());
+        let written = std::fs::metadata(&path).unwrap().len();
+        std::fs::remove_file(&path).unwrap();
+        assert!(written > saved, "the second frame was saved ({saved} → {written} bytes)");
+    }
+
+    /// Save on a document that has no file opens the file picker; cancelling it must not close the
+    /// document. (No picker service here: the same as cancelling.)
+    #[test]
+    fn a_cancelled_save_keeps_the_document_open() {
+        let mut app = app_with_unsaved_document();
+        menus::close_document(&mut app, None);
+        dialogs::confirm(&mut app).unwrap();
+        assert_eq!(app.session.documents().len(), 1);
+        assert!(app.session.documents()[0].is_dirty());
+    }
+
+    #[test]
+    fn closing_a_saved_document_does_not_ask() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), Services::default());
+        app.run("file.new", json!({})).unwrap();
+        menus::activate(&mut app, "file.close", &Value::Null);
+        assert!(app.session.documents().is_empty());
+        assert!(app.ui.dialog.is_none());
+    }
+
     /// The Control panel's two-row groups were centred as if they were one row tall, so the second
     /// row hung below the panel and was cut off.
     #[test]
@@ -1050,6 +1168,38 @@ mod tests {
         ui.snap_zone = 0.0;
         assert!(!ui.snap_view().snap_to_guides);
         assert_eq!(ui.snap_view().zone_px, 0.0);
+    }
+
+    #[test]
+    fn pdf_export_settings_round_trip() {
+        let ui = UiState::default();
+        let json = serde_json::to_string(&ui).unwrap();
+        let parsed: UiState = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.pdf_export, PdfExportSettings::default());
+    }
+
+    #[test]
+    fn pdf_export_settings_defaults() {
+        let settings = PdfExportSettings::default();
+        assert_eq!(settings.preset, "Desktop Printing");
+        assert_eq!(settings.standard, "none");
+        assert!(!settings.compress_images);
+        assert_eq!(settings.flatten, "");
+        assert!(!settings.spreads);
+        assert!(settings.bleed);
+        assert!(!settings.marks_crop);
+        assert!(!settings.marks_bleed);
+        assert!(!settings.marks_page_info);
+        assert_eq!(settings.marks_weight, "0.25");
+        assert_eq!(settings.marks_offset, "6");
+        assert!(settings.tagged);
+    }
+
+    #[test]
+    fn pdf_export_settings_survive_missing_key() {
+        let json = r#"{ "language": "en" }"#;
+        let ui: UiState = serde_json::from_str(json).unwrap();
+        assert_eq!(ui.pdf_export, PdfExportSettings::default());
     }
 
     /// A temporary file named `name` whose bytes aren't a document or a graphic.
