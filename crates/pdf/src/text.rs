@@ -241,7 +241,11 @@ impl Exporter<'_> {
                 if turn.is_some() || shatai.is_some() {
                     let m = turn.unwrap_or(Affine::IDENTITY) * shatai.unwrap_or(Affine::IDENTITY);
                     s.push_transform(&crate::export::tf(m));
-                    self.tagged_run(s, cs, &gs[i..i + 1], l.baseline, story);
+                    if line_span {
+                        self.run(s, cs, &gs[i..i + 1], l.baseline, story);
+                    } else {
+                        self.tagged_run(s, cs, &gs[i..i + 1], l.baseline, story);
+                    }
                     s.pop();
                     i += 1;
                     continue;

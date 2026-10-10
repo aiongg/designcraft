@@ -188,3 +188,19 @@ fn arabic_ligatures_extract_their_letters() {
     assert_eq!(extract_text(&bytes)[0], text);
     assert_eq!(line_actual_texts(&bytes), [text]);
 }
+
+/// A slanted (shatai) glyph in a right-to-left line is drawn inside the line's span, not in a span
+/// of its own (marked content can't nest).
+#[test]
+fn shatai_glyphs_in_right_to_left_lines_stay_in_the_line_span() {
+    hebrew_font();
+    let text = "דוד & שרה";
+    let mut d = doc(text, HEBREW, Rect::new(36.0, 36.0, 576.0, 300.0), rtl());
+    let sid = *d.stories.keys().next().unwrap();
+    d.story_mut(sid).unwrap().format_chars(0.."דוד".len(), |f| f.over.shatai_magnification = Some(30.0));
+    for tagged in [false, true] {
+        let bytes = export_pdf(&d, &Cache::new(), &PdfOptions { tagged, ..PdfOptions::default() }).unwrap();
+        assert_eq!(line_actual_texts(&bytes), [text], "tagged: {tagged}");
+        assert_eq!(extract_text(&bytes)[0], text, "tagged: {tagged}");
+    }
+}
