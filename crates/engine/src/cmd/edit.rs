@@ -111,7 +111,7 @@ pub fn specs() -> Vec<CommandSpec> {
             super::rulers::keep_zero_point(&st.doc, &mut doc);
             st.doc = doc;
             st.selection = e.selection;
-            st.revision += 1;
+            st.bump_revision();
             Ok(json!({"undone": e.label}))
         }),
         cmd!(noundo "edit.redo", "Redo", ["Edit"], Some("Cmd+Shift+Z"), "{}", can_redo, |s, _| {
@@ -122,7 +122,7 @@ pub fn specs() -> Vec<CommandSpec> {
             super::rulers::keep_zero_point(&st.doc, &mut doc);
             st.doc = doc;
             st.selection = e.selection;
-            st.revision += 1;
+            st.bump_revision();
             Ok(json!({"redone": e.label}))
         }),
         cmd!(noundo "selection.set", "Select", [], None, "{ids: [id], add?: bool, content?: bool}", has_doc, |s, p| {
@@ -142,7 +142,7 @@ pub fn specs() -> Vec<CommandSpec> {
             }
             st.selection.text = None;
             st.selection.cells = None;
-            st.revision += 1;
+            st.bump_revision();
             ok()
         }),
         cmd!(noundo "selection.toggle", "Toggle Selection", [], None, "{id}", has_doc, |s, p| {
@@ -155,7 +155,7 @@ pub fn specs() -> Vec<CommandSpec> {
             } else {
                 st.selection.items.push(id);
             }
-            st.revision += 1;
+            st.bump_revision();
             ok()
         }),
         cmd!(noundo "edit.selectAll", "Select All", ["Edit"], Some("Cmd+A"), "{} — all items on the active spreads, or all text in the story", has_doc, |s, _| {
@@ -179,13 +179,13 @@ pub fn specs() -> Vec<CommandSpec> {
                 }
                 st.selection = Selection::items(ids);
             }
-            st.revision += 1;
+            st.bump_revision();
             ok()
         }),
         cmd!(noundo "edit.deselectAll", "Deselect All", ["Edit"], Some("Cmd+Shift+A"), "{}", has_doc, |s, _| {
             let st = s.doc_mut()?;
             st.selection = Selection::default();
-            st.revision += 1;
+            st.bump_revision();
             ok()
         }),
         cmd!("edit.clear", "Clear", ["Edit"], Some("Delete"), "{ids?} — delete selected items (or the selected text)", has_doc, |s, p| {

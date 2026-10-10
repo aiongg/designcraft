@@ -41,7 +41,7 @@ pub fn specs() -> Vec<CommandSpec> {
             let a = floor_char_boundary(text, p.get("anchor").and_then(Value::as_u64).unwrap_or(0) as usize);
             let f = floor_char_boundary(text, p.get("focus").and_then(Value::as_u64).map(|v| v as usize).unwrap_or(a));
             st.selection = Selection::text(TextSel { story: sid, anchor: a, focus: f, frame: None, cell: None });
-            st.revision += 1;
+            st.bump_revision();
             ok()
         }),
         cmd!("text.insert", "Type", [], None, "{text, raw?: bool (no typographer's quotes)} — replaces the selected text", has_text, insert),
@@ -54,7 +54,7 @@ pub fn specs() -> Vec<CommandSpec> {
                 st.selection.items = f.into_iter().collect();
             }
             st.selection.cells = None;
-            st.revision += 1;
+            st.bump_revision();
             ok()
         }),
         cmd!(
@@ -342,7 +342,7 @@ fn select_at(s: &mut Session, p: &Value, unit: &str) -> Result<Value> {
     s.text_drag = false;
     let st = s.doc_mut()?;
     st.selection = Selection::text(TextSel { story: sid, anchor: a, focus: e, frame: Some(frame), cell });
-    st.revision += 1;
+    st.bump_revision();
     Ok(json!({"story": sid.0, "anchor": a, "focus": e}))
 }
 
@@ -408,7 +408,7 @@ fn place(s: &mut Session, p: &Value, extend: bool) -> Result<Value> {
     {
         let range = designcraft_doc::CellRange::new(a.row, a.col, c.row, c.col);
         st.selection.cells = Some(designcraft_doc::TableSel { story: sid, table: c.table, range });
-        st.revision += 1;
+        st.bump_revision();
         return Ok(json!({"story": sid.0, "cells": range}));
     }
     let t = match (extend, st.selection.text) {
@@ -416,7 +416,7 @@ fn place(s: &mut Session, p: &Value, extend: bool) -> Result<Value> {
         _ => TextSel { story: sid, anchor: b, focus: b, frame: Some(frame), cell },
     };
     st.selection = Selection::text(t);
-    st.revision += 1;
+    st.bump_revision();
     Ok(json!({"story": sid.0, "pos": b, "cell": cell}))
 }
 
@@ -472,7 +472,10 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     let tracking = s.doc()?.doc.settings.track_changes;
     let autocorrect = (s.prefs.autocorrect && !tracking && !raw).then(|| s.prefs.autocorrect_list.clone());
     let typing = typing_format(s).cloned();
-    s.typing_format = None;
+    // A preview (IME marked text) leaves the typing format to the text typed in the end.
+    if s.active().is_none_or(|d| d.interaction.is_none()) {
+        s.typing_format = None;
+    }
     s.edit(|d, sel| {
         let t = sel.text.ok_or_else(|| bad("text.insert", "no insertion point"))?;
         let st = d.text_story_mut(t.story, t.cell).ok_or(designcraft_doc::DocError::NoStory(t.story))?;

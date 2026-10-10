@@ -316,6 +316,7 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
     }
     let sel_rect = draw_selection(app, &painter, &xf, &doc, &layout);
     draw_tool_overlays(app, &painter, &xf);
+    ime_output(app, ui.ctx(), &xf);
     if rulers {
         draw_rulers(app, ui, full, rect, &xf, &doc, &layout, &t);
         ruler_units_menus(app, &resp, full, rect, &doc);
@@ -1538,15 +1539,23 @@ fn handle_input(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, r
         resp.request_focus();
     }
     // Keyboard for the active tool.
-    if ui.ctx().text_edit_focused() && !resp.has_focus() {
+    if (ui.ctx().text_edit_focused() && !resp.has_focus()) || !keyboard_pane(app) {
         return;
     }
+    // Keys of a frame that began composing are the IME's too (a Backspace that empties the marked
+    // text must not delete the character before it).
+    let composing_at_start = app.session.tool_composing();
     let evs = ui.input(|i| i.events.clone());
     for e in evs {
+        let composing = composing_at_start || app.session.tool_composing();
         match e {
-            egui::Event::Text(t) if wants_text => {
+            egui::Event::Ime(ime) if wants_text => ime_event(app, ime, vi),
+            // Keys the IME passes through come as text only while nothing is marked.
+            egui::Event::Text(t) if wants_text && !composing => {
                 let _ = app.run("text.insert", json!({"text": t}));
             }
+            // The IME owns the keyboard until it commits: no typing, clipboard or editing keys.
+            egui::Event::Text(_) | egui::Event::Paste(_) | egui::Event::Copy | egui::Event::Cut | egui::Event::Key { .. } if composing => {}
             egui::Event::Paste(t) if wants_text => {
                 // Formatted when the system clipboard still holds what was copied here;
                 // Shift (⇧⌘V) pastes without formatting.
@@ -1598,6 +1607,95 @@ fn handle_input(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, r
         }
     }
     let _ = DVec2::ZERO;
+}
+
+/// Does the current pane take the keyboard? Both panes of a split window see the same events, so
+/// typing, tool keys, the clipboard and the input method serve only the pane last clicked.
+fn keyboard_pane(app: &DesignApp) -> bool {
+    !app.split || app.pane == app.focus_pane
+}
+
+/// One input method event for the text caret: marked text previews in the story, a commit types.
+fn ime_event(app: &mut DesignApp, e: egui::ImeEvent, vi: designcraft_engine::ViewInfo) {
+    let r = match e {
+        egui::ImeEvent::Preedit { text, active_range_chars } => {
+            app.ime_marked = Some(text.clone()).filter(|t| !t.is_empty());
+            app.session.tool_preedit(&text, active_range_chars, vi).map_err(|e| e.to_string())
+        }
+        // A bare line break confirms the composition (Enter with some IMEs): the marked text, not
+        // a new paragraph.
+        egui::ImeEvent::Commit(t) if t == "\n" || t == "\r" => {
+            keep_marked_text(app);
+            Ok(())
+        }
+        egui::ImeEvent::Commit(t) => {
+            app.ime_marked = None;
+            app.session.tool_ime_commit(&t, vi).map_err(|e| e.to_string())
+        }
+        // The web text agent's corrections and mobile Backspace: characters around the caret go.
+        egui::ImeEvent::DeleteSurrounding { before_chars, after_chars } if !app.session.tool_composing() => {
+            delete_surrounding(app, before_chars, after_chars)
+        }
+        // `Enabled` and `Disabled` carry nothing: the IME is on while `ime_output` sets `ime`.
+        _ => Ok(()),
+    };
+    if let Err(e) = r {
+        app.status(e);
+    }
+    app.after_engine();
+}
+
+/// Delete `before` characters before the caret and `after` after it (sizes come from the browser:
+/// a correction never deletes more than a word's worth).
+fn delete_surrounding(app: &mut DesignApp, before: usize, after: usize) -> Result<(), String> {
+    for (n, forward) in [(before, false), (after, true)] {
+        for _ in 0..n.min(64) {
+            app.run("text.delete", json!({"forward": forward}))?;
+        }
+    }
+    Ok(())
+}
+
+/// End a composition outside the IME (a click away, the canvas losing the keyboard): the marked
+/// text stays as typed, and the system IME is told to drop its copy.
+pub(crate) fn keep_marked_text(app: &mut DesignApp) {
+    if app.ime_marked.take().is_some() {
+        app.ime_discard = true;
+    }
+    if app.session.tool_composing() {
+        if let Err(e) = app.session.end_composition() {
+            app.status(e.to_string());
+        }
+        app.after_engine();
+    }
+}
+
+/// While the text caret is in the canvas, let the system IME compose (egui-winit allows it only in
+/// frames that set `ime`; the web build focuses its hidden text input then) and keep the candidate
+/// window at the caret, through zoom, scrolling, view rotation and vertical text.
+fn ime_output(app: &mut DesignApp, ctx: &egui::Context, xf: &Xf) {
+    if !keyboard_pane(app) {
+        return;
+    }
+    // A text field, dialog or Quick Apply has the keyboard: egui's own text editing serves the IME.
+    let ours = app.session.wants_text() && !ctx.text_edit_focused() && app.ui.dialog.is_none() && app.ui.palette.is_none();
+    let caret = if ours { app.session.tool_ime_caret(app.view_info()) } else { None };
+    let Some((a, b)) = caret else {
+        // The IME goes away with its marked text: keep that text as typed, like a click away.
+        keep_marked_text(app);
+        return;
+    };
+    let r = Rect::from_two_pos(xf.to_screen(a), xf.to_screen(b)).expand(1.0);
+    // The composition ended outside the IME (a click, a command): the IME drops what it has marked.
+    let interrupt = app.ime_marked.is_some() && !app.session.tool_composing();
+    if interrupt {
+        app.ime_marked = None;
+        app.ime_discard = true;
+    }
+    app.canvas_ime = true;
+    ctx.output_mut(|o| {
+        o.ime = Some(egui::output::IMEOutput { purpose: egui::IMEPurpose::Normal, rect: r, cursor_rect: r, should_interrupt_composition: interrupt });
+    });
 }
 
 /// View → Show Hidden Characters: ¶ paragraph ends, » tabs, · spaces, ¬ forced line breaks, # end of story.
@@ -2155,5 +2253,154 @@ mod tests {
         let Some(rect) = h.state().canvas_rect else { return };
         right_click(&mut h, pos2(rect.center().x, rect.min.y - RULER / 2.0));
         assert!(h.query_by_label("   Points").is_none());
+    }
+
+    /// One frame of the whole app with `events`; returns what it asks of the system IME.
+    fn ime_frame(app: &mut DesignApp, ctx: &egui::Context, events: Vec<egui::Event>) -> Option<egui::output::IMEOutput> {
+        let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 900.0))), events, ..Default::default() };
+        let mut out = ctx.run_ui(raw, |ui| {
+            app.logic(ui.ctx());
+            app.ui(ui);
+        });
+        out.textures_delta.clear();
+        out.platform_output.ime
+    }
+
+    /// The Type tool's caret at the end of a new text frame holding `text`, the app's first frames
+    /// drawn; returns the story id.
+    fn typing_app(app: &mut DesignApp, ctx: &egui::Context, text: &str) -> Value {
+        app.run("file.new", json!({})).unwrap();
+        let f = app.session.execute("frame.create", &json!({"rect": [36, 36, 300, 200], "content": "text", "text": text})).unwrap();
+        let sid = f["story"].clone();
+        app.session.execute("text.select", &json!({"story": sid, "anchor": text.len(), "focus": text.len()})).unwrap();
+        app.select_tool("type");
+        for _ in 0..4 {
+            ime_frame(app, ctx, vec![]);
+        }
+        sid
+    }
+
+    fn story_text(app: &mut DesignApp, sid: &Value) -> String {
+        app.session.execute("story.get", &json!({"story": sid})).unwrap()["text"].as_str().unwrap().to_string()
+    }
+
+    /// Spread point `p` on screen.
+    fn on_screen(app: &DesignApp, p: Point) -> Pos2 {
+        let st = app.session.active().unwrap();
+        let c = CanvasLayout::new(&st.doc, st.editing_parents).to_canvas(SpreadRef::Doc(0), p);
+        Xf::new(app.canvas_rect.unwrap(), app.view().unwrap()).to_screen(c)
+    }
+
+    fn preedit(t: &str, c: usize) -> egui::Event {
+        egui::Event::Ime(egui::ImeEvent::Preedit { text: t.into(), active_range_chars: Some(c..c) })
+    }
+
+    #[test]
+    #[allow(deprecated)] // `ImeEvent::Enabled` / `Disabled`: egui no longer sends them, other integrations may.
+    fn ime_events_compose_in_the_story_with_the_candidate_window_at_the_caret() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        let ctx = egui::Context::default();
+        let sid = typing_app(&mut app, &ctx, "曲:");
+        // At a text caret the IME is allowed, its window on the caret as the canvas draws it.
+        let ime = ime_frame(&mut app, &ctx, vec![]).expect("IME allowed at a text caret");
+        let (top, bottom) = {
+            let st = app.session.active().unwrap();
+            let cs = app.session.cache.get(&st.doc, designcraft_doc::StoryId(sid.as_u64().unwrap()), None);
+            let (fi, x, bl, asc, desc) = compose::caret(&cs, "曲:".len()).unwrap();
+            let fid = cs.frames[fi].frame;
+            let (a, _) = item_canvas_xf(&st.doc, &CanvasLayout::new(&st.doc, st.editing_parents), fid).unwrap();
+            let m = a * st.doc.text_xf(st.doc.item(fid).unwrap());
+            let xf = Xf::new(app.canvas_rect.unwrap(), app.view().unwrap());
+            (xf.to_screen(m * Point::new(x, bl - asc)), xf.to_screen(m * Point::new(x, bl + desc)))
+        };
+        assert!(ime.rect.expand(1.0).contains(top) && ime.rect.expand(1.0).contains(bottom), "{:?} vs {top:?}–{bottom:?}", ime.rect);
+        assert_eq!(ime.cursor_rect, ime.rect);
+        assert!(!ime.should_interrupt_composition);
+        assert!(app.canvas_ime(), "the web build keeps whole words typed at the caret");
+        // "ni" → に → 日, with the events winit sends.
+        ime_frame(&mut app, &ctx, vec![egui::Event::Ime(egui::ImeEvent::Enabled), preedit("ni", 2)]);
+        assert_eq!(story_text(&mut app, &sid), "曲:ni", "marked text shows in place");
+        assert!(app.session.tool_composing());
+        // Keys, plain text, the clipboard and Undo (the native menu's ⌘Z) wait for the IME.
+        let steps = app.session.doc().unwrap().history.undo.len();
+        let key = |key, pressed| egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers: Default::default() };
+        ime_frame(
+            &mut app,
+            &ctx,
+            vec![key(egui::Key::Backspace, true), key(egui::Key::Backspace, false), egui::Event::Text("x".into()), egui::Event::Paste("y".into())],
+        );
+        crate::menus::activate(&mut app, "edit.undo", &Value::Null);
+        assert!(!crate::menus::enabled(&app, "edit.undo"));
+        assert_eq!(story_text(&mut app, &sid), "曲:ni");
+        let ime2 = ime_frame(&mut app, &ctx, vec![preedit("に", 1)]).expect("IME allowed while composing");
+        assert_eq!(story_text(&mut app, &sid), "曲:に");
+        assert!(ime2.rect.center().x > ime.rect.center().x, "the window follows the IME's cursor: {:?} {:?}", ime2.rect, ime.rect);
+        ime_frame(&mut app, &ctx, vec![egui::Event::Ime(egui::ImeEvent::Commit("日".into())), egui::Event::Ime(egui::ImeEvent::Disabled)]);
+        assert_eq!(story_text(&mut app, &sid), "曲:日");
+        assert!(!app.session.tool_composing());
+        assert_eq!(app.session.doc().unwrap().history.undo.len(), steps + 1, "the commit is one undo step");
+        assert_eq!(app.session.journal.last(), Some(&("text.insert".to_string(), json!({"text": "日"}))));
+        // After the commit, typing and Undo work again.
+        ime_frame(&mut app, &ctx, vec![egui::Event::Text("!".into())]);
+        assert_eq!(story_text(&mut app, &sid), "曲:日!");
+        crate::menus::activate(&mut app, "edit.undo", &Value::Null);
+        crate::menus::activate(&mut app, "edit.undo", &Value::Null);
+        assert_eq!(story_text(&mut app, &sid), "曲:");
+        // Without a text caret the IME is off: single-key tool shortcuts keep working.
+        app.select_tool("selection");
+        assert!(ime_frame(&mut app, &ctx, vec![]).is_none());
+        assert!(!app.canvas_ime());
+    }
+
+    /// Both panes of a split window see the same keyboard events: only the pane last clicked
+    /// types them.
+    #[test]
+    fn a_split_window_types_once() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        let ctx = egui::Context::default();
+        let sid = typing_app(&mut app, &ctx, "ab");
+        app.run("window.split", json!({"on": true})).unwrap();
+        for _ in 0..3 {
+            ime_frame(&mut app, &ctx, vec![]);
+        }
+        assert!(app.other_pane.as_ref().and_then(|o| o.1).is_some(), "both panes are drawn");
+        ime_frame(&mut app, &ctx, vec![egui::Event::Text("c".into())]);
+        assert_eq!(story_text(&mut app, &sid), "abc");
+        let key = |pressed| egui::Event::Key { key: egui::Key::Backspace, physical_key: None, pressed, repeat: false, modifiers: Default::default() };
+        ime_frame(&mut app, &ctx, vec![key(true), key(false)]);
+        assert_eq!(story_text(&mut app, &sid), "ab");
+        ime_frame(&mut app, &ctx, vec![egui::Event::Paste("de".into())]);
+        assert_eq!(story_text(&mut app, &sid), "abde");
+        ime_frame(&mut app, &ctx, vec![preedit("に", 1)]);
+        assert_eq!(story_text(&mut app, &sid), "abdeに");
+        ime_frame(&mut app, &ctx, vec![egui::Event::Ime(egui::ImeEvent::Commit("日".into()))]);
+        assert_eq!(story_text(&mut app, &sid), "abde日");
+    }
+
+    #[test]
+    fn clicking_away_mid_composition_keeps_the_text_and_interrupts_the_ime() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        let ctx = egui::Context::default();
+        let sid = typing_app(&mut app, &ctx, "");
+        ime_frame(&mut app, &ctx, vec![preedit("しょうこ", 4)]);
+        assert!(app.session.tool_composing());
+        // A click in the frame (macOS and Windows send nothing for it): the marked text stays as
+        // typed and the IME is told to drop its composition, once.
+        let p = on_screen(&app, Point::new(150.0, 120.0));
+        let press = |pressed| egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+        let ime = ime_frame(&mut app, &ctx, vec![egui::Event::PointerMoved(p), press(true)]).expect("still at a text caret");
+        assert!(ime.should_interrupt_composition);
+        ime_frame(&mut app, &ctx, vec![press(false)]);
+        assert!(!app.session.tool_composing());
+        assert_eq!(story_text(&mut app, &sid), "しょうこ");
+        assert!(app.take_ime_discard(), "the host tells the system IME to drop its marked text");
+        assert!(!ime_frame(&mut app, &ctx, vec![]).expect("still at a text caret").should_interrupt_composition);
+        assert!(!app.take_ime_discard());
+        // A bare line break from the IME confirms a composition: the marked text, no new paragraph.
+        ime_frame(&mut app, &ctx, vec![preedit("がく", 2)]);
+        ime_frame(&mut app, &ctx, vec![egui::Event::Ime(egui::ImeEvent::Commit("\n".into()))]);
+        assert!(!app.session.tool_composing());
+        let typed = story_text(&mut app, &sid);
+        assert!(typed.contains("がく") && typed.contains("しょうこ") && !typed.contains('\n'), "{typed:?}");
     }
 }
