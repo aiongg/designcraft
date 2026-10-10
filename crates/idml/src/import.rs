@@ -1667,21 +1667,22 @@ impl<'r> Importer<'r> {
                             }
                         }
                     }
-                    "Br" => match brk {
-                        Some(t) => {
+                    "Br" => {
+                        // A column, frame or page break ends its paragraph like a return does.
+                        if let Some(t) = brk {
                             let ch = match t {
                                 "NextColumn" => st::COLUMN_BREAK,
                                 "NextFrame" => st::FRAME_BREAK,
+                                "NextOddPage" => st::ODD_PAGE_BREAK,
+                                "NextEvenPage" => st::EVEN_PAGE_BREAK,
                                 _ => st::PAGE_BREAK,
                             };
                             b.push(&ch.to_string(), cf);
                         }
-                        None => {
-                            b.push("\n", cf);
-                            b.paras.push(pf.clone());
-                            b.fresh = true;
-                        }
-                    },
+                        b.push("\n", cf);
+                        b.paras.push(pf.clone());
+                        b.fresh = true;
+                    }
                     "Table" => {
                         let t = self.table(c);
                         b.push_table(t, pf, cf);

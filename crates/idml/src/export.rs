@@ -1881,6 +1881,7 @@ impl<'a> Ex<'a> {
             let pf = s.paras.get(pi).cloned().unwrap_or_default();
             let mut psr = self.psr_el(&pf);
             let last = pi + 1 == n;
+            let ends_with_break = s.text.get(r.clone()).and_then(|t| t.chars().next_back()).is_some_and(st::is_break_char);
             // Character runs intersecting the paragraph.
             let mut segs: Vec<(std::ops::Range<usize>, CharFormat)> = Vec::new();
             for (rr, f) in s.runs() {
@@ -1927,6 +1928,8 @@ impl<'a> Ex<'a> {
                         st::COLUMN_BREAK => Some("NextColumn"),
                         st::FRAME_BREAK => Some("NextFrame"),
                         st::PAGE_BREAK => Some("NextPage"),
+                        st::ODD_PAGE_BREAK => Some("NextOddPage"),
+                        st::EVEN_PAGE_BREAK => Some("NextEvenPage"),
                         _ => None,
                     };
                     if let Some(code) = ace {
@@ -2104,7 +2107,8 @@ impl<'a> Ex<'a> {
                 flush_text(&mut cur, &mut pending);
                 flush_content(&mut pending, &mut out);
                 let is_last_seg = k + 1 == nseg;
-                if is_last_seg && !last {
+                // A break character that ends the paragraph was written as its `Br`.
+                if is_last_seg && !last && !ends_with_break {
                     out.push(Node::El(El::new("Br")));
                 }
                 if !out.is_empty() || csrs.is_empty() {

@@ -812,6 +812,23 @@ fn column_break_moves_following_text() {
     assert!(lines[1].baseline < 20.0, "second column starts at the top");
 }
 
+/// InDesign: a break character ends its paragraph; the next paragraph starts on the next page (odd
+/// or even for those breaks), with no empty line where the break was.
+#[test]
+fn break_characters_end_their_paragraph_and_keep_page_parity() {
+    use designcraft_doc::story::{EVEN_PAGE_BREAK, ODD_PAGE_BREAK, PAGE_BREAK};
+    let mut d = Document::new(&NewDocument { pages: 4, facing_pages: false, primary_text_frame: true, ..Default::default() });
+    let sid = d.settings.primary_story.unwrap();
+    let text = format!("one{ODD_PAGE_BREAK}\ntwo{EVEN_PAGE_BREAK}\nthree{PAGE_BREAK}\nfour");
+    d.story_mut(sid).unwrap().insert(0, &text);
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    // Frame i is on page i + 1: "one" on 1, "two" on the next odd page (3), "three" on the next
+    // even page (4), and "four" has no page left.
+    let lines: Vec<(usize, usize)> = cs.frames.iter().enumerate().flat_map(|(fi, f)| f.lines.iter().map(move |l| (fi, l.para))).collect();
+    assert_eq!(lines, vec![(0, 0), (2, 1), (3, 2)]);
+    assert_eq!(cs.overset_at, Some(text.find("four").unwrap()));
+}
+
 #[test]
 fn line_before_a_break_character_is_a_last_line() {
     // As in InDesign: column, frame and page breaks end the paragraph's last line (set with the

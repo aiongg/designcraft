@@ -580,6 +580,49 @@ fn absent_item_and_document_attributes_take_indesign_defaults() {
     }
 }
 
+/// InDesign: a break character ends its paragraph (`<Br/>` with a ParagraphBreakType closes the
+/// range); the text after it is a paragraph with its own style, set on the next page of the
+/// break's parity.
+const ODD_PAGE_BREAK_STORY: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<idPkg:Story xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="16.0">
+  <Story Self="s1">
+    <ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/Text%3aBody">
+      <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]"><Content>Body</Content></CharacterStyleRange>
+      <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]" ParagraphBreakType="NextOddPage"><Br/></CharacterStyleRange>
+    </ParagraphStyleRange>
+    <ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/$ID/NormalParagraphStyle" Justification="CenterAlign">
+      <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]"><Content>1</Content></CharacterStyleRange>
+    </ParagraphStyleRange>
+  </Story>
+</idPkg:Story>"#;
+
+#[test]
+fn odd_page_break_ends_its_paragraph_and_keeps_its_parity() {
+    let mut d = import_idml_with(&fixture_with_story(ODD_PAGE_BREAK_STORY), &|_| None).unwrap();
+    let sid = *d.stories.keys().next().unwrap();
+    let story = &d.stories[&sid];
+    assert_eq!(story.text, format!("Body{}\n1", st::ODD_PAGE_BREAK));
+    assert_eq!(story.paras.len(), 2);
+    assert_eq!(story.paras[0].style, "Text/Body");
+    assert_eq!(story.paras[1].style, st::BASIC_PARAGRAPH);
+    assert_eq!(story.paras[1].para.align, Some(designcraft_doc::Align::Center));
+    // Export writes the break as the paragraph's one `Br`; importing that gives the same story.
+    let back = import_idml(&export_idml(&d)).unwrap();
+    let again = back.stories.values().next().unwrap();
+    assert_eq!(again.text, story.text);
+    assert_eq!(again.paras, story.paras);
+    // The fixture's frames are on pages v and vi: the next odd page after v has no frame.
+    let cs = designcraft_compose::compose_story(&d, sid, &Default::default());
+    assert_eq!(cs.frames[0].lines.len(), 1, "no empty line after the break");
+    assert!(cs.frames[1].lines.is_empty());
+    assert_eq!(cs.overset_at, Some(story.text.len() - 1));
+    // Numbered from 4, the second frame is on page 5: "1" starts there.
+    d.sections[0].start_number = Some(4);
+    let cs = designcraft_compose::compose_story(&d, sid, &Default::default());
+    assert_eq!(cs.overset_at, None);
+    assert_eq!(cs.frames[1].lines.iter().map(|l| l.para).collect::<Vec<_>>(), vec![1]);
+}
+
 #[test]
 fn imports_hand_written_fixture() {
     let d = import_idml_with(&fixture(), &|_| None).unwrap();
@@ -624,8 +667,8 @@ fn imports_hand_written_fixture() {
     assert_eq!(d.styles.char_style("Strong").unwrap().chars.font_style.as_deref(), Some("Bold"));
     // Frames, threads, text.
     let story = d.stories.values().next().unwrap();
-    assert_eq!(story.text, format!("Hello & bold\nPage {}\tend{}after", st::PAGE_NUMBER, st::FRAME_BREAK));
-    assert_eq!(story.paras.len(), 2);
+    assert_eq!(story.text, format!("Hello & bold\nPage {}\tend{}\nafter", st::PAGE_NUMBER, st::FRAME_BREAK));
+    assert_eq!(story.paras.len(), 3);
     assert_eq!(story.paras[0].style, "Text/Body");
     assert_eq!(story.paras[1].style, st::BASIC_PARAGRAPH);
     assert_eq!(story.paras[1].para.align, Some(designcraft_doc::Align::Center));
@@ -792,7 +835,7 @@ fn small_doc() -> Document {
     if let Some(s) = d.story_mut(sid) {
         s.format_chars(0..3, |f| f.over = CharAttrs { size: Some(20.0), fill: Some("Brand".into()), ..Default::default() });
         let end = s.len();
-        s.insert(end, &format!(" {}", st::COLUMN_BREAK));
+        s.insert(end, &format!(" {}\n", st::COLUMN_BREAK));
     }
     let id = designcraft_doc::ItemId(d.alloc());
     let mut it = designcraft_doc::Item::new(id, lid, Shape::Oval, shapes::ellipse(Rect::new(650.0, 300.0, 750.0, 380.0)));
