@@ -742,6 +742,15 @@ fn typo_ascent(f: &skrifa::FontRef<'_>, location: &Location, upem: f64) -> Optio
     plausible(Some(v), upem)
 }
 
+/// `family` without the font-format suffix layout apps append when a family is installed in
+/// several formats (`Minion Pro (OTF)` → `Minion Pro`), if it has one.
+fn without_format_suffix(family: &str) -> Option<&str> {
+    const FORMATS: [&str; 5] = ["OTF", "TT", "TTF", "TTC", "T1"];
+    let (base, suffix) = family.trim_end().strip_suffix(')')?.rsplit_once('(')?;
+    let base = base.trim_end();
+    (!base.is_empty() && FORMATS.iter().any(|f| f.eq_ignore_ascii_case(suffix.trim()))).then_some(base)
+}
+
 /// The named style part of a style with axis settings (`Bold {wght:650}` → `Bold`).
 pub fn base_style(style: &str) -> &str {
     style.split('{').next().unwrap_or(style).trim()
@@ -1303,6 +1312,14 @@ impl ScopedFonts<'_> {
     /// `(italic, weight, name)` of each style of `family` (the document's, loaded, or installed),
     /// Regular first, then by weight.
     fn style_traits(&self, family: &str) -> Vec<(bool, f32, String)> {
+        let v = self.exact_style_traits(family);
+        match without_format_suffix(family) {
+            Some(base) if v.is_empty() => self.exact_style_traits(base),
+            _ => v,
+        }
+    }
+
+    fn exact_style_traits(&self, family: &str) -> Vec<(bool, f32, String)> {
         let mut v: Vec<(bool, f32, String)> = self
             .own()
             .iter()
@@ -1322,15 +1339,10 @@ impl ScopedFonts<'_> {
     }
 
     /// Resolve a family + style to a face, falling back to the closest style of the family, then to
-    /// Source Sans 3 Regular. Installed system fonts are found by name whatever ran before.
+    /// Source Sans 3 Regular. Installed system fonts are found by name whatever ran before. A
+    /// family with a format suffix (`Minion Pro (OTF)`) that isn't found is looked up without it.
     pub fn face(&self, family: &str, style: &str) -> Arc<FontFace> {
-        if let Some(f) = self.find(family, style) {
-            return f;
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        if self.db.load_cataloged(family)
-            && let Some(f) = self.find(family, style)
-        {
+        if let Some(f) = self.find_or_load(family, style).or_else(|| without_format_suffix(family).and_then(|base| self.find_or_load(base, style))) {
             return f;
         }
         self.find(FALLBACK_FAMILY, style)
@@ -1339,8 +1351,24 @@ impl ScopedFonts<'_> {
             .unwrap_or_else(last_resort_face)
     }
 
-    /// Is `family` available (the document's, loaded, or installed on the system)?
+    fn find_or_load(&self, family: &str, style: &str) -> Option<Arc<FontFace>> {
+        if let Some(f) = self.find(family, style) {
+            return Some(f);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.db.load_cataloged(family) {
+            return self.find(family, style);
+        }
+        None
+    }
+
+    /// Is `family` available (the document's, loaded, or installed on the system), as named or
+    /// without a format suffix (see [`ScopedFonts::face`])?
     pub fn has_family(&self, family: &str) -> bool {
+        self.has_exact_family(family) || without_format_suffix(family).is_some_and(|base| self.has_exact_family(base))
+    }
+
+    fn has_exact_family(&self, family: &str) -> bool {
         if self.own().iter().any(|f| f.family.eq_ignore_ascii_case(family)) || self.db.is_loaded(family) {
             return true;
         }
