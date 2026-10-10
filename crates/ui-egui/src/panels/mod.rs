@@ -68,7 +68,7 @@ pub fn sel_info(app: &DesignApp) -> Option<SelInfo> {
     let b = b?;
     let first = d.item(st.selection.items[0])?;
     let loc = d.find(first.id)?;
-    let o = d.ruler_origin(loc.spread)?;
+    let o = d.ruler_origin(loc.spread, b.center().x)?;
     let wrap = match first.wrap.mode {
         WrapMode::None => "none",
         WrapMode::BoundingBox => "boundingBox",

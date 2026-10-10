@@ -768,7 +768,14 @@ impl<'a> Ex<'a> {
             El::new("ViewPreference")
                 .attr("HorizontalMeasurementUnits", names::unit_out(s.horizontal_units))
                 .attr("VerticalMeasurementUnits", names::unit_out(s.vertical_units))
-                .attr("RulerOrigin", "SpreadOrigin")
+                .attr(
+                    "RulerOrigin",
+                    match s.ruler_origin {
+                        designcraft_doc::RulerOrigin::Spread => "SpreadOrigin",
+                        designcraft_doc::RulerOrigin::Page => "PageOrigin",
+                        designcraft_doc::RulerOrigin::Spine => "SpineOrigin",
+                    },
+                )
                 .attr("CursorKeyIncrement", num(s.keyboard_increment))
                 .attr("PointsPerInch", "72"),
         );

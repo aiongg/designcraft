@@ -1243,7 +1243,7 @@ fn transform_set(s: &mut Session, p: &Value) -> Result<Value> {
         let fy = [0.0, 0.5, 1.0][(rf / 3).min(2)];
         let mut to = Rect::new(anchor.x - fx * w, anchor.y - fy * h, anchor.x - fx * w + w, anchor.y - fy * h + h);
         // x/y are the reference point's position measured from the rulers' zero point.
-        let origin = ids.first().and_then(|i| d.find(*i)).and_then(|l| d.ruler_origin(l.spread)).unwrap_or(Point::ORIGIN);
+        let origin = ids.first().and_then(|i| d.find(*i)).and_then(|l| d.ruler_origin(l.spread, from.center().x)).unwrap_or(Point::ORIGIN);
         if let Some(x) = p.get("x").and_then(Value::as_f64).filter(|v| v.is_finite()) {
             to = to + Vec2::new(x + origin.x - anchor.x, 0.0);
         }

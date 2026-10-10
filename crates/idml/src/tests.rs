@@ -1401,11 +1401,15 @@ fn list_numbering_format_expression_and_bullet_import_and_round_trip() {
 }
 
 #[test]
-fn round_trips_the_zero_point() {
+fn round_trips_the_zero_point_and_ruler_origin() {
     let mut d = Document::new(&NewDocument { pages: 3, ..Default::default() });
     d.settings.zero_point = [36.0, 18.5];
     let back = import_idml(&export_idml(&d)).unwrap();
     assert_eq!(back.settings.zero_point, [36.0, 18.5]);
+    for origin in [designcraft_doc::RulerOrigin::Page, designcraft_doc::RulerOrigin::Spine, designcraft_doc::RulerOrigin::Spread] {
+        d.settings.ruler_origin = origin;
+        assert_eq!(import_idml(&export_idml(&d)).unwrap().settings.ruler_origin, origin);
+    }
     // A hostile ZeroPoint lands on the pasteboard; a malformed one is ignored.
     let fixture = |zp: &str| {
         let designmap = format!(

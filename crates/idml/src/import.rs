@@ -271,6 +271,12 @@ impl<'r> Importer<'r> {
                     if let Some(v) = e.num("CursorKeyIncrement") {
                         self.settings.keyboard_increment = v;
                     }
+                    match e.get("RulerOrigin") {
+                        Some("PageOrigin") => self.settings.ruler_origin = designcraft_doc::RulerOrigin::Page,
+                        Some("SpineOrigin") => self.settings.ruler_origin = designcraft_doc::RulerOrigin::Spine,
+                        Some("SpreadOrigin") => self.settings.ruler_origin = designcraft_doc::RulerOrigin::Spread,
+                        _ => {}
+                    }
                 }
                 "GridPreference" => self.grid_prefs(e),
                 "PasteboardPreference" => {

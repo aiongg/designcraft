@@ -1,6 +1,6 @@
-//! The rulers' zero point: one per document, an offset from the top-left corner of each spread's
-//! pages, so every spread measures from the same relative place. Moving it is not an undo step,
-//! and undo and redo leave it where it is.
+//! The rulers' zero point: one per document, an offset from the ruler origin (the spread's or
+//! each page's top-left corner, or the spine), so every spread measures from the same relative
+//! place. Moving it is not an undo step, and undo and redo leave it where it is.
 
 use std::sync::Arc;
 
@@ -17,7 +17,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Ruler Zero Point",
             [],
             None,
-            "{at?: [x, y] (points right of and below the top-left corner of each spread's pages; kept on the pasteboard), reset?: bool} → {zeroPoint: [x, y], locked}; with neither, reports it. Not an undo step; refused while locked",
+            "{at?: [x, y] (points right of and below the ruler origin — document.preferences rulerOrigin: spread|page|spine; kept on the pasteboard), reset?: bool} → {zeroPoint: [x, y], locked}; with neither, reports it. Not an undo step; refused while locked",
             has_doc,
             zero_point
         ),
@@ -135,8 +135,8 @@ mod tests {
         s.execute("view.zeroPoint", &json!({"at": [100, 50]})).unwrap();
         s.prefs.dimensions_include_stroke = false;
         let d = s.doc().unwrap().doc.clone();
-        let o0 = d.ruler_origin(SpreadRef::Doc(0)).unwrap();
-        let o1 = d.ruler_origin(SpreadRef::Doc(1)).unwrap();
+        let o0 = d.ruler_origin(SpreadRef::Doc(0), 0.0).unwrap();
+        let o1 = d.ruler_origin(SpreadRef::Doc(1), 0.0).unwrap();
         // The same place relative to each spread's top-left page corner.
         let b0 = d.spreads[0].bounds();
         let b1 = d.spreads[1].bounds();
@@ -152,6 +152,37 @@ mod tests {
             let b = s.doc().unwrap().doc.item(id).unwrap().bounds();
             assert!((b.x0 - (o.x + 20.0)).abs() < 1e-6 && (b.y0 - (o.y + 30.0)).abs() < 1e-6, "spread {spread}: {b:?} from {o:?}");
         }
+    }
+
+    #[test]
+    fn x_measures_from_the_chosen_ruler_origin() {
+        let mut s = Session::new();
+        // Spread 1: page 2 (x 0–612) on the left, page 3 (612–1224) on the right.
+        s.execute("file.new", &json!({"pages": 3})).unwrap();
+        s.prefs.dimensions_include_stroke = false;
+        s.execute("view.zeroPoint", &json!({"at": [10, 0]})).unwrap();
+        let left = s.execute("frame.create", &json!({"spread": 1, "rect": [100, 10, 150, 60]})).unwrap()["id"].as_u64().unwrap();
+        let right = s.execute("frame.create", &json!({"spread": 1, "rect": [700, 10, 750, 60]})).unwrap()["id"].as_u64().unwrap();
+        let x_of = |s: &Session, id: u64| {
+            let d = &s.doc().unwrap().doc;
+            let b = d.item(ItemId(id)).unwrap().bounds();
+            b.x0 - d.ruler_origin(SpreadRef::Doc(1), b.center().x).unwrap().x
+        };
+        assert_eq!(s.doc().unwrap().doc.settings.ruler_origin, designcraft_doc::RulerOrigin::Spread, "the default");
+        for (origin, l, r) in [("spread", 90.0, 690.0), ("page", 90.0, 78.0), ("spine", -522.0, 78.0)] {
+            s.execute("document.preferences", &json!({"rulerOrigin": origin})).unwrap();
+            assert_eq!((x_of(&s, left), x_of(&s, right)), (l, r), "{origin}");
+            // The X field sets what it shows.
+            s.execute("transform.set", &json!({"ids": [right], "x": 5, "ref": 0})).unwrap();
+            assert!((x_of(&s, right) - 5.0).abs() < 1e-6, "{origin}");
+            s.execute("transform.set", &json!({"ids": [right], "x": r, "ref": 0})).unwrap();
+        }
+        // A page origin restarts the horizontal ruler on each page.
+        let pieces = s.doc().unwrap().doc.ruler_pieces(SpreadRef::Doc(1));
+        let starts: Vec<f64> = pieces.iter().map(|p| p.2.x).collect();
+        assert_eq!(starts, [0.0, 612.0]);
+        assert!(pieces[0].0.is_infinite() && pieces[0].1 == 612.0 && pieces[1].1.is_infinite());
+        assert!(s.execute("document.preferences", &json!({"rulerOrigin": "elsewhere"})).is_err());
     }
 
     #[test]

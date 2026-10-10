@@ -1231,42 +1231,58 @@ fn draw_rulers(app: &DesignApp, ui: &egui::Ui, full: Rect, rect: Rect, xf: &Xf, 
     let zc = corner.center();
     painter.line_segment([zc - vec2(4.0, 0.0), zc + vec2(4.0, 0.0)], Stroke::new(1.0, t.ruler_tick));
     painter.line_segment([zc - vec2(0.0, 4.0), zc + vec2(0.0, 4.0)], Stroke::new(1.0, t.ruler_tick));
-    // While the zero point is dragged out of the corner, the rulers measure from the pointer and
-    // crosshair lines show where it lands.
+    // While the zero point is dragged out of the corner, the rulers measure from where it would
+    // land (kept on the pasteboard, as the engine keeps it) and crosshair lines show the spot.
+    // Cmd-dragged, the lines are the two guides it makes; locked, a plain drag does nothing.
     let dragged = ui.data(|d| d.get_temp::<Pos2>(egui::Id::new((ZERO_POINT_DRAG, app.pane)))).filter(|p| !corner.contains(*p));
-    if let Some(p) = dragged {
+    let guides = ui.input(|i| i.modifiers.command);
+    let moving = dragged.filter(|_| !guides && !doc.settings.zero_point_locked).and_then(|p| zero_point_at(app, xf, p));
+    let cross = if guides { dragged } else { moving.map(|(_, c)| xf.to_screen(c)) };
+    if let Some(p) = cross {
         let m = Stroke::new(1.0, t.text_dim);
         dashed(&painter, pos2(p.x, rect.min.y), pos2(p.x, full.max.y), m, 3.0, 3.0);
         dashed(&painter, pos2(rect.min.x, p.y), pos2(full.max.x, p.y), m, 3.0, 3.0);
     }
-    let Some(origin) = dragged.map(|p| xf.to_canvas(p)).or_else(|| ruler_zero(app, doc, layout)) else { return };
+    let zp = moving.map_or_else(|| doc.zero_point(), |(zp, _)| zp);
+    let pieces = ruler_pieces(app, doc, layout, zp);
+    let Some(&(_, _, origin)) = pieces.first() else { return };
     let font = egui::FontId::proportional(9.0);
     let tick = Stroke::new(1.0, t.ruler_tick);
-    // Horizontal.
+    // Horizontal: one run of ticks per piece (a page origin restarts at every page).
     let unit = doc.settings.horizontal_units;
     let (major, sub) = unit.ruler_ticks(xf.zoom);
-    let c0 = xf.to_canvas(top.min).x - origin.x;
-    let c1 = xf.to_canvas(pos2(top.max.x, 0.0)).x - origin.x;
-    let mut k = (c0 / major).floor() as i64;
-    while (k as f64) * major <= c1 {
-        let x0 = k as f64 * major;
-        for s in 0..sub {
-            let x = x0 + major * s as f64 / sub as f64;
-            let sx = xf.to_screen(Point::new(origin.x + x, 0.0)).x;
-            let len = if s == 0 {
-                RULER
-            } else if sub % 2 == 0 && s == sub / 2 {
-                7.0
-            } else {
-                4.0
-            };
-            painter.line_segment([pos2(sx, top.max.y - len), pos2(sx, top.max.y)], tick);
-            if s == 0 {
-                let v = unit.from_pt(x);
-                painter.text(pos2(sx + 2.0, top.min.y + 1.0), egui::Align2::LEFT_TOP, fmt_tick(v), font.clone(), t.ruler_text);
-            }
+    let (v0, v1) = (xf.to_canvas(top.min).x, xf.to_canvas(pos2(top.max.x, 0.0)).x);
+    for &(from, to, o) in &pieces {
+        // The piece and the visible ruler, measured from the piece's origin.
+        let (s0, s1) = (from - o.x, to - o.x);
+        let (c0, c1) = ((v0 - o.x).max(s0), (v1 - o.x).min(s1));
+        if !(c0.is_finite() && c1.is_finite() && c0 <= c1) {
+            continue;
         }
-        k += 1;
+        let mut k = (c0 / major).floor() as i64;
+        while (k as f64) * major <= c1 {
+            let x0 = k as f64 * major;
+            for s in 0..sub {
+                let x = x0 + major * s as f64 / sub as f64;
+                if x < s0 || x >= s1 {
+                    continue;
+                }
+                let sx = xf.to_screen(Point::new(o.x + x, 0.0)).x;
+                let len = if s == 0 {
+                    RULER
+                } else if sub % 2 == 0 && s == sub / 2 {
+                    7.0
+                } else {
+                    4.0
+                };
+                painter.line_segment([pos2(sx, top.max.y - len), pos2(sx, top.max.y)], tick);
+                if s == 0 {
+                    let v = unit.from_pt(x);
+                    painter.text(pos2(sx + 2.0, top.min.y + 1.0), egui::Align2::LEFT_TOP, fmt_tick(v), font.clone(), t.ruler_text);
+                }
+            }
+            k += 1;
+        }
     }
     // Vertical.
     let unit = doc.settings.vertical_units;
@@ -1305,11 +1321,15 @@ fn draw_rulers(app: &DesignApp, ui: &egui::Ui, full: Rect, rect: Rect, xf: &Xf, 
     }
 }
 
-/// Where the rulers measure from (canvas coordinates): the document's zero point on the spread
-/// in view.
-fn ruler_zero(app: &DesignApp, doc: &Document, layout: &CanvasLayout) -> Option<Point> {
-    let slot = layout.slots.get(current_slot(app, layout)?)?;
-    Some(slot.to_canvas(doc.ruler_origin(slot.spread)?))
+/// The horizontal ruler of the spread in view in pieces `(from x, to x, origin)`, canvas
+/// coordinates: the ruler origin (one per page for a page origin) moved by zero point `zp`.
+fn ruler_pieces(app: &DesignApp, doc: &Document, layout: &CanvasLayout, zp: [f64; 2]) -> Vec<(f64, f64, Point)> {
+    let Some(slot) = current_slot(app, layout).and_then(|i| layout.slots.get(i)) else { return Vec::new() };
+    let x = |v: f64, y: f64| if v.is_finite() { slot.to_canvas(Point::new(v, y)).x } else { v };
+    doc.ruler_pieces(slot.spread)
+        .into_iter()
+        .map(|(from, to, b)| (x(from, b.y), x(to, b.y), slot.to_canvas(Point::new(b.x + zp[0], b.y + zp[1]))))
+        .collect()
 }
 
 /// The horizontal (top) and vertical (left) rulers around the view `rect` in `full`.
@@ -1646,11 +1666,12 @@ const ZERO_POINT_DRAG: &str = "canvas_zero_point_drag";
 
 /// The ruler corner: drag from it and the zero point lands where the pointer is released; a click
 /// that stays in the corner leaves it; a double-click resets it. Locked, the corner ignores both.
+/// Cmd-dragged (Ctrl elsewhere), it makes a horizontal and a vertical guide instead.
 /// Holds the pointer position while dragging; returns true while it owns the pointer.
 fn zero_point_drag(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, rect: Rect, xf: &Xf) -> bool {
     let id = egui::Id::new((ZERO_POINT_DRAG, app.pane));
     let corner = Rect::from_min_max(resp.rect.min, rect.min);
-    let (pressed, released, down, origin, latest, dbl) = ui.input(|i| {
+    let (pressed, released, down, origin, latest, dbl, command) = ui.input(|i| {
         (
             i.pointer.primary_pressed(),
             i.pointer.primary_released(),
@@ -1658,12 +1679,12 @@ fn zero_point_drag(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response
             i.pointer.press_origin(),
             i.pointer.latest_pos(),
             i.pointer.button_double_clicked(egui::PointerButton::Primary),
+            i.modifiers.command,
         )
     });
     let mut at: Option<Pos2> = ui.data(|d| d.get_temp(id));
     if at.is_none() {
-        let locked = app.session.active().is_none_or(|st| st.doc.settings.zero_point_locked);
-        if !pressed || !resp.hovered() || locked || corner.width() <= 0.0 || corner.height() <= 0.0 {
+        if !pressed || !resp.hovered() || app.session.active().is_none() || corner.width() <= 0.0 || corner.height() <= 0.0 {
             return false;
         }
         at = origin.filter(|o| corner.contains(*o));
@@ -1682,27 +1703,50 @@ fn zero_point_drag(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response
         // The release happened where we couldn't see it (outside the window).
         return false;
     }
-    if dbl {
-        let _ = app.run("view.zeroPoint", json!({"reset": true}));
-    } else if !corner.contains(p)
-        && let Some(zp) = zero_point_at(app, xf, p)
-    {
-        let _ = app.run("view.zeroPoint", json!({ "at": zp }));
+    let locked = app.session.active().is_none_or(|st| st.doc.settings.zero_point_locked);
+    if command {
+        if !corner.contains(p) && rect.contains(p) {
+            corner_guides(app, xf, p);
+        }
+    } else if !locked {
+        if dbl {
+            let _ = app.run("view.zeroPoint", json!({"reset": true}));
+        } else if !corner.contains(p)
+            && let Some((zp, _)) = zero_point_at(app, xf, p)
+        {
+            let _ = app.run("view.zeroPoint", json!({ "at": zp }));
+        }
     }
     true
 }
 
-/// A screen point as a zero point: its offset from the top-left page corner of the spread in
-/// view, the spread the rulers measure.
-fn zero_point_at(app: &DesignApp, xf: &Xf, p: Pos2) -> Option<[f64; 2]> {
+/// A screen point as a zero point (its offset from the ruler origin of the spread in view, kept
+/// on the pasteboard as the engine keeps it), and where that zero point is on the canvas.
+fn zero_point_at(app: &DesignApp, xf: &Xf, p: Pos2) -> Option<([f64; 2], Point)> {
     let st = app.session.active()?;
     let layout = CanvasLayout::new(&st.doc, st.editing_parents);
     let slot = layout.slots.get(current_slot(app, &layout)?)?;
-    let corner = st.doc.spread(slot.spread)?.bounds();
     let sp = slot.to_spread(xf.to_canvas(p));
-    let zp = [sp.x - corner.x0, sp.y - corner.y0];
-    // The engine keeps it on the pasteboard.
-    zp.iter().all(|v| v.is_finite()).then_some(zp)
+    let base = st.doc.ruler_base(slot.spread, sp.x)?;
+    let zp = st.doc.clamp_zero_point([sp.x - base.x, sp.y - base.y])?;
+    Some((zp, slot.to_canvas(Point::new(base.x + zp[0], base.y + zp[1]))))
+}
+
+/// Cmd-drag from the ruler corner: a horizontal and a vertical spread guide through the drop
+/// point, on the spread under it.
+fn corner_guides(app: &mut DesignApp, xf: &Xf, p: Pos2) {
+    if !app.ui.guides || app.ui.guides_locked {
+        return;
+    }
+    let Some((r, sp)) = app.session.active().and_then(|st| CanvasLayout::new(&st.doc, st.editing_parents).spread_at(xf.to_canvas(p))) else {
+        return;
+    };
+    if !(sp.x.is_finite() && sp.y.is_finite()) {
+        return;
+    }
+    for (orientation, position, at) in [("horizontal", sp.y, sp.x), ("vertical", sp.x, sp.y)] {
+        let _ = app.run("guide.add", json!({"spread": r, "orientation": orientation, "position": position, "at": at, "spreadGuide": true}));
+    }
 }
 
 const GUIDE_DRAG: &str = "canvas_guide_drag";
@@ -1931,6 +1975,12 @@ mod tests {
         primary(h, p, false);
     }
 
+    /// Where the rulers measure from (canvas coordinates): the document's zero point on the
+    /// spread in view (its first page, for a page origin).
+    fn ruler_zero(app: &DesignApp, doc: &Document, layout: &CanvasLayout) -> Option<Point> {
+        ruler_pieces(app, doc, layout, doc.zero_point()).first().map(|p| p.2)
+    }
+
     fn zero_point(h: &Harness<'_, DesignApp>) -> [f64; 2] {
         h.state().session.doc().unwrap().doc.settings.zero_point
     }
@@ -1990,6 +2040,34 @@ mod tests {
         corner_click(&mut h, corner);
         corner_click(&mut h, corner);
         assert_ne!(zero_point(&h), [0.0, 0.0], "a locked zero point isn't reset");
+    }
+
+    #[test]
+    fn cmd_dragging_the_ruler_corner_makes_a_guide_each_way() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({})).unwrap();
+        let mut h = harness(app);
+        let rect = h.state().canvas_rect.unwrap();
+        let corner = rect.min - vec2(RULER / 2.0, RULER / 2.0);
+        let dest = rect.min + vec2(120.0, 90.0);
+        let (r, at) = {
+            let app = h.state();
+            let st = app.session.active().unwrap();
+            CanvasLayout::new(&st.doc, false).spread_at(Xf::new(rect, app.view().unwrap()).to_canvas(dest)).unwrap()
+        };
+        h.event(egui::Event::ModifiersChanged(egui::Modifiers::COMMAND));
+        h.step();
+        corner_drag(&mut h, corner, dest);
+        h.event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+        h.step();
+        let doc = h.state().session.doc().unwrap().doc.clone();
+        let guides: Vec<_> = doc.spread(r).unwrap().pages.iter().flat_map(|p| p.guides.clone()).collect();
+        assert_eq!(guides.len(), 2, "{guides:?}");
+        let pos = |o: designcraft_doc::Orientation| guides.iter().find(|g| g.orientation == o).map(|g| g.position).unwrap();
+        assert!((pos(designcraft_doc::Orientation::Horizontal) - at.y).abs() < 0.5);
+        assert!((pos(designcraft_doc::Orientation::Vertical) - at.x).abs() < 0.5);
+        assert!(guides.iter().all(|g| g.spread));
+        assert_eq!(doc.settings.zero_point, [0.0, 0.0], "the zero point stays");
     }
 
     #[test]
