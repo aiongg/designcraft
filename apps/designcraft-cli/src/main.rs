@@ -34,6 +34,19 @@ mod perf;
 use designcraft_engine::Session;
 use serde_json::{Value, json};
 
+/// The usage block. Shared by `--help` (stdout, success) and an unknown command (stderr, failure).
+const USAGE: &str = "usage: designcraft-cli run [--in FILE | --sample] [--cmd ID[=JSON]]... [--page N] [--scale S] [--pdf-options JSON] [--export OUT] [--all-pages DIR]\n         (--page, --scale and --pdf-options apply to the exports that follow them)\n       designcraft-cli commands [FILTER]\n       designcraft-cli describe COMMAND\n       designcraft-cli script [FILE|-] [--in FILE | --sample] [--connect PORT] [--save OUT] [--export OUT] [--keep-going]\n       designcraft-cli app [--port PORT] COMMAND [JSON] | --method METHOD [JSON]\n       designcraft-cli mcp [--connect PORT] [--sample]\n       designcraft-cli perf [--pages N] [--runs N] [--strict]\n       designcraft-cli bench FILE [--runs N]\n       designcraft-cli links\n       designcraft-cli --version";
+
+/// The links line under the usage block.
+fn usage_footer() -> String {
+    format!(
+        "\nCommunity: {}  ·  {}  ·  {}",
+        designcraft_engine::links::DISCORD,
+        designcraft_engine::links::APP_PAGE,
+        designcraft_engine::links::GITHUB
+    )
+}
+
 /// stdout went away. A reader that stopped early (a closed pipe) ends the program quietly, as
 /// ripgrep does; any other write error is reported.
 fn stdout_failed(e: std::io::Error) -> ! {
@@ -76,16 +89,16 @@ fn main() -> ExitCode {
             outln!("Discord   {DISCORD}\nWebsite   {WEBSITE}\nApp page  {APP_PAGE}\nGitHub    {GITHUB}\nIssues    {ISSUES}");
             ExitCode::SUCCESS
         }
+        // Asking for help is not an error: it goes to stdout and succeeds. An unknown command
+        // still prints the same usage to stderr and fails.
+        Some("--help" | "-h" | "help") => {
+            outln!("{USAGE}");
+            outln!("{}", usage_footer());
+            ExitCode::SUCCESS
+        }
         _ => {
-            eprintln!(
-                "usage: designcraft-cli run [--in FILE | --sample] [--cmd ID[=JSON]]... [--page N] [--scale S] [--pdf-options JSON] [--export OUT] [--all-pages DIR]\n         (--page, --scale and --pdf-options apply to the exports that follow them)\n       designcraft-cli commands [FILTER]\n       designcraft-cli describe COMMAND\n       designcraft-cli script [FILE|-] [--in FILE | --sample] [--connect PORT] [--save OUT] [--export OUT] [--keep-going]\n       designcraft-cli app [--port PORT] COMMAND [JSON] | --method METHOD [JSON]\n       designcraft-cli mcp [--connect PORT] [--sample]\n       designcraft-cli perf [--pages N] [--runs N] [--strict]\n       designcraft-cli bench FILE [--runs N]\n       designcraft-cli links\n       designcraft-cli --version"
-            );
-            eprintln!(
-                "\nCommunity: {}  ·  {}  ·  {}",
-                designcraft_engine::links::DISCORD,
-                designcraft_engine::links::APP_PAGE,
-                designcraft_engine::links::GITHUB
-            );
+            eprintln!("{USAGE}");
+            eprintln!("{}", usage_footer());
             ExitCode::FAILURE
         }
     }
