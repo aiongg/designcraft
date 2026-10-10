@@ -1734,6 +1734,24 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Vertical:", "Vertikal:"),
     ("Working CMYK", "CMYK-Arbeitsfarbraum"),
     ("Yellow", "Gelb"),
+    ("Recent", "Zuletzt verwendet"),
+    ("Saved", "Gespeichert"),
+    ("[Default]", "[Standard]"),
+    ("Your Recent Items", "Zuletzt verwendete Elemente"),
+    ("Saved Presets", "Gespeicherte Vorgaben"),
+    ("Blank Document Presets", "Vorgaben für leere Dokumente"),
+    (
+        "No saved presets yet. Set the details, then click Save Document Preset.",
+        "Noch keine gespeicherten Vorgaben. Legen Sie die Details fest und klicken Sie auf Dokumentvorgabe speichern.",
+    ),
+    ("Delete Preset", "Vorgabe löschen"),
+    ("Preset Details", "Vorgabedetails"),
+    ("Document Name", "Dokumentname"),
+    ("Save Document Preset", "Dokumentvorgabe speichern"),
+    ("Save Document Preset As:", "Dokumentvorgabe speichern unter:"),
+    ("Save Preset", "Vorgabe speichern"),
+    ("Start #", "Startseitennr."),
+    ("Column Gutter", "Spaltenabstand"),
 ];
 
 #[cfg(test)]
