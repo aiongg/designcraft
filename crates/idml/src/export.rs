@@ -1404,6 +1404,18 @@ impl<'a> Ex<'a> {
                 },
             );
         }
+        if let Some(n) = a.number_style {
+            props.push(p("NumberingFormat", "string", names::numbering_format_out(n)));
+        }
+        if let Some(x) = &a.number_expression {
+            el.set("NumberingExpression", names::list_text_out(x));
+        }
+        if let Some(x) = &a.list_separator {
+            el.set("BulletsTextAfter", names::list_text_out(x));
+        }
+        if let Some(c) = a.bullet_char.as_deref().and_then(|s| s.chars().next()) {
+            props.push(El::new("BulletChar").attr("BulletCharacterType", "UnicodeOnly").attr("BulletCharacterValue", u32::from(c).to_string()));
+        }
         if let Some(b) = a.balance_ragged {
             props.push(p("BalanceRaggedLines", "enumeration", if b { "FullyBalanced" } else { "NoBalancing" }));
         }

@@ -462,7 +462,7 @@ pub const REF_POINTS: [&str; 9] = [
 
 pub fn number_style_out(n: NumberStyle) -> &'static str {
     match n {
-        NumberStyle::Arabic | NumberStyle::ArabicLeadingZero => "Arabic",
+        NumberStyle::Arabic | NumberStyle::ArabicLeadingZero | NumberStyle::ArabicThreeDigits | NumberStyle::ArabicFourDigits => "Arabic",
         NumberStyle::UpperRoman => "UpperRoman",
         NumberStyle::LowerRoman => "LowerRoman",
         NumberStyle::UpperLetters => "UpperLetters",
@@ -541,17 +541,55 @@ pub fn pt(x: f64, y: f64) -> String {
     format!("{} {}", num(x), num(y))
 }
 
+// ---------- list numbering ----------
+
+/// A paragraph's `NumberingFormat` ("A, B, C, D...", "001, 002, 003...", …), told apart by its
+/// first item. None for formats with no counterpart (CJK, Arabic, Hebrew, …).
+pub fn numbering_format_in(s: &str) -> Option<NumberStyle> {
+    Some(match s.split(',').next().unwrap_or("").trim() {
+        "1" => NumberStyle::Arabic,
+        "01" => NumberStyle::ArabicLeadingZero,
+        "001" => NumberStyle::ArabicThreeDigits,
+        "0001" => NumberStyle::ArabicFourDigits,
+        "I" => NumberStyle::UpperRoman,
+        "i" => NumberStyle::LowerRoman,
+        "A" => NumberStyle::UpperLetters,
+        "a" => NumberStyle::LowerLetters,
+        _ => return None,
+    })
+}
+pub fn numbering_format_out(n: NumberStyle) -> &'static str {
+    match n {
+        NumberStyle::Arabic | NumberStyle::Symbols => "1, 2, 3, 4...",
+        NumberStyle::ArabicLeadingZero => "01, 02, 03...",
+        NumberStyle::ArabicThreeDigits => "001, 002, 003...",
+        NumberStyle::ArabicFourDigits => "0001, 0002, 0003...",
+        NumberStyle::UpperRoman => "I, II, III, IV...",
+        NumberStyle::LowerRoman => "i, ii, iii, iv...",
+        NumberStyle::UpperLetters => "A, B, C, D...",
+        NumberStyle::LowerLetters => "a, b, c, d...",
+    }
+}
+/// Label text in IDML metacharacters (a tab is `^t`).
+pub fn list_text_out(s: &str) -> String {
+    s.replace('\t', "^t")
+}
+
 // ---------- footnote options ----------
 
 pub fn note_style_out(n: NumberStyle) -> &'static str {
     match n {
         NumberStyle::ArabicLeadingZero => "SingleLeadingZeros",
+        NumberStyle::ArabicThreeDigits => "DoubleLeadingZeros",
+        NumberStyle::ArabicFourDigits => "TripleLeadingZeros",
         n => number_style_out(n),
     }
 }
 pub fn note_style_in(s: &str) -> NumberStyle {
     match s {
-        "SingleLeadingZeros" | "DoubleLeadingZeros" => NumberStyle::ArabicLeadingZero,
+        "SingleLeadingZeros" => NumberStyle::ArabicLeadingZero,
+        "DoubleLeadingZeros" => NumberStyle::ArabicThreeDigits,
+        "TripleLeadingZeros" => NumberStyle::ArabicFourDigits,
         "Asterisks" => NumberStyle::Symbols,
         s => number_style_in(s),
     }

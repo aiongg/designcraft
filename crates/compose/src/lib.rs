@@ -498,7 +498,7 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                     return None;
                 }
                 let c = counters.entry(pp.list_name.clone()).or_insert_with(|| doc.list_start(story.id, &pp.list_name));
-                *c = pp.start_at.map_or(*c + 1, |s| s.max(1));
+                *c = pp.start_at.map_or(c.saturating_add(1), |s| s.max(1));
                 Some(*c)
             })
             .collect()
@@ -704,16 +704,16 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
             designcraft_doc::ListType::Numbers if !pp.list_name.is_empty() => {
                 // A named list: carries on past other paragraphs (and from earlier stories).
                 let n = named_numbers.get(pi).copied().flatten().unwrap_or(1);
-                let label = format!("{}.{}", pp.number_style.format(n), pp.list_separator);
+                let label = pp.number_label(n);
                 prepend_label(db, &mut sp.glyphs, &label, prange.start, &base_chars, label_env, &mut table);
             }
             designcraft_doc::ListType::Numbers => {
-                list_counter = pp.start_at.map_or(list_counter + 1, |s| s.max(1));
-                let label = format!("{}.{}", pp.number_style.format(list_counter), pp.list_separator);
+                list_counter = pp.start_at.map_or(list_counter.saturating_add(1), |s| s.max(1));
+                let label = pp.number_label(list_counter);
                 prepend_label(db, &mut sp.glyphs, &label, prange.start, &base_chars, label_env, &mut table);
             }
             designcraft_doc::ListType::Bullets => {
-                let label = format!("{}{}", pp.bullet_char, pp.list_separator);
+                let label = pp.bullet_label();
                 prepend_label(db, &mut sp.glyphs, &label, prange.start, &base_chars, label_env, &mut table);
             }
             designcraft_doc::ListType::None => list_counter = 0,

@@ -353,7 +353,7 @@ impl Document {
             crate::ListType::Numbers => {
                 // Count the run of numbered paragraphs before this one.
                 let n = (0..=pi).rev().take_while(|&k| self.styles.resolve_para(&st.paras[k]).0.list_type == crate::ListType::Numbers).count();
-                format!("{}.", pp.number_style.format(n as u32))
+                pp.number_label(u32::try_from(n).unwrap_or(u32::MAX)).trim_end().to_string()
             }
             _ => String::new(),
         };

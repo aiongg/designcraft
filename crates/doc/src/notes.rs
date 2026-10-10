@@ -238,7 +238,7 @@ impl crate::Document {
             for p in &st.paras {
                 let (pp, _) = self.styles.resolve_para(p);
                 if pp.list_type == crate::ListType::Numbers && pp.list_name == name {
-                    n = pp.start_at.map_or(n + 1, |s| s.max(1));
+                    n = pp.start_at.map_or(n.saturating_add(1), |s| s.max(1));
                 }
             }
         }
