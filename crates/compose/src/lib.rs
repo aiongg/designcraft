@@ -2217,6 +2217,8 @@ fn layout_line(
     let mut x = 0.0;
     let mut i = 0;
     let mut leaders: Vec<(usize, String)> = Vec::new();
+    // The line's last tab and whether it is a left tab (only text after a left tab justifies).
+    let mut last_tab: Option<(usize, bool)> = None;
     while i < line.len() {
         if line[i].ch == '\t' {
             let (w, stop) = tab_advance(&pp.tabs, x0 + x - tab_origin, line.get(i + 1..).unwrap_or_default());
@@ -2226,9 +2228,11 @@ fn layout_line(
                 leaders.push((i, t.leader.clone()));
             }
             line[i].adv = w;
+            last_tab = Some((i, stop.is_none_or(|t| t.align == TabAlign::Left)));
         } else if line[i].ch == story::RIGHT_INDENT_TAB {
             let rest: f64 = line[i + 1..].iter().map(|g| g.adv).sum();
             line[i].adv = (measure - x - rest).max(0.0);
+            last_tab = Some((i, false));
         }
         x += line[i].adv;
         i += 1;
@@ -2253,7 +2257,11 @@ fn layout_line(
     }
     let natural: f64 = line.iter().map(|g| g.adv).sum();
     let mut extra = measure - natural;
-    let spaces: Vec<usize> = line.iter().enumerate().filter(|(_, g)| g.is_space() && !g.no_break).map(|(i, _)| i).collect();
+    // Justification adjusts only the text after the last tab (InDesign keeps tab stops aligned);
+    // a line whose last tab is a right, centre, character or right-indent tab is not justified.
+    let seg = last_tab.map_or(0, |(i, _)| i + 1);
+    let seg_justifies = last_tab.is_none_or(|(_, left)| left);
+    let spaces: Vec<usize> = line.iter().enumerate().skip(seg).filter(|(_, g)| g.is_space() && !g.no_break).map(|(i, _)| i).collect();
     let align = match pp.align {
         Align::TowardsSpine => {
             if left_page {
@@ -2271,10 +2279,10 @@ fn layout_line(
         }
         a => a,
     };
-    let justify_this = align.is_justified() && (!last || align == Align::FullyJustified || forced_mid) && !has_tab;
+    let justify_this = align.is_justified() && (!last || align == Align::FullyJustified || forced_mid) && seg_justifies;
     // A justified paragraph's last line may have been composed with shrunk spaces: shrink it too.
     let squeeze_last = !justify_this
-        && !has_tab
+        && seg_justifies
         && extra < 0.0
         && (align.is_justified() || line.iter().any(|g| g.moji.shrink > 0.0 || mojikumi::start_elastic(g, false, true)[1] > 0.0));
     // Extra advance per glyph (word spaces and letter gaps) and horizontal scale per glyph.
@@ -2284,7 +2292,7 @@ fn layout_line(
     // Kashidas: in justified Arabic, the joins of words take the extra length first.
     let mut kashidas: Vec<(usize, f64)> = Vec::new();
     if justify_this && extra > 0.0 && pp.kashidas && pp.arabic_justification != "DefaultJustification" {
-        let points = kashida_points(&line);
+        let points: Vec<usize> = kashida_points(&line).into_iter().filter(|&i| i >= seg).collect();
         if !points.is_empty() {
             let total = extra.min(points.iter().map(|&i| line[i].size * 1.5).sum());
             let per = total / points.len() as f64;
@@ -2299,8 +2307,11 @@ fn layout_line(
         extra = mojikumi::distribute(&mut line, extra, &mut add);
     }
     if (justify_this || squeeze_last) && !spaces.is_empty() {
-        distribute(&line, &spaces, extra, sp, &mut add, &mut scale);
-    } else if justify_this && spaces.is_empty() && line.len() > 1 && !last {
+        let rebased: Vec<usize> = spaces.iter().map(|&i| i - seg).collect();
+        let (seg_line, seg_add, seg_scale) =
+            (line.get(seg..).unwrap_or(&[]), add.get_mut(seg..).unwrap_or(&mut []), scale.get_mut(seg..).unwrap_or(&mut []));
+        distribute(seg_line, &rebased, extra, sp, seg_add, seg_scale);
+    } else if justify_this && spaces.is_empty() && line.len() > seg + 1 && !last {
         // Single word: Single Word Justification.
         match pp.single_word_justify {
             Align::FullyJustified => {
@@ -2308,6 +2319,7 @@ fn layout_line(
                     .iter()
                     .enumerate()
                     .take(line.len() - 1)
+                    .skip(seg)
                     .filter(|(_, g)| !g.moji.active && (!g.locked_advance || g.break_after != Some(false)))
                     .map(|(i, _)| i)
                     .collect();
@@ -2318,8 +2330,14 @@ fn layout_line(
                     }
                 }
             }
-            Align::Center => offset = extra / 2.0,
-            Align::Right => offset = extra,
+            // After a tab the word moves by widening the tab, so text before it stays put.
+            Align::Center | Align::Right => {
+                let shift = if pp.single_word_justify == Align::Center { extra / 2.0 } else { extra };
+                match seg.checked_sub(1).and_then(|t| add.get_mut(t)) {
+                    Some(tab) => *tab += shift,
+                    None => offset = shift,
+                }
+            }
             _ => {}
         }
     } else {
