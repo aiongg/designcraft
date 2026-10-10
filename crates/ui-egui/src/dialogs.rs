@@ -30,7 +30,6 @@ impl Dialog {
             "insertTable" => json!({"bodyRows": 4, "columns": 4, "headerRows": 0, "footerRows": 0}),
             "insertXref" => json!({"linkTo": "paragraph", "style": "", "target": "", "format": ""}),
             "findChange" => json!({"find": "", "change": "", "grep": false, "caseSensitive": false, "wholeWord": false, "scope": "document"}),
-            "textFrameOptions" => json!({"columns": 1, "gutter": "1p0", "inset": "0p0", "verticalJustification": "top"}),
             "documentSetup" => json!({}),
             _ => json!({}),
         };
@@ -277,6 +276,155 @@ fn print_dialog(app: &crate::DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
         });
         ui.end_row();
     });
+}
+
+/// The options of the selected text frame (the first selected item, or the frame of the caret).
+fn selected_frame_options(app: &DesignApp) -> Option<designcraft_doc::TextFrameOptions> {
+    let st = app.session.active()?;
+    let fid = st.selection.items.first().copied().or_else(|| st.selection.text.and_then(|t| t.frame))?;
+    st.doc.item(fid)?.text_frame().map(|t| t.options.clone())
+}
+
+/// Object › Text Frame Options shows the selected frame's options. `_shown` keeps what it showed,
+/// so OK sends only the fields the user changed. Fields given when the dialog opened count as
+/// changed.
+fn seed_text_frame_options(app: &DesignApp, d: &mut Dialog) {
+    if d.fields.contains_key("_shown") {
+        return;
+    }
+    let o = selected_frame_options(app).unwrap_or_default();
+    let units = app.session.active().map(|s| s.doc.settings.horizontal_units).unwrap_or(Unit::Picas);
+    let fm = |v: f64| json!(format_measure(v, units));
+    let shown = json!({
+        "columns": o.columns, "gutter": fm(o.gutter),
+        "insetTop": fm(o.inset[0]), "insetLeft": fm(o.inset[1]), "insetBottom": fm(o.inset[2]), "insetRight": fm(o.inset[3]),
+        "verticalJustification": serde_json::to_value(o.vertical_justification).unwrap_or(Value::Null),
+        "columnRule": o.column_rule, "columnRuleWeight": format_measure(o.column_rule_weight, Unit::Points), "columnRuleColor": o.column_rule_color,
+    });
+    if let Value::Object(m) = &shown {
+        for (k, v) in m {
+            d.fields.entry(k.clone()).or_insert_with(|| v.clone());
+        }
+    }
+    d.fields.insert("_shown".into(), shown);
+}
+
+fn text_frame_options_dialog(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
+    let lang = app.ui.language.clone();
+    let tr = |s: &'static str| crate::i18n::tr(&lang, s);
+    egui::Grid::new("tfo").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
+        crate::rtl::label(ui, tr("Number of columns"));
+        text_field(ui, d, "columns", 80.0);
+        ui.end_row();
+        crate::rtl::label(ui, tr("Gutter"));
+        text_field(ui, d, "gutter", 80.0);
+        ui.end_row();
+    });
+    ui.add_space(6.0);
+    crate::rtl::label(ui, egui::RichText::new(tr("Inset spacing")).font(semibold(12.0)));
+    egui::Grid::new("tfo_inset").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
+        for (label, key) in [("Top", "insetTop"), ("Bottom", "insetBottom"), ("Left", "insetLeft"), ("Right", "insetRight")] {
+            crate::rtl::label(ui, tr(label));
+            text_field(ui, d, key, 80.0);
+            ui.end_row();
+        }
+    });
+    ui.add_space(6.0);
+    egui::Grid::new("tfo_vj").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
+        crate::rtl::label(ui, tr("Vertical justification"));
+        let cur = d.s("verticalJustification");
+        egui::ComboBox::from_id_salt("vj").selected_text(crate::rtl::widget(ui, crate::i18n::tr(&lang, &cur))).show_ui(ui, |ui| {
+            for v in ["top", "center", "bottom", "justify"] {
+                if ui.selectable_label(cur == v, crate::rtl::widget(ui, crate::i18n::tr(&lang, v))).clicked() {
+                    d.fields.insert("verticalJustification".into(), json!(v));
+                }
+            }
+        });
+        ui.end_row();
+    });
+    ui.add_space(6.0);
+    crate::rtl::label(ui, egui::RichText::new(tr("Column Rules")).font(semibold(12.0)));
+    check(ui, d, "columnRule", tr("Insert Column Rule"));
+    let swatches: Vec<String> = app
+        .session
+        .active()
+        .map(|s| {
+            s.doc
+                .swatches
+                .iter()
+                .filter(|w| !matches!(w.value, designcraft_color::swatch::SwatchValue::Gradient { .. }))
+                .map(|w| w.name.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    let opts: Vec<(&str, &str)> = swatches.iter().map(|n| (n.as_str(), n.as_str())).collect();
+    egui::Grid::new("tfo_rule").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
+        crate::rtl::label(ui, tr("Weight"));
+        text_field(ui, d, "columnRuleWeight", 70.0);
+        ui.end_row();
+        crate::rtl::label(ui, tr("Color"));
+        combo(ui, d, "columnRuleColor", &opts);
+        ui.end_row();
+    });
+}
+
+/// Whether the user changed `key` from what the dialog showed.
+fn edited(d: &Dialog, key: &str) -> bool {
+    let shown = match d.fields.get("_shown").and_then(|s| s.get(key)) {
+        Some(Value::String(s)) => s.clone(),
+        Some(v) => v.to_string(),
+        None => return d.fields.contains_key(key),
+    };
+    d.fields.contains_key(key) && d.s(key).trim() != shown.trim()
+}
+
+fn confirm_text_frame_options(app: &mut DesignApp, d: &mut Dialog) -> Result<Value, String> {
+    seed_text_frame_options(app, d);
+    let d = &*d;
+    let mut p = Map::new();
+    let bad = |what: &str| format!("Text Frame Options: {what}");
+    if edited(d, "columns") {
+        p.insert("columns".into(), json!(d.n("columns").ok_or_else(|| bad("the number of columns is not a number"))?.max(1.0) as u64));
+    }
+    if edited(d, "gutter") {
+        p.insert("gutter".into(), json!(d.m("gutter").ok_or_else(|| bad("the gutter is not a measure"))?));
+    }
+    let sides = ["insetTop", "insetLeft", "insetBottom", "insetRight"];
+    if edited(d, "inset") {
+        p.insert("inset".into(), json!(d.m("inset").ok_or_else(|| bad("the inset is not a measure"))?));
+    } else if sides.iter().any(|k| edited(d, k)) {
+        // Sides left as shown are null: each selected frame keeps its own.
+        let mut inset = [None; 4];
+        for (v, k) in inset.iter_mut().zip(sides) {
+            if edited(d, k) {
+                *v = Some(d.m(k).ok_or_else(|| bad("an inset is not a measure"))?);
+            }
+        }
+        p.insert("inset".into(), json!(inset));
+    }
+    if edited(d, "verticalJustification") {
+        p.insert("verticalJustification".into(), json!(d.s("verticalJustification")));
+    }
+    if edited(d, "columnRule") {
+        p.insert("columnRule".into(), json!(d.b("columnRule")));
+    }
+    if edited(d, "columnRuleWeight") {
+        p.insert("columnRuleWeight".into(), json!(d.pt("columnRuleWeight").ok_or_else(|| bad("the column rule weight is not a measure"))?));
+    }
+    if edited(d, "columnRuleColor") {
+        p.insert("columnRuleColor".into(), json!(d.s("columnRuleColor")));
+    }
+    if p.is_empty() {
+        return Ok(Value::Null);
+    }
+    // Typing in a frame: the options apply to that frame.
+    if let Some(st) = app.session.active()
+        && st.selection.items.is_empty()
+        && let Some(f) = st.selection.text.and_then(|t| t.frame)
+    {
+        p.insert("ids".into(), json!([f.0]));
+    }
+    app.run("object.textFrameOptions", Value::Object(p))
 }
 
 /// File › Document Setup, filled from the document.
@@ -1343,27 +1491,8 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
                 });
             }
             "textFrameOptions" => {
-                egui::Grid::new("tfo").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
-                    crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Number of columns"));
-                    text_field(ui, &mut d, "columns", 80.0);
-                    ui.end_row();
-                    crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Gutter"));
-                    text_field(ui, &mut d, "gutter", 80.0);
-                    ui.end_row();
-                    crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Inset spacing"));
-                    text_field(ui, &mut d, "inset", 80.0);
-                    ui.end_row();
-                    crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Vertical justification"));
-                    let cur = d.s("verticalJustification");
-                    egui::ComboBox::from_id_salt("vj").selected_text(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, &cur))).show_ui(ui, |ui| {
-                        for v in ["top", "center", "bottom", "justify"] {
-                            if ui.selectable_label(cur == v, crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, v))).clicked() {
-                                d.fields.insert("verticalJustification".into(), json!(v));
-                            }
-                        }
-                    });
-                    ui.end_row();
-                });
+                seed_text_frame_options(app, &mut d);
+                text_frame_options_dialog(app, ui, &mut d);
             }
             "documentSetup" => document_setup(app, ui, &mut d),
             _ => {}
@@ -1441,10 +1570,16 @@ pub fn confirm(app: &mut DesignApp) -> Result<Value, String> {
             json!({"rows": d.n("bodyRows").unwrap_or(4.0).max(1.0) as u64, "cols": d.n("columns").unwrap_or(4.0).max(1.0) as u64,
                 "headerRows": d.n("headerRows").unwrap_or(0.0).max(0.0) as u64, "footerRows": d.n("footerRows").unwrap_or(0.0).max(0.0) as u64}),
         ),
-        "textFrameOptions" => app.run(
-            "object.textFrameOptions",
-            json!({"columns": d.n("columns").unwrap_or(1.0) as u64, "gutter": d.m("gutter").unwrap_or(12.0), "inset": d.m("inset").unwrap_or(0.0), "verticalJustification": d.s("verticalJustification")}),
-        ),
+        "textFrameOptions" => {
+            // On an error the dialog stays open to be corrected.
+            let mut d = d;
+            let r = confirm_text_frame_options(app, &mut d);
+            if let Err(e) = &r {
+                app.status(e.clone());
+                app.ui.dialog = Some(d);
+            }
+            r
+        }
         "documentSetup" => {
             let edges = |k: &str| json!(["Top", "Bottom", "Inside", "Outside"].map(|e| d.m(&format!("{k}{e}")).unwrap_or(0.0)));
             app.run(
@@ -2653,6 +2788,46 @@ fn find_font(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn text_frame_options_change_only_what_was_edited() {
+        let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({})).unwrap();
+        let r = app.run("frame.create", json!({"rect": [36, 36, 336, 236], "content": "text", "text": "Hello"})).unwrap();
+        let id = designcraft_doc::ItemId(r["id"].as_u64().unwrap());
+        app.run("object.textFrameOptions", json!({"ids": [id.0], "columns": 2, "inset": [1, 2, 3, 4]})).unwrap();
+        let opts = |app: &DesignApp| app.session.doc().unwrap().doc.item(id).unwrap().text_frame().unwrap().options.clone();
+        let before = opts(&app);
+        let open = |app: &mut DesignApp, fields: &[(&str, Value)]| {
+            app.ui.dialog = Some(Dialog::new("textFrameOptions", json!({})));
+            let mut d = app.ui.dialog.take().unwrap();
+            seed_text_frame_options(app, &mut d);
+            for (k, v) in fields {
+                d.fields.insert((*k).into(), v.clone());
+            }
+            app.ui.dialog = Some(d);
+            confirm(app)
+        };
+        // OK without edits changes nothing (no undo step either).
+        assert_eq!(open(&mut app, &[]).unwrap(), Value::Null);
+        assert_eq!(opts(&app), before);
+        // The rule's weight is in points; unequal insets the user didn't touch stay.
+        open(&mut app, &[("columnRule", json!(true)), ("columnRuleWeight", json!("6"))]).unwrap();
+        let o = opts(&app);
+        assert!(o.column_rule && o.column_rule_weight == 6.0, "{o:?}");
+        assert_eq!((o.inset, o.columns, o.gutter), (before.inset, before.columns, before.gutter));
+        // One inset side edited: the others keep their values.
+        open(&mut app, &[("insetLeft", json!("1p0"))]).unwrap();
+        assert_eq!(opts(&app).inset, [1.0, 12.0, 3.0, 4.0]);
+        // An unknown swatch is an error and the dialog stays open.
+        let e = open(&mut app, &[("columnRuleColor", json!("Mauve"))]).unwrap_err();
+        assert!(e.contains("Mauve") && app.ui.dialog.is_some(), "{e}");
+        assert_eq!(opts(&app).column_rule_color, designcraft_color::swatch::BLACK);
+        // Each OK is one undo step.
+        app.run("edit.undo", json!({})).unwrap();
+        app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(opts(&app), before);
+    }
 
     #[test]
     fn parses_command_params() {

@@ -440,6 +440,8 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Cell Text", "نص الخلية"),
     ("Cell Type", "نوع الخلية"),
     ("Column Width", "عرض العمود"),
+    ("Column Rules", "خطوط الأعمدة"),
+    ("Insert Column Rule", "إدراج خط بين الأعمدة"),
     ("Composer", "منضّد النص"),
     ("Convert Selection to Multi-State Object", "تحويل التحديد إلى كائن متعدد الحالات"),
     ("Convert to Text", "تحويل إلى نص"),

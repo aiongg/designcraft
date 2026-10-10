@@ -1237,6 +1237,8 @@ const TABLE: &[(&str, [&str; 5])] = &[
     ("Close Path", ["Close Path", "Close Path", "Close Path", "Close Path", "闭合路径"]),
     ("Color Group Options", ["Color Group Options", "Color Group Options", "Color Group Options", "Color Group Options", "颜色组选项"]),
     ("Column Width", ["Column Width", "Column Width", "Column Width", "Column Width", "列宽"]),
+    ("Column Rules", ["Spaltenlinien", "Filets de colonne", "Filetes de columna", "段間罫線", "栏间线"]),
+    ("Insert Column Rule", ["Spaltenlinie einfügen", "Insérer un filet de colonne", "Insertar filete de columna", "段間罫線を挿入", "插入栏间线"]),
     ("Condition Options…", ["Condition Options…", "Condition Options…", "Condition Options…", "Condition Options…", "条件选项…"]),
     (
         "Convert to Liquid Guide",

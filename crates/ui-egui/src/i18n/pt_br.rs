@@ -441,6 +441,8 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Cell Text", "Texto da célula"),
     ("Cell Type", "Tipo de célula"),
     ("Column Width", "Largura da coluna"),
+    ("Column Rules", "Fios de coluna"),
+    ("Insert Column Rule", "Inserir fio de coluna"),
     ("Composer", "Compositor"),
     ("Convert Selection to Multi-State Object", "Converter seleção em objeto de vários estados"),
     ("Convert to Text", "Converter em texto"),
