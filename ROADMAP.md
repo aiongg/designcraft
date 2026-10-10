@@ -34,6 +34,7 @@ DesignCraft aims at full Adobe InDesign parity — and to be better: faster, ope
 ## Recent improvements (2026-10-08)
 
 - QA1: Font rescans retry missing glyphs and fallback families after new fonts arrive; a controlled Linux regression covers older in-flight misses after a rescan.
+- QA1: Explicit default text overrides survive native ZIP and legacy JSON reopening
 
 ## Status (2026-10-01)
 
