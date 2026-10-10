@@ -582,6 +582,25 @@ mod resolution_tests {
     }
 
     #[test]
+    fn a_style_name_beats_another_face_s_legacy_subfamily() {
+        // Static families often name each weight's legacy (RIBBI) family "Legacy Sans Black" with
+        // subfamily "Regular": that alias must not shadow the face actually styled Regular.
+        let face =
+            |records: &[(u16, u16, u16, u16, &str)]| testing::with_names(&testing::font_with("Legacy Sans", &['A']).unwrap(), records).unwrap();
+        let db = FontDb::with_font_dirs(Vec::new());
+        db.add_font(face(&[
+            (3, 1, 0x409, 1, "Legacy Sans Black"),
+            (3, 1, 0x409, 2, "Regular"),
+            (3, 1, 0x409, 16, "Legacy Sans"),
+            (3, 1, 0x409, 17, "Black"),
+        ]));
+        db.add_font(face(&[(3, 1, 0x409, 1, "Legacy Sans"), (3, 1, 0x409, 2, "Regular")]));
+        let scope = db.scoped(0);
+        assert_eq!(scope.face("Legacy Sans", "Regular").style, "Regular");
+        assert_eq!(scope.face("Legacy Sans", "Black").style, "Black");
+    }
+
+    #[test]
     fn known_substitution_preserves_missing_original_status() {
         let db = FontDb::with_font_dirs(Vec::new());
         db.add_font(testing::font_with("Carlito", &['A']).unwrap());

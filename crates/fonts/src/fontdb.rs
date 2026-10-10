@@ -1619,7 +1619,12 @@ impl ScopedFonts<'_> {
             return None;
         }
         let ns = norm(style);
-        if let Some(f) = cands.iter().find(|f| norm(&f.style) == ns || (f.coords.is_empty() && f.style_aliases.iter().any(|alias| norm(alias) == ns)))
+        // A face's own style name first: another face's legacy subfamily ("Black" faces named
+        // "Regular" in their RIBBI family) or localized name must not shadow it.
+        if let Some(f) = cands
+            .iter()
+            .find(|f| norm(&f.style) == ns)
+            .or_else(|| cands.iter().find(|f| f.coords.is_empty() && f.style_aliases.iter().any(|alias| norm(alias) == ns)))
         {
             return Some((*f).clone());
         }
