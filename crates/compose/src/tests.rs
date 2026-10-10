@@ -3332,14 +3332,52 @@ fn cjk_em_center_alignment_moves_small_characters() {
         compose_story(&d, sid, &ComposeOptions::default()).frames[0].lines[0].clone()
     };
     let line = line_with(japanese());
+    // Em box centre (y down): the font's BASE em box, else 0.88/-0.12 em.
     let center = |g: &PlacedGlyph| {
-        let (a, b) = g.face.vertical_metrics();
-        g.y + (b - a) / (2.0 * (a + b)) * g.face.units_per_em() * g.sy
+        let upem = g.face.units_per_em();
+        let (top, bottom) = g.face.declared_em_box().unwrap_or((upem * 0.88, upem * -0.12));
+        g.y - (top + bottom) / 2.0 * g.sy
     };
     assert!((center(&line.glyphs[0]) - center(&line.glyphs[1])).abs() < 1e-6);
     // The other composers keep every character on the baseline.
     let line = line_with(ParaAttrs::default());
     assert!(line.glyphs.iter().all(|g| g.y.abs() < 1e-9), "{:?}", line.glyphs.iter().map(|g| g.y).collect::<Vec<_>>());
+}
+
+#[test]
+fn smaller_cjk_run_aligns_to_the_line_em_box_centre() {
+    use designcraft_doc::cjk::CharacterAlignment;
+    let text = "Ab 甲乙 cd";
+    let run = "Ab ".len().."Ab 甲乙".len();
+    // Em box centre (y down) of a placed glyph: its font's BASE em box, else 0.88/-0.12 em.
+    let centre = |l: &Line, g: &PlacedGlyph| {
+        let upem = g.face.units_per_em();
+        let (top, bottom) = g.face.declared_em_box().unwrap_or((upem * 0.88, upem * -0.12));
+        l.baseline + g.y - (top + bottom) / 2.0 * g.sy
+    };
+    for alignment in [CharacterAlignment::EmCenter, CharacterAlignment::Baseline] {
+        let (mut d, sid, _) = doc_with(text, Rect::new(0.0, 0.0, 300.0, 100.0), japanese());
+        d.story_mut(sid).unwrap().format_chars(0..text.len(), |f| {
+            f.over.size = Some(10.0);
+            f.over.character_alignment = Some(alignment);
+        });
+        d.story_mut(sid).unwrap().format_chars(run.clone(), |f| f.over.size = Some(6.0));
+        let cs = compose_story(&d, sid, &ComposeOptions::default());
+        let line = &cs.frames[0].lines[0];
+        let latin = &line.glyphs[0];
+        let cjk: Vec<&PlacedGlyph> = line.glyphs.iter().filter(|g| run.contains(&g.byte)).collect();
+        assert_eq!(cjk.len(), 2);
+        assert!(latin.y.abs() < 1e-9);
+        for g in cjk {
+            match alignment {
+                CharacterAlignment::EmCenter => {
+                    assert!((centre(line, g) - centre(line, latin)).abs() < 0.01, "{} vs {}", centre(line, g), centre(line, latin));
+                    assert!(g.y < -1.0, "a 6 pt run rises in a 10 pt line: {}", g.y);
+                }
+                _ => assert!(g.y.abs() < 1e-9, "Roman baseline keeps the run on the baseline: {}", g.y),
+            }
+        }
+    }
 }
 
 #[test]

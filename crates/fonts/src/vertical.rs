@@ -69,10 +69,12 @@ pub(crate) fn em_box(face: &FontFace) -> ((f64, f64), bool) {
             (top, top - upem)
         })
     };
-    font.and_then(|f| f.os2().ok())
+    let em = font
+        .and_then(|f| f.os2().ok())
         .and_then(|t| centred(f64::from(t.s_typo_ascender()), f64::from(t.s_typo_descender())))
         .or_else(|| centred(face.ascent, -face.descent))
-        .map_or(((upem * 0.88, upem * -0.12), false), |b| (b, false))
+        .unwrap_or((upem * 0.88, upem * -0.12));
+    (em, false)
 }
 
 /// The ideographic character face (ICF) box (top, bottom) in font units, y up: `BASE`
