@@ -134,6 +134,7 @@ fn shape_mark(face: FaceRef, text: &str, m: &KentenMark, b: &PlacedGlyph) -> Vec
             style: m.style,
             byte: b.byte,
             len: 0,
+            generated_text: None,
             visible: true,
             upright: upright_in_vertical(ch),
             tcy: None,
