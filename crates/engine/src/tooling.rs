@@ -207,7 +207,8 @@ impl Session {
 
     pub fn begin_interaction(&mut self, label: &str) -> Result<()> {
         let st = self.doc_mut()?;
-        st.interaction = Some(Interaction { label: label.into(), doc: st.doc.clone(), selection: st.selection.clone(), preview: None });
+        st.interaction =
+            Some(Interaction { label: label.into(), doc: st.doc.clone(), selection: st.selection.clone(), preview: None, revision: st.revision });
         Ok(())
     }
 
@@ -250,9 +251,10 @@ impl Session {
         if let Some(st) = self.active_mut()
             && let Some(it) = st.interaction.take()
         {
+            // Nothing changed: the document goes back to the state and revision it began with.
             st.doc = it.doc;
             st.selection = it.selection;
-            st.revision += 1;
+            st.revision = it.revision;
             if self.transforms.2 {
                 self.transforms.0.pop();
                 self.transforms.2 = false;

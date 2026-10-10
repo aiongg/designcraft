@@ -145,3 +145,37 @@ fn an_ime_commit_takes_the_format_chosen_at_the_caret() {
     s.execute("text.select", &json!({"story": sid, "anchor": 1, "focus": 7})).unwrap();
     assert_eq!(s.execute("type.selectionAttrs", &json!({})).unwrap()["chars"]["size"], 24.0);
 }
+
+#[test]
+fn a_cancelled_gesture_puts_back_the_revision_and_leaves_a_saved_document_saved() {
+    let mut s = session();
+    let v = ViewInfo::default();
+    let sid = typing_into(&mut s, "雅");
+    // As if just saved.
+    let st = s.doc_mut().unwrap();
+    st.saved_doc = st.doc.clone();
+    let before = st.revision;
+    let mut seen = vec![before];
+    // A cancelled composition…
+    for t in ["が", "がく"] {
+        s.tool_preedit(t, None, v).unwrap();
+        seen.push(s.doc().unwrap().revision);
+    }
+    s.tool_preedit("", None, v).unwrap();
+    assert_eq!(s.doc().unwrap().revision, before);
+    assert!(!s.doc().unwrap().is_dirty());
+    // …and any other cancelled gesture.
+    let preview = |t: &str| designcraft_tools::Action::Preview("text.insert".into(), json!({"text": t, "raw": true}));
+    s.run_actions(vec![designcraft_tools::Action::Begin("Type".into()), preview("x")]).unwrap();
+    seen.push(s.doc().unwrap().revision);
+    s.run_actions(vec![preview("xy"), designcraft_tools::Action::Cancel]).unwrap();
+    assert_eq!(s.doc().unwrap().revision, before);
+    assert!(!s.doc().unwrap().is_dirty());
+    assert_eq!(text(&mut s, sid), "雅");
+    // The next change gets a revision no preview had: caches keyed by revision never show a
+    // cancelled preview.
+    s.execute("text.insert", &json!({"text": "楽"})).unwrap();
+    let after = s.doc().unwrap().revision;
+    assert!(!seen.contains(&after), "{after} in {seen:?}");
+    assert!(s.doc().unwrap().is_dirty());
+}

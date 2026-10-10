@@ -242,7 +242,7 @@ fn file_save(s: &mut Session, p: &Value) -> Result<Value> {
         super::datamerge::refresh_relative_paths(&mut d, std::path::Path::new(&path));
         if d.data_merge != st.doc.data_merge {
             st.doc = Arc::new(d);
-            st.revision = st.revision.saturating_add(1);
+            st.bump_revision();
         }
     }
     let bytes = to_bytes(&st.doc);
@@ -649,7 +649,6 @@ fn file_revert(s: &mut Session, _: &Value) -> Result<Value> {
         let mut fresh = DocState::new(d, Some(path.clone()));
         fresh.fonts = fonts;
         fresh.uid = uid;
-        fresh.revision = st.revision + 1;
         *st = fresh;
         if let Some(dir) = &s.recovery_dir {
             crate::recovery::discard(dir, uid);
