@@ -2348,11 +2348,7 @@ impl<'r> Importer<'r> {
             }
         }
         for story in self.stories.values_mut() {
-            for p in &mut story.paras {
-                if clears(&p.para) && inherits_drop_cap_style(&self.styles, Some(&p.style)) {
-                    p.para.drop_cap_style = Some(st::NO_CHAR_STYLE.into());
-                }
-            }
+            clear_story_drop_cap_styles(&self.styles, story, 0);
         }
     }
 
@@ -2552,6 +2548,30 @@ fn text_frame_options(prefs: &[&El]) -> TextFrameOptions {
         }
     }
     o
+}
+
+/// Deepest table-in-cell or note nesting the drop cap pass walks into.
+const MAX_STORY_NESTING: usize = 32;
+
+/// [`Importer::clear_inherited_drop_cap_styles`] for one story's paragraphs and those of the table
+/// cells, footnotes and endnotes in it.
+fn clear_story_drop_cap_styles(styles: &Styles, story: &mut Story, depth: usize) {
+    for p in &mut story.paras {
+        if p.para.drop_cap_style.is_none() && p.para.nested_styles.is_some() && inherits_drop_cap_style(styles, Some(&p.style)) {
+            p.para.drop_cap_style = Some(st::NO_CHAR_STYLE.into());
+        }
+    }
+    if depth >= MAX_STORY_NESTING {
+        return;
+    }
+    for table in story.tables.values_mut() {
+        for cell in &mut Arc::make_mut(table).cells {
+            clear_story_drop_cap_styles(styles, &mut cell.text, depth + 1);
+        }
+    }
+    for note in story.notes.iter_mut().chain(story.endnotes.iter_mut()) {
+        clear_story_drop_cap_styles(styles, &mut Arc::make_mut(note).text, depth + 1);
+    }
 }
 
 /// Does paragraph style `name` (and its based-on chain) set a drop cap character style? A style

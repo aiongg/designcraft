@@ -1907,6 +1907,30 @@ fn own_nested_styles_clear_an_inherited_drop_cap_style() {
     assert_eq!(d.styles.resolve_para(&story.paras[1]).0.drop_cap_style, "Strong");
 }
 
+/// Paragraphs in table cells and footnotes are cleared like story paragraphs.
+#[test]
+fn own_nested_styles_clear_an_inherited_drop_cap_style_in_cells_and_notes() {
+    let opener = |text: &str| {
+        format!(
+            r#"<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/Opener"><Properties>WORDS</Properties><CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]"><Content>{text}</Content></CharacterStyleRange></ParagraphStyleRange>"#
+        )
+    };
+    let paras = format!(
+        r#"<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/$ID/NormalParagraphStyle"><CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]">
+<Content>Body</Content><Footnote>{}</Footnote>
+<Table HeaderRowCount="0" FooterRowCount="0"><Row Name="0" MinimumHeight="24"/><Column Name="0" SingleColumnWidth="60"/><Cell Name="0:0">{}</Cell></Table>
+</CharacterStyleRange></ParagraphStyleRange>"#,
+        opener("Note"),
+        opener("Cell")
+    );
+    let d = import_idml_with(&drop_cap_fixture("", &paras), &|_| None).unwrap();
+    let story = d.stories.values().find(|s| !s.notes.is_empty()).expect("story with a footnote");
+    let note = &story.notes[0].text;
+    assert_eq!(note.paras[0].para.drop_cap_style.as_deref(), Some(st::NO_CHAR_STYLE), "{:?}", note.text);
+    let cell = &story.tables.values().next().expect("a table").cell(0, 0).unwrap().text;
+    assert_eq!(cell.paras[0].para.drop_cap_style.as_deref(), Some(st::NO_CHAR_STYLE), "{:?}", cell.text);
+}
+
 /// A paragraph that clears its style's drop cap style without nested styles of its own round-trips:
 /// it is written with the style's list, the Dropcap entry set to [None].
 #[test]
