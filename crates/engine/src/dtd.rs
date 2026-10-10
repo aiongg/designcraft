@@ -196,8 +196,12 @@ fn expand_parameter_entities(src: &str, ents: &[(String, String)]) -> Result<Str
             append(&mut out, prefix)?;
             // `find` points to an ASCII `%`, so both split positions are UTF-8 boundaries.
             rest = reference.split_at(1).1;
-            // A name can't contain `%`: stopping at the next one keeps a round linear in the text.
-            if let Some(end) = rest.bytes().take(256).take_while(|&b| b != b'%').position(|b| b == b';')
+            // A name has no whitespace and no `%` (`parse` ends a name at whitespace), whatever its
+            // length: the search for the closing `;` stops at the first of those, so the searches of
+            // a round never overlap and a round stays linear in the text.
+            let end =
+                rest.bytes().position(|b| matches!(b, b';' | b'%') || b.is_ascii_whitespace()).filter(|&k| rest.as_bytes().get(k) == Some(&b';'));
+            if let Some(end) = end
                 && let Some(value) = rest.get(..end).and_then(|name| entities.get(name))
             {
                 // A value that is its own reference (`<!ENTITY % a "%a;">`) never gets anywhere.
@@ -300,37 +304,63 @@ pub fn parse(src: &str) -> Result<Dtd, String> {
     Ok(dtd)
 }
 
+/// What `ends` has worked out for one sequence of children: the end positions of a group (by the
+/// address of its node, which lives as long as the model) from a position.
+type EndsMemo = HashMap<(usize, usize), Vec<usize>>;
+
 /// End positions after `cp` matches a prefix of `seq[i..]`.
-fn ends(cp: &Cp, seq: &[&str], i: usize) -> Vec<usize> {
+///
+/// The positions of each group are worked out once per start position (`memo`): nested repetitions
+/// such as `((a*)*)*` ask the inner group for the same positions again and again, which is
+/// exponential in their depth without it.
+fn ends(cp: &Cp, seq: &[&str], i: usize, memo: &mut EndsMemo) -> Vec<usize> {
+    if let Cp::Name(n) = cp {
+        return if seq.get(i) == Some(&n.as_str()) { vec![i + 1] } else { vec![] };
+    }
+    let key = (std::ptr::from_ref(cp) as usize, i);
+    if let Some(done) = memo.get(&key) {
+        return done.clone();
+    }
     let mut out: Vec<usize> = match cp {
-        Cp::Name(n) => {
-            if seq.get(i) == Some(&n.as_str()) {
-                vec![i + 1]
-            } else {
-                vec![]
-            }
-        }
+        Cp::Name(_) => vec![],
         // Keep the positions after each item a set: as a list of every path, `(a?, a?, …)` doubles per item.
-        Cp::Seq(items) => items.iter().fold(vec![i], |at, c| {
-            let mut next: Vec<usize> = at.into_iter().flat_map(|p| ends(c, seq, p)).collect();
-            next.sort_unstable();
-            next.dedup();
-            next
-        }),
-        Cp::Choice(items) => items.iter().flat_map(|c| ends(c, seq, i)).collect(),
+        Cp::Seq(items) => {
+            let mut at = vec![i];
+            for c in items {
+                let mut next = Vec::new();
+                for p in at {
+                    next.extend(ends(c, seq, p, memo));
+                }
+                next.sort_unstable();
+                next.dedup();
+                at = next;
+            }
+            at
+        }
+        Cp::Choice(items) => {
+            let mut all = Vec::new();
+            for c in items {
+                all.extend(ends(c, seq, i, memo));
+            }
+            all
+        }
         Cp::Rep(c, r) => {
             let mut all = if *r == '+' { vec![] } else { vec![i] };
-            let mut frontier = ends(c, seq, i);
+            let mut frontier = ends(c, seq, i, memo);
             if *r == '?' {
                 all.extend(frontier);
             } else {
                 while !frontier.is_empty() {
                     let new: Vec<usize> = frontier.iter().copied().filter(|p| !all.contains(p)).collect();
                     all.extend(&new);
-                    frontier = new.into_iter().filter(|&p| p > i).flat_map(|p| ends(c, seq, p)).filter(|p| !all.contains(p)).collect();
+                    let mut next = Vec::new();
+                    for p in new.into_iter().filter(|&p| p > i) {
+                        next.extend(ends(c, seq, p, memo).into_iter().filter(|p| !all.contains(p)));
+                    }
                     // Two paths to one position are one position: kept apart they multiply per round.
-                    frontier.sort_unstable();
-                    frontier.dedup();
+                    next.sort_unstable();
+                    next.dedup();
+                    frontier = next;
                 }
             }
             all
@@ -338,6 +368,7 @@ fn ends(cp: &Cp, seq: &[&str], i: usize) -> Vec<usize> {
     };
     out.sort_unstable();
     out.dedup();
+    memo.insert(key, out.clone());
     out
 }
 
@@ -425,7 +456,7 @@ fn check(dtd: &Dtd, n: &Node, path: &str, out: &mut Vec<Problem>) {
                 problem(format!("`{}` can't contain text", n.name));
             }
             let seq: Vec<&str> = n.children.iter().map(|c| c.name.as_str()).collect();
-            if !ends(cp, &seq, 0).contains(&seq.len()) {
+            if !ends(cp, &seq, 0, &mut EndsMemo::new()).contains(&seq.len()) {
                 let got = if seq.is_empty() { "nothing".to_string() } else { seq.join(", ") };
                 problem(format!("`{}` contains {got}; the DTD asks for {}", n.name, show(cp)));
             }
@@ -590,6 +621,37 @@ mod tests {
         // A run of `%` around a real reference still finds it.
         let entities = [("model".to_string(), "EMPTY".to_string())];
         assert_eq!(expand_parameter_entities("%%%model;%%", &entities), Ok("%%EMPTY%%".to_string()));
+    }
+
+    #[test]
+    fn parameter_entity_with_a_long_name_expands() {
+        // A name can be any length: the search for the closing `;` has no window.
+        let name = "n".repeat(300);
+        let dtd = parse(&format!("<!ENTITY % {name} \"EMPTY\"><!ELEMENT root %{name};>")).unwrap();
+        assert_eq!(dtd.model("root"), Some(&Model::Empty));
+    }
+
+    #[test]
+    fn percent_in_text_without_a_reference_is_left_alone() {
+        // `100% sure` (a space ends the search) and a `%` followed by 1 MiB without a `;` are text.
+        let text = format!("100% sure, %{}", "a".repeat(1 << 20));
+        let entities = [("a".to_string(), "X".to_string())];
+        assert_eq!(expand_parameter_entities(&text, &entities), Ok(text.clone()));
+    }
+
+    /// `a` inside `levels` groups, each repeated: `((a)*)*…`.
+    fn nested_repetitions(levels: usize) -> String {
+        format!("{}a{}", "(".repeat(levels), ")*".repeat(levels))
+    }
+
+    #[test]
+    fn nested_repetitions_validate_without_going_exponential() {
+        // Ten levels over 100 children: each level asked the one below for the same positions again
+        // and again, about 10^14 steps without the memo of `ends`.
+        let dtd = parse(&format!("<!ELEMENT root {}><!ELEMENT a EMPTY><!ELEMENT b EMPTY>", nested_repetitions(10))).unwrap();
+        assert_eq!(validate(&dtd, &format!("<root>{}</root>", "<a/>".repeat(100))), vec![]);
+        let problems = validate(&dtd, &format!("<root>{}<b/></root>", "<a/>".repeat(100)));
+        assert_eq!(problems.len(), 1, "{problems:?}");
     }
 
     #[test]
