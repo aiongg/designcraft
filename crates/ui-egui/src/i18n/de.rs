@@ -1270,6 +1270,7 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Linear", "Linear"),
     ("Radial", "Radial"),
     ("Arabic", "Arabisch"),
+    ("Kanji", "Kanji"),
     ("Beveled Rectangle", "Abgeflachtes Rechteck"),
     ("Chinese", "Chinesisch"),
     ("Constrain proportions for width and height", "Proportionen für Breite und Höhe beibehalten"),
