@@ -20,8 +20,9 @@ pub struct NativeMenu {
     _menu: Menu,
     items: HashMap<String, (String, Value, Handle)>,
     last_refresh: f64,
-    /// The interface language the titles are in: the menu is rebuilt when it changes.
-    language: String,
+    /// The interface language the titles are in and whether CJK features are shown: the menu is
+    /// rebuilt when either changes.
+    shown_for: (String, bool),
 }
 
 /// Accelerator for "Cmd+Shift+]" (modifier-less shortcuts stay in the app so typing works).
@@ -71,7 +72,7 @@ impl NativeMenu {
                 (p.is_null() && accel(sc).is_some()).then(|| id.clone())
             })
             .collect();
-        Self { _menu: menu, items, last_refresh: 0.0, language: app.ui.language.clone() }
+        Self { _menu: menu, items, last_refresh: 0.0, shown_for: (app.ui.language.clone(), designcraft_ui_egui::cjk_features(app)) }
     }
 
     pub fn poll(&mut self, app: &mut DesignApp, ctx: &egui::Context) {
@@ -80,9 +81,10 @@ impl NativeMenu {
                 menus::activate_native(app, ctx, &cmd.clone(), &params.clone());
             }
         }
-        // Edit › Interface Language: the system menu bar follows at once, like the panels (the
-        // new menu replaces the old one as the application's menu before that one is dropped).
-        if app.ui.language != self.language {
+        // Edit › Interface Language and Show CJK Features: the system menu bar follows at once,
+        // like the panels (the new menu replaces the old one as the application's menu before
+        // that one is dropped).
+        if app.ui.language != self.shown_for.0 || designcraft_ui_egui::cjk_features(app) != self.shown_for.1 {
             *self = Self::install(app);
         }
         let now = designcraft_ui_egui::now_ms();
@@ -114,7 +116,7 @@ fn build(app: &DesignApp, parent: &Submenu, entries: &[Item], items: &mut HashMa
                 build(app, &sub, children, items, counter);
                 let _ = parent.append(&sub);
             }
-            // The menu bar is built once, so Show CJK Features applies here from the next launch.
+            // Hidden CJK commands; `NativeMenu::poll` rebuilds the bar when Show CJK Features changes.
             Item::Cmd { id, .. } if !menus::shown(app, id) => {}
             Item::Cmd { label, id, params, shortcut } => {
                 *counter += 1;
