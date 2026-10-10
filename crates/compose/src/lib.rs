@@ -2117,8 +2117,10 @@ fn cjk_line_reference(line: &[Glyph]) -> f64 {
     let (top, bottom) = cjk_em_box(g);
     match g.leading_model {
         L::Roman => 0.0,
-        L::AkiBelow => bottom,
-        L::AkiAbove => top,
+        // "Space below" measures from the em box top (Em Box Top/Right), "space above" from its
+        // bottom (Em Box Bottom/Left).
+        L::AkiBelow => top,
+        L::AkiAbove => bottom,
         L::Center | L::CenterDown => (top + bottom) / 2.0,
     }
 }

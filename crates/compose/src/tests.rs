@@ -1679,6 +1679,31 @@ fn cjk_center_leading_measures_em_centers_across_different_sizes() {
 }
 
 #[test]
+fn cjk_aki_below_measures_em_tops_and_aki_above_em_bottoms() {
+    use designcraft_doc::cjk::LeadingModel;
+    for (model, top) in [(LeadingModel::AkiBelow, true), (LeadingModel::AkiAbove, false)] {
+        let (mut d, sid, _) = doc_with("A\nB", Rect::new(0.0, 0.0, 300.0, 200.0), ParaAttrs::default());
+        d.story_mut(sid).unwrap().format_chars(0..3, |f| {
+            f.over.leading = Some(designcraft_doc::Leading::Points(30.0));
+            f.over.leading_model = Some(model);
+        });
+        d.story_mut(sid).unwrap().format_chars(0..1, |f| f.over.size = Some(24.0));
+        let cs = compose_story(&d, sid, &ComposeOptions::default());
+        let lines = all_lines(&cs);
+        assert_eq!(lines.len(), 2);
+        // The em box edge below the baseline (y down): its top, or its bottom one em lower.
+        let edge = |l: &Line| {
+            let g = &l.glyphs[0];
+            let (a, b) = g.face.vertical_metrics();
+            let em = g.face.units_per_em() * g.sy;
+            let em_top = l.baseline - em * a / (a + b);
+            if top { em_top } else { em_top + em }
+        };
+        assert!((edge(lines[1]) - edge(lines[0]) - 30.0).abs() < 1e-6, "{model:?}");
+    }
+}
+
+#[test]
 fn cjk_em_center_alignment_moves_small_characters() {
     let (mut d, sid, _) = doc_with("AB", Rect::new(0.0, 0.0, 300.0, 100.0), ParaAttrs::default());
     d.story_mut(sid).unwrap().format_chars(0..1, |f| f.over.size = Some(24.0));
