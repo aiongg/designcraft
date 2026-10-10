@@ -14,13 +14,16 @@ mod bidi;
 pub mod breaker;
 mod cache;
 pub mod grep;
+mod grid;
 pub mod hyphen;
+pub mod kenten;
 mod mojikumi;
 mod notes;
 mod overlay;
 mod parabox;
 mod ruby;
 pub mod shape;
+pub mod shatai;
 pub mod table;
 pub mod vars;
 mod warichu;
@@ -71,10 +74,15 @@ pub struct RunStyle {
     pub inserted: bool,
     /// XML element the text is tagged with (tag markers on screen).
     pub xml_tag: Option<String>,
-    /// Ruby over the run, and kenten (emphasis dots).
+    /// Ruby over the run.
     pub ruby: Option<String>,
-    pub kenten: bool,
-    pub kenten_character: String,
+    /// The ruby's settings (set with `ruby`), and for per-character ruby the parent character's
+    /// place in its run (see `ruby::reserve`).
+    pub ruby_spec: Option<designcraft_doc::ruby::RubySpec>,
+    pub ruby_unit: Option<u32>,
+    /// Overprint the fill and stroke (ruby glyphs set to overprint).
+    pub overprint_fill: bool,
+    pub overprint_stroke: bool,
     /// Warichu: stack this run in smaller lines inside the parent em.
     pub warichu: bool,
     pub warichu_lines: u32,
@@ -86,6 +94,10 @@ pub struct RunStyle {
     pub warichu_align: designcraft_doc::cjk::WarichuAlignment,
     pub warichu_chars_before: u32,
     pub warichu_chars_after: u32,
+    /// Kenten Settings and Kenten Color resolved (`None` without kenten); see [`kenten`].
+    pub kenten_mark: Option<kenten::KentenMark>,
+    /// Shatai (`None` when off); see [`shatai`] and [`RunStyle::shatai_xf`].
+    pub shatai: Option<shatai::Shatai>,
 }
 
 /// An underline or strikethrough bar: its centre `offset` below the baseline (negative =
@@ -139,6 +151,9 @@ pub struct PlacedGlyph {
     pub tcy: Option<[f64; 3]>,
     /// Set right to left (an odd bidi level): the caret before it is at its right edge.
     pub rtl: bool,
+    /// How far after its pen position the glyph is drawn (CJK aki, ruby parent spacing): its
+    /// advance starts at `x - dx`.
+    pub dx: f64,
 }
 
 impl PlacedGlyph {
@@ -523,6 +538,7 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
         limits: Rc::default(),
         split: None,
         split_limits: Rc::default(),
+        grid_next: None,
     };
     let para_ranges = story.para_ranges();
     let np = para_ranges.len();
@@ -653,6 +669,9 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
             vars: var_values,
             hidden_conditions: doc.conditions.iter().filter(|c| !c.visible).map(|c| c.name.clone()).collect(),
             vertical: cur_frame.is_some_and(|f| f.vertical),
+            auto_tcy: pp.auto_tcy.min(shape::AUTO_TCY_MAX),
+            auto_tcy_roman: pp.auto_tcy_include_roman,
+            rotate_roman: pp.rotate_roman,
             ..Default::default()
         };
         if !story.endnotes.is_empty() {
@@ -990,6 +1009,8 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
         let has_tabs = glyphs.iter().any(|g| g.ch == '\t');
         let mut first_line_rect: Option<(usize, f64, f64, f64)> = None; // frame, baseline, ascent, x-span
         let rtl = pp.direction == designcraft_doc::TextDirection::RightToLeft;
+        // Paragraph gyoudori: the (frame, column) of the block and the grid line after it.
+        let mut para_block: Option<((usize, usize), f64)> = None;
         loop {
             if cur.fi >= frames.len() {
                 if let Some(j) = trial_failed(&mut trial, &mut limits, balance_runs < balance_budget) {
@@ -1064,16 +1085,62 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                 };
                 let (reference, model) = cjk_line_reference(line_glyphs);
                 let advance = if cur.last_baseline.is_some() { cur.aki_below.unwrap_or(lead) } else { lead };
-                // Baseline grid: the next grid line at or below.
-                let grid = f.grid.filter(|&(_, inc)| {
-                    inc > 0.0 && (pp.grid_align == GridAlign::AllLines || (pp.grid_align == GridAlign::FirstLineOnly && line_no == 0))
-                });
-                let snap = |y: f64| grid.map_or(y, |(g_start, inc)| g_start + ((y - g_start) / inc - 1e-6).ceil() * inc);
                 let mut baseline = cur.next_baseline(f, col, advance, asc, tops, &pp);
                 if cur.last_baseline.is_some() {
                     baseline += cur.last_reference - reference;
                 }
-                baseline = snap(baseline);
+                // Baseline grid: grid alignment and gyoudori (see `grid`).
+                let grid = f.grid.filter(|&(_, inc)| {
+                    inc > 0.0
+                        && inc.is_finite()
+                        && (pp.grid_align == GridAlign::AllLines || (pp.grid_align == GridAlign::FirstLineOnly && line_no == 0))
+                });
+                let mut grid_end = None;
+                if let Some((g_start, inc)) = grid {
+                    let n = pp.grid_gyoudori.min(grid::MAX_GYOUDORI);
+                    match para_block.filter(|(at, _)| line_no > 0 && *at == (cur.fi, cur.col)) {
+                        // Inside a paragraph-gyoudori block, lines after the first keep their leading.
+                        Some((_, end)) => grid_end = Some(end),
+                        None => {
+                            let r = grid::reference_offset(line_glyphs, pp.grid_reference);
+                            let block = n > 0 && pp.paragraph_gyoudori && line_no == 0;
+                            let span = if block {
+                                // From this line's reference point to the paragraph's last line's.
+                                let aki_below = |model, lead| (model == designcraft_doc::cjk::LeadingModel::AkiBelow).then_some(lead);
+                                let (mut down, mut prev, mut prev_aki, mut last_r) = (0.0, reference, aki_below(model, lead), r);
+                                for (j, nb) in breaks.iter().enumerate().skip(k + 1) {
+                                    let (ns, ne) = (g0 + nb.start, g0 + nb.end);
+                                    let lg = glyphs.get(ns..ne.max(ns)).unwrap_or_default();
+                                    let (_, _, _, nlead) = line_metrics(lg, &glyphs, ns, mark_leading, mark_chars.size, db, &mark_chars);
+                                    let nlead = match last_line_mark {
+                                        Some(m) if j + 1 == breaks.len() => nlead.max(m),
+                                        _ => nlead,
+                                    };
+                                    let (nref, nmodel) = cjk_line_reference(lg);
+                                    down += prev_aki.unwrap_or(nlead) + prev - nref;
+                                    prev = nref;
+                                    prev_aki = aki_below(nmodel, nlead);
+                                    last_r = grid::reference_offset(lg, pp.grid_reference);
+                                }
+                                (down + last_r - r).max(0.0)
+                            } else {
+                                0.0
+                            };
+                            let lines = if block { grid::lines_for(span, inc, n) } else { n.max(1) };
+                            let free = cur.grid_next.filter(|(b, _)| cur.last_baseline == Some(*b)).map(|(_, y)| y);
+                            let band = grid::Band { natural: baseline + r, free, pending: cur.pending, fixed: n > 0, lines, span };
+                            let (y, end) = grid::place((g_start, inc), pp.grid_reference, band);
+                            baseline = y - r;
+                            grid_end = Some(end);
+                            if block {
+                                para_block = Some(((cur.fi, cur.col), end));
+                            }
+                        }
+                    }
+                }
+                // A line a wrap pushes down moves by whole grid lines, keeping its place in its band.
+                let on_grid = baseline;
+                let snap = |y: f64| grid.map_or(y, |(_, inc)| on_grid + ((y - on_grid) / inc - 1e-6).ceil().max(0.0) * inc);
                 // Wrap: push the line down to the first position with a slot (back on the grid).
                 let (mut x0, mut x1) = (col.x0, col.x1);
                 if !f.exclusions.is_empty() {
@@ -1094,6 +1161,7 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                         baseline = snap(baseline);
                     }
                 }
+                grid_end = grid_end.map(|end| end + baseline - on_grid);
                 let capped = cur.split.is_none() && line_cap[pi] == Some(line_no) && line_no > col_first_line;
                 // Footnotes referenced on this line need room at the bottom of the column too
                 // (a line at the top of a column is set anyway).
@@ -1227,7 +1295,8 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                         rect: Rect::new(at, baseline - asc, at + dc.width, baseline + dc.drop + desc),
                     });
                 }
-                ruby::annotate(db, &styles_tab, &mut placed, doc.settings.glyph_fallback);
+                ruby::annotate(db, &mut styles_tab, &story.text, &mut placed, doc.settings.glyph_fallback, f.vertical);
+                kenten::annotate(db, &styles_tab, &mut placed, doc.settings.glyph_fallback);
                 let range_end = if last { prange.end } else { glyphs.get(g0 + b.next).map(|g| g.byte).unwrap_or(prange.end) };
                 let range_start = glyphs.get(s).map(|g| g.byte).unwrap_or(prange.start).min(range_end);
                 let range_start = if line_no == 0 { prange.start } else { range_start };
@@ -1289,6 +1358,7 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                 cur.aki_below = (model == designcraft_doc::cjk::LeadingModel::AkiBelow).then_some(lead);
                 cur.last_descent = desc;
                 cur.pending = 0.0;
+                cur.grid_next = grid_end.map(|end| (baseline, end));
                 line_no += 1;
                 // A column / frame / page break inside the paragraph: the rest of it continues in the
                 // new column/frame/page, re-broken there. (A break that ends the paragraph moves the
@@ -1680,6 +1750,10 @@ fn apply_desired_spacing(glyphs: &mut [Glyph], pp: &ParaProps) {
                 {
                     g.break_after = Some(false);
                 }
+                // Roman word break: a roman word may break between any two of its letters.
+                if pp.roman_word_break && g.break_after.is_none() && roman_letter(a) && roman_letter(b) {
+                    g.break_after = Some(true);
+                }
             }
         }
     }
@@ -1701,6 +1775,11 @@ fn apply_desired_spacing(glyphs: &mut [Glyph], pp: &ParaProps) {
             g.dx *= gs;
         }
     }
+}
+
+/// Letters of the roman scripts (Latin, Greek, Cyrillic), which Roman Word Break lets break.
+fn roman_letter(c: char) -> bool {
+    c.is_alphabetic() && matches!(c as u32, 0x41..=0x5A | 0x61..=0x7A | 0xC0..=0x24F | 0x370..=0x3FF | 0x400..=0x4FF | 0x1E00..=0x1EFF)
 }
 
 /// Lengths of the composed output and the cursor before a paragraph (keep resolution re-lays
@@ -1905,6 +1984,9 @@ struct Cursor {
     split: Option<SplitBlock>,
     /// Bottoms that balance split blocks, by block part (kept by the compose loop).
     split_limits: Rc<Vec<(SplitKey, f64)>>,
+    /// The first grid line after the last grid-aligned line's band, with that line's baseline (it
+    /// holds while `last_baseline` is still that baseline).
+    grid_next: Option<(f64, f64)>,
 }
 
 /// A band's frame and first paragraph.
@@ -2228,6 +2310,17 @@ fn cjk_em_box(g: &Glyph) -> (f64, f64) {
     let top = -height * g.ascent / (g.ascent + g.descent).max(1e-9);
     (top, top + height)
 }
+/// The ideographic character face (ICF) box relative to the baseline: the em box of
+/// [`cjk_em_box`] inset by the font's own ICF insets (`BASE` `icft`/`icfb`, else 5% of the em).
+fn cjk_icf_box(g: &Glyph) -> (f64, f64) {
+    let (top, bottom) = cjk_em_box(g);
+    let (em_top, em_bottom) = g.face.em_box();
+    let (icf_top, icf_bottom) = g.face.icf_box();
+    let em = (em_top - em_bottom).max(1e-9);
+    let height = bottom - top;
+    let inset = |v: f64| if v.is_finite() { v.clamp(0.0, 0.5) } else { 0.05 };
+    (top + inset((em_top - icf_top) / em) * height, bottom - inset((icf_bottom - em_bottom) / em) * height)
+}
 fn cjk_alignment_shift(g: &Glyph, reference: &Glyph) -> f64 {
     use designcraft_doc::cjk::CharacterAlignment as A;
     let (t, b) = cjk_em_box(g);
@@ -2237,8 +2330,8 @@ fn cjk_alignment_shift(g: &Glyph, reference: &Glyph) -> f64 {
         A::EmTop => t - rt,
         A::EmCenter => (t + b - rt - rb) / 2.0,
         A::EmBottom => b - rb,
-        A::IcfTop => reference.ascent - g.ascent,
-        A::IcfBottom => g.descent - reference.descent,
+        A::IcfTop => cjk_icf_box(g).0 - cjk_icf_box(reference).0,
+        A::IcfBottom => cjk_icf_box(g).1 - cjk_icf_box(reference).1,
     }
 }
 /// The point leading measures a line from, relative to its baseline, and the leading model of
@@ -2249,8 +2342,10 @@ fn cjk_line_reference(line: &[Glyph]) -> (f64, designcraft_doc::cjk::LeadingMode
     let (top, bottom) = cjk_em_box(g);
     let reference = match g.leading_model {
         L::Roman => 0.0,
-        L::AkiBelow => bottom,
-        L::AkiAbove => top,
+        // "Space below" measures from the em box top (Em Box Top/Right), "space above" from its
+        // bottom (Em Box Bottom/Left).
+        L::AkiBelow => top,
+        L::AkiAbove => bottom,
         L::Center | L::CenterDown => (top + bottom) / 2.0,
     };
     (reference, g.leading_model)
@@ -2684,6 +2779,7 @@ fn layout_line(
         if scale[i] != 1.0 {
             p.sx *= scale[i];
             p.x = x + g.dx * scale[i];
+            p.dx = g.dx * scale[i];
             p.adv *= scale[i];
         }
         p.adv += add[i];
@@ -2717,7 +2813,7 @@ fn layout_line(
         }
         // One tatweel stretched over the gap (overlapping its neighbours a little).
         let k = (l + 0.4) / w;
-        out.push(PlacedGlyph { gid, x: at - 0.2, y: -g.shift, adv: 0.0, sx: g.sx * k, len: 0, upright: false, tcy: None, ..place(g, at) });
+        out.push(PlacedGlyph { gid, x: at - 0.2, y: -g.shift, adv: 0.0, sx: g.sx * k, len: 0, upright: false, tcy: None, dx: 0.0, ..place(g, at) });
     }
     (out, x, ratio)
 }
@@ -2839,6 +2935,7 @@ fn tab_leader(tab: &Glyph, leader: &str, x: f64, w: f64, origin: f64, out: &mut 
                 upright: false,
                 tcy: None,
                 rtl: false,
+                dx: 0.0,
             });
             at += adv;
         }
@@ -2960,6 +3057,7 @@ fn place(g: &Glyph, x: f64) -> PlacedGlyph {
         upright: g.upright,
         tcy: g.tcy,
         rtl: false,
+        dx: g.dx,
     }
 }
 
@@ -3748,8 +3846,12 @@ pub fn path_glyphs(
             } else {
                 designcraft_geom::Affine::IDENTITY
             };
-            let m =
-                place * designcraft_geom::Affine::translate((g.x, l.baseline + g.y)) * skew * designcraft_geom::Affine::scale_non_uniform(g.sx, g.sy);
+            let shatai = style.shatai_xf(g, l.baseline).unwrap_or(designcraft_geom::Affine::IDENTITY);
+            let m = place
+                * shatai
+                * designcraft_geom::Affine::translate((g.x, l.baseline + g.y))
+                * skew
+                * designcraft_geom::Affine::scale_non_uniform(g.sx, g.sy);
             let k = match runs.iter().position(|r| r.0 == g.style) {
                 Some(k) => k,
                 None => {

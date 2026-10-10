@@ -963,7 +963,10 @@ pub fn run_ui(app: &mut DesignApp, id: &str, p: &Value) -> Option<Result<Value, 
                 let at = if t.range().is_empty() { t.range().start } else { t.range().start + 1 };
                 story.char_format_at(at).over.ruby.clone()
             });
-            app.ui.dialog = Some(crate::dialogs::Dialog::new("ruby", json!({"text": cur.unwrap_or_default()})));
+            let cur = cur.unwrap_or_default();
+            // The ruby settings the panes show: the selection's resolved character attributes.
+            let base = crate::panels::text_attrs(app).and_then(|a| a.get("chars").cloned()).unwrap_or(Value::Null);
+            app.ui.dialog = Some(crate::dialogs::Dialog::new("ruby", json!({"text": cur, "base": base})));
             Ok(Value::Null)
         }
         "app.paragraphRulesDialog" => {
