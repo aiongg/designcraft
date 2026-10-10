@@ -4405,7 +4405,14 @@ fn footnote_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
                 ui,
                 d,
                 "firstBaseline",
-                &[("ascent", "Ascent"), ("capHeight", "Cap Height"), ("leading", "Leading"), ("xHeight", "x Height"), ("fixed", "Fixed")],
+                &[
+                    ("ascent", "Ascent"),
+                    ("capHeight", "Cap Height"),
+                    ("leading", "Leading"),
+                    ("xHeight", "x Height"),
+                    ("emboxHeight", "Em Box Height"),
+                    ("fixed", "Fixed"),
+                ],
             );
             ui.end_row();
             crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Min:"));

@@ -997,6 +997,7 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Rule On", "Linie ein"),
     ("Ascent", "Oberlänge"),
     ("Cap Height", "Versalhöhe"),
+    ("Em Box Height", "Gevierthöhe"),
     ("Leading", "Zeilenabstand"),
     ("x Height", "x-Höhe"),
     ("Fixed", "Fest"),

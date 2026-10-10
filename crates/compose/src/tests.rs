@@ -2220,6 +2220,47 @@ fn ascent_first_baseline_uses_the_typographic_ascender() {
 }
 
 #[test]
+fn em_box_first_baseline_uses_the_base_em_box_else_0_88_em() {
+    use designcraft_doc::FirstBaseline;
+    let db = designcraft_fonts::FontDb::global();
+    // The test font's `BASE` table puts the em box bottom (`ideo`) at -170 units: its top is 0.83 em.
+    let mut no_base = typo_test_font("EmBoxTop 0700", Some(700));
+    let tables = u16::from_be_bytes([no_base[4], no_base[5]]) as usize;
+    let rec = (0..tables).map(|t| 12 + 16 * t).find(|&r| &no_base[r..r + 4] == b"BASE").unwrap();
+    // Still sorted between its neighbours, so the table directory stays valid.
+    no_base[rec..rec + 4].copy_from_slice(b"BASX");
+    db.add_font(no_base);
+    db.add_font(typo_test_font("EmBoxBase 700", Some(700)));
+    assert_eq!(db.face("EmBoxTop 0700", "Regular").declared_em_box(), None);
+    assert_eq!(db.face("EmBoxBase 700", "Regular").declared_em_box(), Some((830.0, -170.0)));
+    let (mut d, sid, fid) = doc_with("Hxg Hxg", Rect::new(36.0, 36.0, 300.0, 300.0), ParaAttrs::default());
+    let mut first = |family: &str, sizes: [f64; 2], kind: FirstBaseline| {
+        let st = d.story_mut(sid).unwrap();
+        for (range, size) in [(0..4, sizes[0]), (4..7, sizes[1])] {
+            st.format_chars(range, |f| {
+                f.over.font_family = Some(family.into());
+                f.over.font_style = Some("Regular".into());
+                f.over.size = Some(size);
+            });
+        }
+        d.item_mut(fid).unwrap().text_frame_mut().unwrap().options.first_baseline = kind;
+        compose_story(&d, sid, &ComposeOptions::default()).frames[0].lines[0].baseline - 36.0
+    };
+    let close = |a: f64, b: f64| (a - b).abs() < 0.01;
+    // Ascent: the 0.7 em typographic ascender; Em Box Height: the 0.88 em default em box top.
+    let asc = first("EmBoxTop 0700", [10.0; 2], FirstBaseline::Ascent);
+    assert!(close(asc, 7.0), "{asc}");
+    let emb = first("EmBoxTop 0700", [10.0; 2], FirstBaseline::EmboxHeight);
+    assert!(close(emb, 8.8), "{emb}");
+    // A mixed first line takes its largest size.
+    let emb = first("EmBoxTop 0700", [10.0, 20.0], FirstBaseline::EmboxHeight);
+    assert!(close(emb, 17.6), "{emb}");
+    // A font's `BASE` em box wins over the default.
+    let emb = first("EmBoxBase 700", [10.0; 2], FirstBaseline::EmboxHeight);
+    assert!(close(emb, 8.3), "{emb}");
+}
+
+#[test]
 fn ascent_first_baseline_falls_back_to_the_ascent_without_a_usable_typo_ascender() {
     let db = designcraft_fonts::FontDb::global();
     // No OS/2 table, a negative and an absurd typo ascender: the (hhea) ascent, 1 em.

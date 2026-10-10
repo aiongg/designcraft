@@ -510,10 +510,11 @@ pub fn first_baseline_out(f: FirstBaseline) -> &'static str {
         FirstBaseline::Leading => "LeadingOffset",
         FirstBaseline::XHeight => "XHeight",
         FirstBaseline::Fixed => "FixedHeight",
+        FirstBaseline::EmboxHeight => "EmboxHeight",
     }
 }
 pub fn first_baseline_in(s: &str) -> FirstBaseline {
-    [FirstBaseline::CapHeight, FirstBaseline::Leading, FirstBaseline::XHeight, FirstBaseline::Fixed]
+    [FirstBaseline::CapHeight, FirstBaseline::Leading, FirstBaseline::XHeight, FirstBaseline::Fixed, FirstBaseline::EmboxHeight]
         .into_iter()
         .find(|m| first_baseline_out(*m) == s)
         .unwrap_or(FirstBaseline::Ascent)

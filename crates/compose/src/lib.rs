@@ -1030,7 +1030,7 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
             let col = cur.split_rect(col);
             // Estimate slots for the breaker with the paragraph's base leading.
             let est_asc = base_chars.size * 0.75;
-            let est_tops = Tops { typo_ascent: est_asc, cap: est_asc * 0.72, xh: est_asc * 0.5 };
+            let est_tops = Tops { typo_ascent: est_asc, cap: est_asc * 0.72, xh: est_asc * 0.5, em: base_chars.size * 0.88 };
             let est_first = cur.next_baseline(f, col, base_leading, est_asc, est_tops, &pp);
             let est_jump = cur.jump(f, base_leading, est_asc, est_tops);
             let slots = estimate_slots(f, col, est_first, est_jump, base_leading, base_chars.size, &glyphs[g0..], &pp, line_no);
@@ -2282,25 +2282,34 @@ impl Cursor {
 fn first_baseline_offset(f: &FrameSpec, lead: f64, asc: f64, tops: Tops) -> f64 {
     let off = match f.opts.first_baseline {
         // Vertical frames measure from the ascent.
-        FirstBaseline::Ascent if f.vertical => asc,
+        FirstBaseline::Ascent | FirstBaseline::EmboxHeight if f.vertical => asc,
         FirstBaseline::CapHeight if f.vertical => asc * 0.72,
         FirstBaseline::XHeight if f.vertical => asc * 0.5,
         FirstBaseline::Ascent => tops.typo_ascent,
         FirstBaseline::CapHeight => tops.cap,
         FirstBaseline::XHeight => tops.xh,
+        FirstBaseline::EmboxHeight => tops.em,
         FirstBaseline::Leading => lead,
         FirstBaseline::Fixed => 0.0,
     };
     off.max(f.opts.first_baseline_min)
 }
 
-/// A line's tallest typographic ascender, cap height and x height above its baseline: the
-/// first baseline offsets.
+/// A line's tallest typographic ascender, cap height, x height and em box top above its baseline:
+/// the first baseline offsets.
 #[derive(Clone, Copy, Default)]
 struct Tops {
     typo_ascent: f64,
     cap: f64,
     xh: f64,
+    em: f64,
+}
+
+/// The em box top above the baseline at `size`: the font's `BASE` em box, else the default
+/// ideographic em box, 0.88 em above the baseline.
+fn em_box_top(face: &designcraft_fonts::FontFace, size: f64) -> f64 {
+    let em = face.declared_em_box().filter(|_| face.upem > 0.0).map_or(0.88, |(top, _)| top / face.upem);
+    em * size
 }
 
 /// Em box relative to the baseline. Font ascender/descender proportions locate it;
@@ -2365,7 +2374,7 @@ fn line_metrics(
     if src.is_empty() {
         let face = face();
         let k = base_size / face.upem;
-        let tops = Tops { typo_ascent: face.typo_ascent * k, cap: face.cap_height * k, xh: face.x_height * k };
+        let tops = Tops { typo_ascent: face.typo_ascent * k, cap: face.cap_height * k, xh: face.x_height * k, em: em_box_top(&face, base_size) };
         return (face.ascent * k, tops, face.descent * k, base_leading);
     }
     let mut asc: f64 = 0.0;
@@ -2382,6 +2391,7 @@ fn line_metrics(
         if !g.list_label {
             own_text = true;
             tops.typo_ascent = tops.typo_ascent.max(g.typo_ascent + up);
+            tops.em = tops.em.max(em_box_top(&g.face, g.size) + up);
         }
         tops.cap = tops.cap.max(g.cap + up);
         tops.xh = tops.xh.max(g.xh + up);
@@ -2392,6 +2402,7 @@ fn line_metrics(
         // Only a label (an empty list paragraph): as an empty paragraph.
         let face = face();
         tops.typo_ascent = face.typo_ascent * base_size / face.upem;
+        tops.em = em_box_top(&face, base_size);
     }
     (asc, tops, desc, lead)
 }

@@ -281,6 +281,8 @@ pub enum FirstBaseline {
     Leading,
     XHeight,
     Fixed,
+    /// The top of the em box: the font's `BASE` em box, else 0.88 em above the baseline.
+    EmboxHeight,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

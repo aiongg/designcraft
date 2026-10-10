@@ -2248,6 +2248,7 @@ const TABLE: &[(&str, [&str; 5])] = &[
     ("Cap Height", ["Cap Height", "Cap Height", "Cap Height", "Cap Height", "大写字母高度"]),
     ("Leading", ["Leading", "Leading", "Leading", "Leading", "行距"]),
     ("x Height", ["x Height", "x Height", "x Height", "x Height", "x 字高"]),
+    ("Em Box Height", ["Em Box Height", "Em Box Height", "Em Box Height", "Em Box Height", "全角字框高度"]),
     ("Fixed", ["Fixed", "Fixed", "Fixed", "Fixed", "固定"]),
     ("Never (continuous)", ["Never (continuous)", "Never (continuous)", "Never (continuous)", "Never (continuous)", "从不（连续编号）"]),
     ("Page", ["Page", "Page", "Page", "Page", "页面"]),

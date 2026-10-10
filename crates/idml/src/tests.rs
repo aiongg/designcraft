@@ -2676,3 +2676,14 @@ fn cell_edge_gap_colours_and_tints_import_and_round_trip_per_edge() {
     let back = import_idml(&export_idml(&d)).unwrap();
     assert_eq!(gaps(&back), (style, cell));
 }
+
+#[test]
+fn em_box_first_baseline_offset_round_trips() {
+    use designcraft_doc::FirstBaseline;
+    let first = |d: &Document| d.spreads[0].items[0].text_frame().unwrap().options.first_baseline;
+    let d = inset_fixture(r#"<TextFramePreference FirstBaselineOffset="EmboxHeight"/>"#, "");
+    assert_eq!(first(&d), FirstBaseline::EmboxHeight);
+    assert_eq!(first(&import_idml(&export_idml(&d)).unwrap()), FirstBaseline::EmboxHeight);
+    let unknown = inset_fixture(r#"<TextFramePreference FirstBaselineOffset="SomethingElse"/>"#, "");
+    assert_eq!(first(&unknown), FirstBaseline::Ascent);
+}
