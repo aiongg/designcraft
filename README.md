@@ -120,20 +120,6 @@ CRAFT_FONTS_DIR="$PWD/../craft-fonts" cargo run --release -p designcraft   # abs
 Without it, Japanese falls back to the system's fonts (none on the web). Release builds always
 include it.
 
-On Windows, the desktop app initializes only DirectX 12 by default. This avoids an AMD
-OpenGL driver startup crash in `atio6axx.dll`; no custom launcher or shortcut is needed.
-For graphics troubleshooting, `WGPU_BACKEND` overrides this default (for example, `dx12`
-or `vulkan`). In PowerShell, run this from the directory containing the executable:
-
-```powershell
-$env:WGPU_BACKEND = "vulkan"
-& .\designcraft.exe
-Remove-Item Env:WGPU_BACKEND                     # restore the default for later launches
-```
-
-An explicit `opengl` override can reintroduce the driver crash on affected systems.
-The macOS, Linux and web backend defaults are unchanged.
-
 To drive a running app, send JSON lines to `127.0.0.1:7979`. The protocol is described in
 [`docs/control-protocol.md`](docs/control-protocol.md).
 

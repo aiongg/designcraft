@@ -9,8 +9,6 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod control_server;
-#[cfg(any(target_os = "windows", test))]
-mod graphics;
 mod logging;
 #[cfg(target_os = "macos")]
 mod native_menu;
@@ -241,8 +239,6 @@ fn main() -> eframe::Result {
             .with_title_shown(false),
         ..Default::default()
     };
-    #[cfg(target_os = "windows")]
-    graphics::configure(&mut options, eframe::wgpu::Backends::from_env());
     options.viewport = options.viewport.with_app_id(APP_ID);
     if let Some(icon) = app_icon() {
         options.viewport = options.viewport.with_icon(icon);
