@@ -13,11 +13,14 @@
 mod bidi;
 pub mod breaker;
 mod cache;
+mod grid;
 pub mod hyphen;
+pub mod kenten;
 mod notes;
 mod overlay;
 mod ruby;
 pub mod shape;
+pub mod shatai;
 pub mod table;
 pub mod vars;
 mod warichu;
@@ -67,10 +70,8 @@ pub struct RunStyle {
     pub inserted: bool,
     /// XML element the text is tagged with (tag markers on screen).
     pub xml_tag: Option<String>,
-    /// Ruby over the run, and kenten (emphasis dots).
+    /// Ruby over the run.
     pub ruby: Option<String>,
-    pub kenten: bool,
-    pub kenten_character: String,
     /// Warichu: stack this run in smaller lines inside the parent em.
     pub warichu: bool,
     pub warichu_lines: u32,
@@ -82,6 +83,10 @@ pub struct RunStyle {
     pub warichu_align: designcraft_doc::cjk::WarichuAlignment,
     pub warichu_chars_before: u32,
     pub warichu_chars_after: u32,
+    /// Kenten Settings and Kenten Color resolved (`None` without kenten); see [`kenten`].
+    pub kenten_mark: Option<kenten::KentenMark>,
+    /// Shatai (`None` when off); see [`shatai`] and [`RunStyle::shatai_xf`].
+    pub shatai: Option<shatai::Shatai>,
 }
 
 /// An underline or strikethrough bar: its centre `offset` below the baseline (negative =
@@ -495,6 +500,7 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
         limits: Rc::default(),
         split: None,
         split_limits: Rc::default(),
+        grid_next: None,
     };
     let para_ranges = story.para_ranges();
     let np = para_ranges.len();
@@ -622,6 +628,9 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
             vars: var_values,
             hidden_conditions: doc.conditions.iter().filter(|c| !c.visible).map(|c| c.name.clone()).collect(),
             vertical: cur_frame.is_some_and(|f| f.vertical),
+            auto_tcy: pp.auto_tcy.min(shape::AUTO_TCY_MAX),
+            auto_tcy_roman: pp.auto_tcy_include_roman,
+            rotate_roman: pp.rotate_roman,
             ..Default::default()
         };
         if !story.endnotes.is_empty() {
@@ -867,6 +876,8 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
         let mut col_first_line = 0usize;
         let has_tabs = glyphs.iter().any(|g| g.ch == '\t');
         let mut first_line_rect: Option<(usize, f64, f64, f64)> = None; // frame, baseline, ascent, x-span
+        // Paragraph gyoudori: the (frame, column) of the block and the grid line after it.
+        let mut para_block: Option<((usize, usize), f64)> = None;
         loop {
             if cur.fi >= frames.len() {
                 if let Some(j) = trial_failed(&mut trial, &mut limits, balance_runs < balance_budget) {
@@ -919,13 +930,47 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                 if cur.last_baseline.is_some() {
                     baseline += cur.last_reference - reference;
                 }
-                // Baseline grid.
+                // Baseline grid: grid alignment and gyoudori (see `grid`).
+                let mut grid_end = None;
                 if let Some((g_start, inc)) = f.grid
                     && (pp.grid_align == GridAlign::AllLines || (pp.grid_align == GridAlign::FirstLineOnly && line_no == 0))
                     && inc > 0.0
+                    && inc.is_finite()
                 {
-                    let n = ((baseline - g_start) / inc - 1e-6).ceil();
-                    baseline = g_start + n * inc;
+                    let n = pp.grid_gyoudori.min(grid::MAX_GYOUDORI);
+                    match para_block.filter(|(at, _)| line_no > 0 && *at == (cur.fi, cur.col)) {
+                        // Inside a paragraph-gyoudori block, lines after the first keep their leading.
+                        Some((_, end)) => grid_end = Some(end),
+                        None => {
+                            let r = grid::reference_offset(line_glyphs, pp.grid_reference);
+                            let block = n > 0 && pp.paragraph_gyoudori && line_no == 0;
+                            let span = if block {
+                                // From this line's reference point to the paragraph's last line's.
+                                let (mut down, mut prev, mut last_r) = (0.0, reference, r);
+                                for nb in breaks.iter().skip(k + 1) {
+                                    let (ns, ne) = (g0 + nb.start, g0 + nb.end);
+                                    let lg = glyphs.get(ns..ne.max(ns)).unwrap_or_default();
+                                    let (_, _, nlead) = line_metrics(lg, &glyphs, ns, base_leading, base_chars.size, db, &base_chars);
+                                    let nref = cjk_line_reference(lg);
+                                    down += nlead + prev - nref;
+                                    prev = nref;
+                                    last_r = grid::reference_offset(lg, pp.grid_reference);
+                                }
+                                (down + last_r - r).max(0.0)
+                            } else {
+                                0.0
+                            };
+                            let lines = if block { grid::lines_for(span, inc, n) } else { n.max(1) };
+                            let free = cur.grid_next.filter(|(b, _)| cur.last_baseline == Some(*b)).map(|(_, y)| y);
+                            let band = grid::Band { natural: baseline + r, free, pending: cur.pending, fixed: n > 0, lines, span };
+                            let (y, end) = grid::place((g_start, inc), pp.grid_reference, band);
+                            baseline = y - r;
+                            grid_end = Some(end);
+                            if block {
+                                para_block = Some(((cur.fi, cur.col), end));
+                            }
+                        }
+                    }
                 }
                 // Wrap: push the line down until a slot exists.
                 let (mut x0, mut x1) = (col.x0, col.x1);
@@ -1039,7 +1084,8 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                     layout_line(&glyphs, s, e, b.hyphen, lx0, lx1, col.x0, &pp, &spacing, ends_para, forced_mid, f.left_page, &bidi_info);
                 // Warichu runs before ruby so a reading is placed over the stacked note.
                 let end_x = end_x + warichu::place(&styles_tab, &mut placed);
-                ruby::annotate(db, &styles_tab, &mut placed, doc.settings.glyph_fallback);
+                ruby::annotate(&styles_tab, &mut placed);
+                kenten::annotate(db, &styles_tab, &mut placed, doc.settings.glyph_fallback);
                 let range_end = if last { prange.end } else { glyphs.get(g0 + b.next).map(|g| g.byte).unwrap_or(prange.end) };
                 let range_start = glyphs.get(s).map(|g| g.byte).unwrap_or(prange.start).min(range_end);
                 let range_start = if line_no == 0 { prange.start } else { range_start };
@@ -1089,6 +1135,7 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                 cur.last_reference = reference;
                 cur.last_descent = desc;
                 cur.pending = 0.0;
+                cur.grid_next = grid_end.map(|end| (baseline, end));
                 line_no += 1;
                 // A column / frame / page break inside the paragraph: the rest of it continues in the
                 // new column/frame/page, re-broken there. (A break that ends the paragraph moves the
@@ -1512,6 +1559,10 @@ fn apply_desired_spacing(glyphs: &mut [Glyph], pp: &ParaProps) {
                 {
                     g.break_after = Some(false);
                 }
+                // Roman word break: a roman word may break between any two of its letters.
+                if pp.roman_word_break && g.break_after.is_none() && roman_letter(a) && roman_letter(b) {
+                    g.break_after = Some(true);
+                }
             }
         }
     }
@@ -1533,6 +1584,11 @@ fn apply_desired_spacing(glyphs: &mut [Glyph], pp: &ParaProps) {
             g.dx *= gs;
         }
     }
+}
+
+/// Letters of the roman scripts (Latin, Greek, Cyrillic), which Roman Word Break lets break.
+fn roman_letter(c: char) -> bool {
+    c.is_alphabetic() && matches!(c as u32, 0x41..=0x5A | 0x61..=0x7A | 0xC0..=0x24F | 0x370..=0x3FF | 0x400..=0x4FF | 0x1E00..=0x1EFF)
 }
 
 /// Lengths of the composed output and the cursor before a paragraph (keep resolution re-lays
@@ -1732,6 +1788,9 @@ struct Cursor {
     split: Option<SplitBlock>,
     /// Bottoms that balance split blocks, by block part (kept by the compose loop).
     split_limits: Rc<Vec<(SplitKey, f64)>>,
+    /// The first grid line after the last grid-aligned line's band, with that line's baseline (it
+    /// holds while `last_baseline` is still that baseline).
+    grid_next: Option<(f64, f64)>,
 }
 
 /// A band's frame and first paragraph.
@@ -3200,8 +3259,12 @@ pub fn path_glyphs(
             } else {
                 designcraft_geom::Affine::IDENTITY
             };
-            let m =
-                place * designcraft_geom::Affine::translate((g.x, l.baseline + g.y)) * skew * designcraft_geom::Affine::scale_non_uniform(g.sx, g.sy);
+            let shatai = style.shatai_xf(g, l.baseline).unwrap_or(designcraft_geom::Affine::IDENTITY);
+            let m = place
+                * shatai
+                * designcraft_geom::Affine::translate((g.x, l.baseline + g.y))
+                * skew
+                * designcraft_geom::Affine::scale_non_uniform(g.sx, g.sy);
             let k = match runs.iter().position(|r| r.0 == g.style) {
                 Some(k) => k,
                 None => {

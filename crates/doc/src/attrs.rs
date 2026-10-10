@@ -722,7 +722,8 @@ attr_set! {
         jidori: u32 = 0,
         character_alignment: crate::cjk::CharacterAlignment = crate::cjk::CharacterAlignment::Baseline,
         leading_model: crate::cjk::LeadingModel = crate::cjk::LeadingModel::Roman,
-        /// Explicit emphasis character; empty uses the traditional sesame dot.
+        /// The kenten mark's text: a custom mark, or the preset of `kenten_kind` (see
+        /// [`crate::cjk_settings::kenten_mark`]); empty is the sesame dot.
         kenten_character: String = String::new(),
         /// Horizontal / vertical scale, 1.0 = 100%.
         h_scale: f64 = 1.0,
@@ -774,6 +775,41 @@ attr_set! {
         /// Minimum characters on a warichu line before a break, and on the line after it.
         warichu_chars_before_break: u32 = 1,
         warichu_chars_after_break: u32 = 1,
+        // Kenten Settings / Kenten Color (`kenten` switches the marks on).
+        /// The mark; [`crate::cjk_settings::KentenKind::Custom`] draws `kenten_character`.
+        kenten_kind: crate::cjk_settings::KentenKind = crate::cjk_settings::KentenKind::SesameDot,
+        /// Font of a custom mark (empty = the text's font) and its style.
+        kenten_font: String = String::new(),
+        kenten_font_style: String = String::new(),
+        /// Mark size in points; `None` is half the text size.
+        kenten_size: Option<f64> = None,
+        /// Horizontal / vertical scale of the mark, 1.0 = 100%.
+        kenten_x_scale: f64 = 1.0,
+        kenten_y_scale: f64 = 1.0,
+        /// Points between the text's em box and the mark's.
+        kenten_distance: f64 = 0.0,
+        kenten_position: crate::cjk_settings::KentenPosition = crate::cjk_settings::KentenPosition::AboveRight,
+        kenten_alignment: crate::cjk_settings::KentenAlignment = crate::cjk_settings::KentenAlignment::Center,
+        /// How a custom mark was entered (IDML `KentenCharacterSet`), kept for interchange.
+        kenten_character_set: String = String::new(),
+        /// Mark fill and stroke swatches (empty = the text's), tints and stroke weight (`None` =
+        /// the text's).
+        kenten_fill: String = String::new(),
+        kenten_fill_tint: Option<f32> = None,
+        kenten_stroke: String = String::new(),
+        kenten_stroke_tint: Option<f32> = None,
+        kenten_stroke_weight: Option<f64> = None,
+        kenten_overprint_fill: crate::cjk_settings::AdornmentOverprint = crate::cjk_settings::AdornmentOverprint::Auto,
+        kenten_overprint_stroke: crate::cjk_settings::AdornmentOverprint = crate::cjk_settings::AdornmentOverprint::Auto,
+        // Shatai (斜体): the character is compressed across the direction at `shatai_angle`.
+        /// Compression in percent of the em (0 = off).
+        shatai_magnification: f64 = 0.0,
+        /// Degrees from the line direction, counter-clockwise.
+        shatai_angle: f64 = 45.0,
+        /// Turn the compressed character back so its edge along the line stays along the line.
+        shatai_adjust_rotation: bool = false,
+        /// Fit the advance to the compressed em box.
+        shatai_adjust_tsume: bool = true,
         /// Digits (World-Ready): how 0–9 are drawn.
         digits: Digits = Digits::Default,
         character_direction: crate::arabic::CharacterDirection = crate::arabic::CharacterDirection::Default,
@@ -890,6 +926,24 @@ attr_set! {
         bunri_kinshi: bool = false,
         rensuuji: bool = true,
         treat_ideographic_space_as_space: bool = false,
+        // Auto Tate-chu-yoko, Japanese Composition and Grid Settings.
+        /// Auto tate-chu-yoko: in vertical text, runs of up to this many half-width digits are set
+        /// across one em (0 = off).
+        auto_tcy: u32 = 0,
+        /// Auto tate-chu-yoko also takes runs of half-width roman letters.
+        auto_tcy_include_roman: bool = false,
+        /// Rotate Roman Characters in Vertical Text (縦組み中の欧文回転): half-width characters
+        /// stand upright one by one instead of lying along the line.
+        rotate_roman: bool = false,
+        /// Roman word break (欧文泣き別れ): roman words may break between any two letters,
+        /// without a hyphen.
+        roman_word_break: bool = false,
+        /// The point of a line that sits on the grid while `grid_align` is on.
+        grid_reference: crate::cjk::CharacterAlignment = crate::cjk::CharacterAlignment::Baseline,
+        /// Gyoudori (行取り): grid lines each line takes (0 = as many as its leading needs).
+        grid_gyoudori: u32 = 0,
+        /// Paragraph gyoudori: the paragraph as a whole, not each line, takes `grid_gyoudori` lines.
+        paragraph_gyoudori: bool = false,
         /// Paragraph shading, and how far it reaches past the text: top, left, bottom, right.
         shading_on: bool = false,
         shading_color: String = "[Black]".into(),

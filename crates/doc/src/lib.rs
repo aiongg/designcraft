@@ -15,6 +15,7 @@ pub mod arrow;
 pub mod attrs;
 pub mod build;
 pub mod cjk;
+pub mod cjk_settings;
 pub mod datamerge;
 mod edit;
 pub mod endnotes;

@@ -1399,3 +1399,69 @@ fn list_numbering_format_expression_and_bullet_import_and_round_trip() {
     check(&d);
     check(&import_idml(&export_idml(&d)).unwrap());
 }
+
+#[test]
+fn kenten_shatai_and_grid_settings_import_and_round_trip() {
+    use designcraft_doc::cjk::CharacterAlignment;
+    use designcraft_doc::cjk_settings::{AdornmentOverprint, KentenAlignment, KentenKind, KentenPosition};
+    let story = r#"<idPkg:Story xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging"><Story Self="s1">
+      <ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/$ID/[No paragraph style]" AutoTcy="3" AutoTcyIncludeRoman="true" RotateSingleByteCharacters="true" AllowArbitraryHyphenation="true" GridAlignment="AlignEmCenter" GridAlignFirstLineOnly="true" GridGyoudori="2" ParagraphGyoudori="true">
+        <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]" KentenKind="KentenSmallBlackCircle" KentenFontSize="6" KentenXScale="80" KentenYScale="120" KentenPlacement="1.5" KentenPosition="BelowLeft" KentenAlignment="AlignKentenLeft" KentenCharacterSet="CharacterInput" KentenTint="50" KentenStrokeTint="-1" KentenWeight="0.5" KentenOverprintFill="OverprintOn" KentenOverprintStroke="Auto" ShataiMagnification="20" ShataiDegreeAngle="6000" ShataiAdjustRotation="true" ShataiAdjustTsume="false"><Properties><KentenFont type="string">$ID/</KentenFont><KentenFontStyle type="enumeration">Nothing</KentenFontStyle><KentenFillColor type="string">Text Color</KentenFillColor></Properties><Content>甲乙</Content></CharacterStyleRange>
+        <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]" KentenKind="Custom" KentenCustomCharacter="★"><Content>丙</Content></CharacterStyleRange>
+      </ParagraphStyleRange></Story></idPkg:Story>"#;
+    let doc = import_idml(&fixture_with_story(story)).unwrap();
+    let st = doc.stories.values().find(|s| s.text.contains("甲乙")).unwrap();
+    let runs: Vec<CharAttrs> = st.runs().map(|(_, f)| f.over.clone()).collect();
+    let a = &runs[0];
+    assert_eq!((a.kenten, a.kenten_kind, a.kenten_character.as_deref()), (Some(true), Some(KentenKind::SmallBlackCircle), Some("\u{2022}")));
+    assert_eq!((a.kenten_size, a.kenten_x_scale, a.kenten_y_scale, a.kenten_distance), (Some(Some(6.0)), Some(0.8), Some(1.2), Some(1.5)));
+    assert_eq!((a.kenten_position, a.kenten_alignment), (Some(KentenPosition::BelowLeft), Some(KentenAlignment::Start)));
+    assert_eq!((a.kenten_font.as_deref(), a.kenten_font_style.as_deref(), a.kenten_fill.as_deref()), (Some(""), Some(""), Some("")));
+    assert_eq!((a.kenten_fill_tint, a.kenten_stroke_tint, a.kenten_stroke_weight), (Some(Some(0.5)), Some(None), Some(Some(0.5))));
+    assert_eq!((a.kenten_overprint_fill, a.kenten_overprint_stroke), (Some(AdornmentOverprint::On), Some(AdornmentOverprint::Auto)));
+    assert_eq!(a.kenten_character_set.as_deref(), Some("CharacterInput"));
+    assert_eq!(
+        (a.shatai_magnification, a.shatai_angle, a.shatai_adjust_rotation, a.shatai_adjust_tsume),
+        (Some(20.0), Some(60.0), Some(true), Some(false))
+    );
+    let custom = runs.iter().find(|r| r.kenten_kind == Some(KentenKind::Custom)).unwrap();
+    assert_eq!(custom.kenten_character.as_deref(), Some("★"));
+    let p = &st.paras[0].para;
+    assert_eq!((p.auto_tcy, p.auto_tcy_include_roman, p.rotate_roman, p.roman_word_break), (Some(3), Some(true), Some(true), Some(true)));
+    assert_eq!((p.grid_align, p.grid_reference), (Some(designcraft_doc::GridAlign::FirstLineOnly), Some(CharacterAlignment::EmCenter)));
+    assert_eq!((p.grid_gyoudori, p.paragraph_gyoudori), (Some(2), Some(true)));
+
+    let back = import_idml(&export_idml(&doc)).unwrap();
+    let st2 = back.stories.values().find(|s| s.text.contains("甲乙")).unwrap();
+    let runs2: Vec<CharAttrs> = st2.runs().map(|(_, f)| f.over.clone()).collect();
+    for (a, b) in runs.iter().zip(&runs2) {
+        assert_eq!((a.kenten, a.kenten_kind, &a.kenten_character), (b.kenten, b.kenten_kind, &b.kenten_character));
+        assert_eq!(
+            (a.kenten_size, a.kenten_x_scale, a.kenten_y_scale, a.kenten_distance),
+            (b.kenten_size, b.kenten_x_scale, b.kenten_y_scale, b.kenten_distance)
+        );
+        assert_eq!(
+            (a.kenten_position, a.kenten_alignment, &a.kenten_character_set),
+            (b.kenten_position, b.kenten_alignment, &b.kenten_character_set)
+        );
+        assert_eq!((&a.kenten_font, &a.kenten_font_style, &a.kenten_fill), (&b.kenten_font, &b.kenten_font_style, &b.kenten_fill));
+        assert_eq!(
+            (a.kenten_fill_tint, a.kenten_stroke_tint, a.kenten_stroke_weight),
+            (b.kenten_fill_tint, b.kenten_stroke_tint, b.kenten_stroke_weight)
+        );
+        assert_eq!((a.kenten_overprint_fill, a.kenten_overprint_stroke), (b.kenten_overprint_fill, b.kenten_overprint_stroke));
+        assert_eq!(
+            (a.shatai_magnification, a.shatai_angle, a.shatai_adjust_rotation, a.shatai_adjust_tsume),
+            (b.shatai_magnification, b.shatai_angle, b.shatai_adjust_rotation, b.shatai_adjust_tsume)
+        );
+    }
+    let p2 = &st2.paras[0].para;
+    assert_eq!(
+        (p.auto_tcy, p.auto_tcy_include_roman, p.rotate_roman, p.roman_word_break),
+        (p2.auto_tcy, p2.auto_tcy_include_roman, p2.rotate_roman, p2.roman_word_break)
+    );
+    assert_eq!(
+        (p.grid_align, p.grid_reference, p.grid_gyoudori, p.paragraph_gyoudori),
+        (p2.grid_align, p2.grid_reference, p2.grid_gyoudori, p2.paragraph_gyoudori)
+    );
+}

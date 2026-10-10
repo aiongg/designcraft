@@ -116,6 +116,12 @@ pub fn check(s: &Session, min_ppi: f64) -> Vec<Issue> {
             let mut fams = vec![base.font_family.clone()];
             for (run, f) in story.runs().filter(|(run, _)| run.start < range.end && run.end > range.start) {
                 let props = d.styles.resolve_char(&base, f);
+                {
+                    use designcraft_doc::cjk_settings::AdornmentOverprint as O;
+                    if props.kenten && (props.kenten_overprint_fill != O::Auto || props.kenten_overprint_stroke != O::Auto) {
+                        unsupported_typography.insert("Kenten overprint is preserved, but not applied".to_string());
+                    }
+                }
                 if has_rtl
                     && story.text.get(run.start.max(range.start)..run.end.min(range.end)).is_some_and(|t| t.chars().any(designcraft_fonts::is_rtl))
                 {
