@@ -370,7 +370,15 @@ fn place_image(
             ..Default::default()
         }),
     );
-    let mut g = Graphic { asset: aid, size: (nw, nh), xf: Affine::translate((inner.x0, inner.y0)), auto_fit: mode, fit_align: 0, crop: [0.0; 4] };
+    let mut g = Graphic {
+        asset: aid,
+        size: (nw, nh),
+        xf: Affine::translate((inner.x0, inner.y0)),
+        auto_fit: mode,
+        fit_align: 0,
+        crop: [0.0; 4],
+        wrap: Default::default(),
+    };
     if let Some(xf) = g.fitted(inner, mode) {
         g.xf = xf;
     }

@@ -9,6 +9,7 @@ use super::*;
 
 mod decorations;
 mod variables;
+mod wrap;
 
 fn zip_files(files: &[(&str, &str)]) -> Vec<u8> {
     use zip::write::SimpleFileOptions;

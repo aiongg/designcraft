@@ -109,7 +109,12 @@ pub fn sel_info(app: &DesignApp) -> Option<SelInfo> {
     let first = d.item(st.selection.items[0])?;
     let loc = d.find(first.id)?;
     let o = d.ruler_origin(loc.spread, b.center().x)?;
-    let wrap = match first.wrap.mode {
+    // With the graphic selected (Direct Selection), the Text Wrap panel shows its own wrap.
+    let tw = match (&first.content, st.selection.content) {
+        (Content::Graphic(g), true) => &g.wrap,
+        _ => &first.wrap,
+    };
+    let wrap = match tw.mode {
         WrapMode::None => "none",
         WrapMode::BoundingBox => "boundingBox",
         WrapMode::Contour => "contour",
@@ -135,7 +140,7 @@ pub fn sel_info(app: &DesignApp) -> Option<SelInfo> {
             .and_then(|v| v.get("kind").and_then(Value::as_str).map(str::to_string).or_else(|| v.as_str().map(str::to_string)))
             .unwrap_or_else(|| "solid".into()),
         corner: (first.corners.corners[0].shape, first.corners.corners[0].size),
-        wrap_invert: first.wrap.invert,
+        wrap_invert: tw.invert,
         locked: first.locked,
     })
 }
