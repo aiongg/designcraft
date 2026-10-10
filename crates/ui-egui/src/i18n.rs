@@ -231,8 +231,6 @@ const TABLE: &[(&str, [&str; 5])] = &[
         "Roman Word Break",
         ["Lateinische Wörter beliebig trennen", "Coupure libre des mots latins", "Corte libre de palabras latinas", "欧文泣き別れ", "西文单词断开"],
     ),
-    ("Em Box Top", ["Geviert oben", "Haut du cadratin", "Parte superior del cuadratín", "仮想ボディの上", "全角字框上"]),
-    ("Em Box Bottom", ["Geviert unten", "Bas du cadratin", "Parte inferior del cuadratín", "仮想ボディの下", "全角字框下"]),
     ("ICF Top", ["ICF oben", "Haut ICF", "Parte superior ICF", "平均字面の上", "平均字面上"]),
     ("ICF Bottom", ["ICF unten", "Bas ICF", "Parte inferior ICF", "平均字面の下", "平均字面下"]),
     ("Gyoudori:", ["Gyoudori:", "Gyoudori:", "Gyoudori:", "行取り:", "行取："]),

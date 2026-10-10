@@ -102,8 +102,6 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Adjust Tsume", "ツメの調整"),
     ("Rotate Roman Characters in Vertical Text", "縦組み中の欧文回転"),
     ("Roman Word Break", "欧文泣き別れ"),
-    ("Em Box Top", "仮想ボディの上"),
-    ("Em Box Bottom", "仮想ボディの下"),
     ("ICF Top", "平均字面の上"),
     ("ICF Bottom", "平均字面の下"),
     ("Gyoudori:", "行取り:"),
