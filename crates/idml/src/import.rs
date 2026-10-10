@@ -2330,12 +2330,39 @@ impl<'r> Importer<'r> {
         self.spreads.iter().chain(self.parents.iter()).find_map(|s| find(&s.items, id))
     }
 
+    /// A nested style list replaces the one a style or paragraph inherits, and with it the drop
+    /// cap style (the list's leading "through 1 Dropcap" entry, read into the drop cap style). A
+    /// list of its own without that entry clears an inherited drop cap style.
+    fn clear_inherited_drop_cap_styles(&mut self) {
+        let clears = |a: &designcraft_doc::ParaAttrs| a.drop_cap_style.is_none() && a.nested_styles.is_some();
+        let cleared: Vec<String> = self
+            .styles
+            .paragraph
+            .iter()
+            .filter(|s| clears(&s.para) && inherits_drop_cap_style(&self.styles, s.based_on.as_deref()))
+            .map(|s| s.name.clone())
+            .collect();
+        for name in cleared {
+            if let Some(s) = self.styles.para_mut(&name) {
+                s.para.drop_cap_style = Some(st::NO_CHAR_STYLE.into());
+            }
+        }
+        for story in self.stories.values_mut() {
+            for p in &mut story.paras {
+                if clears(&p.para) && inherits_drop_cap_style(&self.styles, Some(&p.style)) {
+                    p.para.drop_cap_style = Some(st::NO_CHAR_STYLE.into());
+                }
+            }
+        }
+    }
+
     fn finish(mut self, root: &El) -> Result<Document> {
         let title = root.get("Name").map(|n| n.trim_end_matches(".indd").to_string()).filter(|n| !n.is_empty()).unwrap_or_else(|| "Untitled".into());
         if self.spreads.is_empty() {
             return Err(IdmlError::Invalid("document has no spreads".into()));
         }
         self.settings.lists = std::mem::take(&mut self.lists);
+        self.clear_inherited_drop_cap_styles();
         // Make sure built-in paragraph styles exist and are first.
         let d = Document {
             title,
@@ -2525,6 +2552,23 @@ fn text_frame_options(prefs: &[&El]) -> TextFrameOptions {
         }
     }
     o
+}
+
+/// Does paragraph style `name` (and its based-on chain) set a drop cap character style? A style
+/// with a nested style list of its own and no drop cap style has none.
+fn inherits_drop_cap_style<'a>(styles: &'a Styles, mut name: Option<&'a str>) -> bool {
+    let mut seen = HashSet::new();
+    while let Some(n) = name {
+        let Some(s) = styles.para(n).filter(|_| seen.insert(n)) else { break };
+        if let Some(c) = s.para.drop_cap_style.as_deref() {
+            return !c.is_empty() && c != st::NO_CHAR_STYLE;
+        }
+        if s.para.nested_styles.is_some() {
+            return false;
+        }
+        name = s.based_on.as_deref();
+    }
+    false
 }
 
 /// Attribute lookup over several elements: the first that has it.
