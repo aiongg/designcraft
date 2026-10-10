@@ -1970,12 +1970,13 @@ pub fn menu_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
         menus.reverse();
     }
     for (menu, entries) in menus {
-        menu_button(ui, crate::rtl::widget(ui, crate::i18n::tr(&lang, menu)), |ui| menu_column(app, ui, &entries, menu));
+        menu_button(ui, crate::rtl::widget(ui, crate::i18n::tr(&lang, menu)), |ui| menu_column(app, ui, &[(menu, entries)]));
     }
 }
 
-/// One menu's rows, as the menu bar and the canvas context menus show them.
-fn menu_column(app: &mut DesignApp, ui: &mut egui::Ui, items: &[Item], path: &str) {
+/// One menu's rows, as the menu bar and the canvas context menus show them: runs of items, each
+/// with the menu path its rows are hidden by (Edit › Menus).
+fn menu_column<P: AsRef<str>>(app: &mut DesignApp, ui: &mut egui::Ui, runs: &[(P, Vec<Item>)]) {
     let lang = app.ui.language.clone();
     let rtl = crate::i18n::is_rtl(&lang);
     if rtl {
@@ -1983,7 +1984,10 @@ fn menu_column(app: &mut DesignApp, ui: &mut egui::Ui, items: &[Item], path: &st
     }
     ui.with_layout(egui::Layout::top_down_justified(if rtl { egui::Align::Max } else { egui::Align::Min }), |ui| {
         ui.set_min_width(240.0);
-        let hidden = menu_items(app, ui, items, path);
+        let mut hidden = 0;
+        for (path, items) in runs {
+            hidden += menu_items(app, ui, items, path.as_ref());
+        }
         if hidden > 0 && !app.ui.show_full_menus {
             ui.separator();
             if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&lang, "Show All Menu Items"))).clicked() {
@@ -2079,7 +2083,8 @@ const CONTEXT_CANVAS: &[&str] = &[
     "cmd:edit.selectAll",
 ];
 
-/// The menu-bar path context menu rows are keyed by (Edit › Menus doesn't list them).
+/// The menu-bar path context menu rows are keyed by (Edit › Menus doesn't list them); rows
+/// inserted with `menu:` keep their menu bar path.
 const CONTEXT_PATH: &str = "Context";
 
 /// The entries of a canvas context menu for the current selection.
@@ -2105,20 +2110,23 @@ fn context_entries(app: &DesignApp, kind: ContextMenu) -> Vec<&'static str> {
     }
 }
 
-/// Parses context menu entries: the menu bar's syntax plus `menu:Menu/Submenu` (not inside a `>` submenu).
-fn context_parse(entries: &[&str]) -> Vec<Item> {
+/// Parses context menu entries: the menu bar's syntax plus `menu:Menu/Submenu` (not inside a `>`
+/// submenu). Returns runs of items with the menu path they are hidden by: `Context`, or for an
+/// inserted submenu its menu bar menu, so hiding a row in the menu bar hides it here too.
+fn context_parse(entries: &[&str]) -> Vec<(String, Vec<Item>)> {
     let tree = menu_tree();
     let mut out = Vec::new();
     let mut run: Vec<&str> = Vec::new();
     for e in entries {
         if let Some(path) = e.strip_prefix("menu:") {
-            out.extend(parse_entries(&std::mem::take(&mut run)));
-            out.extend(menu_bar_submenu(&tree, path));
+            out.push((CONTEXT_PATH.to_owned(), parse_entries(&std::mem::take(&mut run))));
+            let menu = path.rsplit_once('/').map_or(path, |(menu, _)| menu);
+            out.push((menu.to_owned(), menu_bar_submenu(&tree, path).into_iter().collect()));
         } else {
             run.push(e);
         }
     }
-    out.extend(parse_entries(&run));
+    out.push((CONTEXT_PATH.to_owned(), parse_entries(&run)));
     out
 }
 
@@ -2131,13 +2139,13 @@ fn menu_bar_submenu(tree: &[(&str, Vec<Item>)], path: &str) -> Option<Item> {
 /// A canvas context menu: the menu bar's rows (labels, shortcuts, check marks, greyed when they
 /// can't run), scrolling when taller than the window.
 pub fn context_menu(app: &mut DesignApp, ui: &mut egui::Ui, kind: ContextMenu) {
-    let items = context_parse(&context_entries(app, kind));
+    let runs = context_parse(&context_entries(app, kind));
     let max_height = menu_max_height(ui, None);
     let mut scroll = egui::ScrollArea::vertical().max_height(max_height).min_scrolled_height(1.0);
     if ui.is_sizing_pass() {
         scroll = scroll.vertical_scroll_offset(0.0);
     }
-    scroll.show(ui, |ui| menu_column(app, ui, &items, CONTEXT_PATH));
+    scroll.show(ui, |ui| menu_column(app, ui, &runs));
 }
 
 /// The key a menu item is hidden by (Edit › Menus).
@@ -3220,7 +3228,9 @@ mod tests {
                 assert!(menu_bar_submenu(&tree, path).is_some(), "no menu bar submenu {path}");
             }
             let mut all = Vec::new();
-            walk(&context_parse(entries), &mut all);
+            for (_, items) in context_parse(entries) {
+                walk(&items, &mut all);
+            }
             for (label, id, _) in &all {
                 assert!(ui_label(id).is_some() || designcraft_engine::find_command(id).is_some(), "context entry {label}: unknown command {id}");
             }
