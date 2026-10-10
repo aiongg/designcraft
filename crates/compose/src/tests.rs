@@ -2072,18 +2072,18 @@ fn cap_height_and_x_height_first_baselines_use_the_fonts_cap_and_x_heights() {
 fn cap_height_and_x_height_fall_back_without_usable_os2_values() {
     use designcraft_doc::FirstBaseline;
     let db = designcraft_fonts::FontDb::global();
-    // No OS/2 table, zero / negative and absurd values: the top of the H (0.656 em) and 0.5 of the
-    // (1 em) ascent.
+    // No OS/2 table, zero / negative and absurd values: the top of the H (0.656 em) and of the x
+    // (0.486 em).
     let zero: &[(usize, i16)] = &[(CAP_HEIGHT, 0), (X_HEIGHT, -40)];
     let big: &[(usize, i16)] = &[(CAP_HEIGHT, i16::MAX), (X_HEIGHT, i16::MAX)];
     for (family, fields) in [("CapXHeightNoO", None), ("CapXHeightNeg", Some(zero)), ("CapXHeightBig", Some(big))] {
         db.add_font(test_font(family, fields));
         let face = db.face(family, "Regular");
         assert_eq!(face.family, family);
-        assert_eq!((face.cap_height, face.x_height), (656.0, face.ascent * 0.5), "{family}");
+        assert_eq!((face.cap_height, face.x_height), (656.0, 486.0), "{family}");
         let cap = first_baseline_in(family, |o| o.first_baseline = FirstBaseline::CapHeight);
         let x = first_baseline_in(family, |o| o.first_baseline = FirstBaseline::XHeight);
-        assert!((cap - (40.0 + 13.12)).abs() < 0.01 && (x - (40.0 + 10.0)).abs() < 0.01, "{family}: {cap} {x}");
+        assert!((cap - (40.0 + 13.12)).abs() < 0.01 && (x - (40.0 + 9.72)).abs() < 0.01, "{family}: {cap} {x}");
     }
 }
 
