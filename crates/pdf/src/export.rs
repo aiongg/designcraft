@@ -1233,7 +1233,13 @@ impl Exporter<'_> {
             _ => lossless(&data, fmt, mode),
         };
         if img.is_none() {
-            self.warn(format!("image `{}` could not be decoded and was skipped", asset.name));
+            if data.is_empty() {
+                // A linked file that wasn't found when the document was opened: nothing to decode.
+                let at = asset.link.as_deref().map(|l| format!(" ({l})")).unwrap_or_default();
+                self.warn(format!("image `{}` is missing{at} and was skipped", asset.name));
+            } else {
+                self.warn(format!("image `{}` could not be decoded and was skipped", asset.name));
+            }
         }
         self.images.insert(id, img.clone());
         img
