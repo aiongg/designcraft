@@ -1460,3 +1460,41 @@ fn list_numbering_format_expression_and_bullet_import_and_round_trip() {
     check(&d);
     check(&import_idml(&export_idml(&d)).unwrap());
 }
+
+#[test]
+fn list_tab_position_round_trips_as_a_tab_stop() {
+    use designcraft_doc::{ListType, ParaAttrs, ParagraphStyle, TabAlign, TabStop};
+    let stop = |position, align| TabStop { position, align, leader: String::new(), align_on: String::new() };
+    let mut d = Document::new(&NewDocument::default());
+    std::sync::Arc::make_mut(&mut d.styles).paragraph.push(ParagraphStyle {
+        name: "List".into(),
+        based_on: None,
+        next_style: None,
+        para: ParaAttrs { list_type: Some(ListType::Bullets), list_tab: Some(Some(24.0)), ..Default::default() },
+        chars: CharAttrs::default(),
+        shortcut: String::new(),
+    });
+    let local = ParaAttrs {
+        list_type: Some(ListType::Bullets),
+        list_tab: Some(Some(36.0)),
+        tabs: Some(vec![stop(100.0, TabAlign::Right)]),
+        ..Default::default()
+    };
+    let ended = ParaAttrs { list_type: Some(ListType::None), ..Default::default() };
+    let lid = d.default_layer();
+    for (i, (text, style, para)) in
+        [("Local\tx", "", local), ("Styled\ty", "List", ParaAttrs::default()), ("Ended\tz", "List", ended)].into_iter().enumerate()
+    {
+        let pf = ParaFormat { style: if style.is_empty() { ParaFormat::default().style } else { style.into() }, para, ..Default::default() };
+        let y = 40.0 + 100.0 * i as f64;
+        d.add_text_frame(SpreadRef::Doc(0), Rect::new(40.0, y, 300.0, y + 80.0), lid, text, pf).unwrap();
+    }
+    let back = import_idml(&export_idml(&d)).unwrap();
+    let tabs = |prefix: &str| {
+        let s = back.stories.values().find(|s| s.text.starts_with(prefix)).unwrap();
+        back.styles.resolve_para(&s.paras[0]).0.tabs
+    };
+    assert_eq!(tabs("Local"), vec![stop(36.0, TabAlign::Left), stop(100.0, TabAlign::Right)]);
+    assert_eq!(tabs("Styled"), vec![stop(24.0, TabAlign::Left)]);
+    assert_eq!(tabs("Ended"), vec![], "a paragraph that ends the list has no list tab stop");
+}
