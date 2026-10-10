@@ -112,6 +112,15 @@ pub fn import_idml_report(bytes: &[u8], read_link: &dyn Fn(&str) -> Option<Vec<u
         im.modified = xmp_date(&m, "xmp:ModifyDate");
     }
     im.run(&root, &top)?;
+    if im.repaired_tab_lists > 0 {
+        warnings.push(format!(
+            "tab lists repaired to fit the limits (at most {} stops, finite positions up to {} in, leaders of at most {} characters, one stop per position): {}",
+            designcraft_doc::MAX_TAB_STOPS,
+            designcraft_doc::MAX_TAB_POSITION / 72.0,
+            designcraft_doc::MAX_TAB_LEADER,
+            im.repaired_tab_lists,
+        ));
+    }
     let document = im.finish(&root).map_err(|e| match e {
         // Without its spread parts there is nothing to open: say which parts were missing.
         IdmlError::Invalid(msg) if !warnings.is_empty() => IdmlError::Invalid(format!("{msg} ({})", warnings.join("; "))),
@@ -119,6 +128,19 @@ pub fn import_idml_report(bytes: &[u8], read_link: &dyn Fn(&str) -> Option<Vec<u
     })?;
     document.check().map_err(|e| IdmlError::Invalid(e.to_string()))?;
     Ok(Imported { document, warnings })
+}
+
+/// Whether sanitizing a file's tab list dropped, moved or shortened a stop. Sorting, and the `.`
+/// a char stop with no character aligns on, change nothing.
+fn tab_list_repaired(read: &[TabStop], sanitized: &[TabStop]) -> bool {
+    let kept = |t: &TabStop| {
+        sanitized.iter().any(|o| {
+            o.position == t.position
+                && o.leader == t.leader
+                && (o.align_on == t.align_on || (t.align_on.is_empty() && o.align == designcraft_doc::TabAlign::Char))
+        })
+    };
+    read.len() != sanitized.len() || !read.iter().all(kept)
 }
 
 /// A package part name in the form the lookup compares: InDesign and other IDML writers differ
@@ -233,6 +255,8 @@ struct Importer<'r> {
     /// Creation and modification times (Unix seconds) from the package metadata.
     created: Option<i64>,
     modified: Option<i64>,
+    /// Tab lists [`TabStop::sanitized_list`] had to repair (an import warning).
+    repaired_tab_lists: usize,
 }
 
 fn lab_to_color(l: f32, a: f32, b: f32) -> Color {
@@ -374,6 +398,7 @@ impl<'r> Importer<'r> {
             text_var_ids: HashMap::new(),
             created: None,
             modified: None,
+            repaired_tab_lists: 0,
         }
     }
 
@@ -1593,7 +1618,11 @@ impl<'r> Importer<'r> {
                     align_on: get("AlignmentCharacter").filter(|c| c != ".").unwrap_or_default(),
                 });
             }
-            a.tabs = Some(TabStop::sanitized_list(tabs));
+            let sanitized = TabStop::sanitized_list(tabs.clone());
+            if tab_list_repaired(&tabs, &sanitized) {
+                self.repaired_tab_lists = self.repaired_tab_lists.saturating_add(1);
+            }
+            a.tabs = Some(sanitized);
         }
         a.list_type = e.prop("BulletsAndNumberingListType").map(|v| match v.trim() {
             "BulletList" => ListType::Bullets,

@@ -2626,10 +2626,24 @@ fn hostile_tab_lists_import_within_the_limits() {
         <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]"><Content>Many tabs</Content></CharacterStyleRange>
       </ParagraphStyleRange></Story></idPkg:Story>"#
     );
-    let doc = import_idml(&fixture_with_story(&story)).unwrap();
+    let report = import_idml_report(&fixture_with_story(&story), &|_| None).unwrap();
+    assert!(report.warnings.iter().any(|w| w.starts_with("tab lists repaired to fit the limits") && w.ends_with("): 1")), "{:?}", report.warnings);
+    let doc = report.document;
     let tabs = doc.stories.values().find(|s| s.text.contains("Many tabs")).unwrap().paras[0].para.tabs.clone().unwrap();
     assert_eq!(tabs.len(), designcraft_doc::MAX_TAB_STOPS);
     assert!(tabs.iter().all(|t| t.position.is_finite() && t.leader.chars().count() <= designcraft_doc::MAX_TAB_LEADER));
     assert!(tabs.windows(2).all(|w| w[0].position < w[1].position), "sorted");
     assert_eq!((tabs[0].position, tabs[99].position), (0.0, 297.0), "the first stops by position");
+    // A list within the limits, unsorted and with a char stop on `.`, imports without a warning.
+    let fine = format!(
+        r#"<idPkg:Story xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging"><Story Self="s1">
+      <ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/$ID/[No paragraph style]">
+        <Properties><TabList type="list">{}{}<ListItem type="record"><Alignment type="enumeration">CharacterAlign</Alignment><AlignmentCharacter type="string">.</AlignmentCharacter><Leader type="string"></Leader><Position type="unit">40</Position></ListItem></TabList></Properties>
+        <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]"><Content>Few tabs</Content></CharacterStyleRange>
+      </ParagraphStyleRange></Story></idPkg:Story>"#,
+        item("90", "."),
+        item("12", "")
+    );
+    let report = import_idml_report(&fixture_with_story(&fine), &|_| None).unwrap();
+    assert!(report.warnings.is_empty(), "{:?}", report.warnings);
 }
