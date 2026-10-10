@@ -452,3 +452,24 @@ fn fills_open_contours_without_changing_strokes() {
     let (_, paths) = drawn(&export_pdf(&d, &Cache::new(), &PdfOptions::default()).unwrap());
     assert!(paths.iter().any(|r| (r.width() - 22.0).abs() < 0.01 && (r.height() - 17.0).abs() < 0.01), "{paths:?}");
 }
+
+#[test]
+fn column_rules_are_drawn() {
+    let rules = |on: bool| {
+        let mut d = doc_with_text("Column text");
+        let fid = d.stories.values().next().unwrap().frames[0];
+        let o = &mut d.item_mut(fid).unwrap().text_frame_mut().unwrap().options;
+        o.columns = 3;
+        o.gutter = 12.0;
+        o.inset = [0.0; 4];
+        o.column_rule = on;
+        o.column_rule_weight = 2.0;
+        let (_, paths) = drawn(&export_pdf(&d, &Cache::new(), &PdfOptions::default()).unwrap());
+        paths.into_iter().filter(|r| (r.width() - 2.0).abs() < 0.01 && (r.height() - 264.0).abs() < 0.01).map(|r| r.center().x).collect::<Vec<_>>()
+    };
+    // 540 pt wide in three columns with 12 pt gutters: columns of 172 pt from x 36.
+    let xs = rules(true);
+    assert_eq!(xs.len(), 2, "{xs:?}");
+    assert!((xs[0] - 214.0).abs() < 0.01 && (xs[1] - 398.0).abs() < 0.01, "{xs:?}");
+    assert!(rules(false).is_empty());
+}

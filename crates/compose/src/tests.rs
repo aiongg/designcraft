@@ -3572,3 +3572,120 @@ fn mojikumi_does_not_restore_fullwidth_blanks_to_narrow_tracked_punctuation() {
         assert!((a.adv - b.adv).abs() < 0.001);
     }
 }
+
+fn ruled(text: &str, rect: Rect, columns: u32, edit: impl FnOnce(&mut Document, StoryId)) -> (Document, ItemId, Vec<Rect>) {
+    let (mut d, sid, fid) = doc_with(text, rect, ParaAttrs::default());
+    {
+        let o = &mut d.item_mut(fid).unwrap().text_frame_mut().unwrap().options;
+        o.columns = columns;
+        o.gutter = 12.0;
+        o.inset = [10.0, 6.0, 20.0, 6.0];
+        o.column_rule = true;
+        o.column_rule_weight = 2.0;
+        o.column_rule_color = "[Black]".into();
+    }
+    edit(&mut d, sid);
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let rules = cs.frames[0].decos.iter().filter(|dc| dc.color == "[Black]").map(|dc| dc.rect).collect();
+    (d, fid, rules)
+}
+
+#[test]
+fn column_rules_sit_in_the_gutters_inside_the_insets() {
+    // Two columns in 0..300 with 6 pt side insets: the gutter is centred on 150.
+    let (_, _, rules) = ruled("Text", Rect::new(0.0, 0.0, 300.0, 200.0), 2, |_, _| {});
+    assert_eq!(rules.len(), 1, "{rules:?}");
+    let r = rules[0];
+    assert!((r.center().x - 150.0).abs() < 1e-9 && (r.width() - 2.0).abs() < 1e-9, "{r:?}");
+    assert!((r.y0 - 10.0).abs() < 1e-9 && (r.y1 - 180.0).abs() < 1e-9, "{r:?}");
+    // Three columns: one rule per gutter, each centred between its two columns.
+    let (_, _, rules) = ruled("Text", Rect::new(0.0, 0.0, 300.0, 200.0), 3, |_, _| {});
+    assert_eq!(rules.len(), 2, "{rules:?}");
+    let w = (288.0 - 24.0) / 3.0;
+    for (i, r) in rules.iter().enumerate() {
+        let edge = 6.0 + w * (i + 1) as f64 + 12.0 * i as f64;
+        assert!((r.center().x - (edge + 6.0)).abs() < 1e-9, "{i}: {r:?}");
+    }
+    // Off, or a single column: no rule.
+    let (_, _, rules) = ruled("Text", Rect::new(0.0, 0.0, 300.0, 200.0), 1, |_, _| {});
+    assert!(rules.is_empty());
+    let (_, _, rules) = ruled("Text", Rect::new(0.0, 0.0, 300.0, 200.0), 2, |d, sid| {
+        let fid = d.story(sid).unwrap().frames[0];
+        d.item_mut(fid).unwrap().text_frame_mut().unwrap().options.column_rule = false;
+    });
+    assert!(rules.is_empty());
+}
+
+#[test]
+fn column_rules_centre_on_unequal_gutters_and_ignore_bad_weights() {
+    let cols = [Rect::new(200.0, 0.0, 300.0, 50.0), Rect::new(0.0, 0.0, 100.0, 50.0), Rect::new(110.0, 0.0, 180.0, 50.0)];
+    let weight = |w: f64| TextFrameOptions { column_rule_weight: w, ..Default::default() };
+    let rules = column_rule_rects(&cols, &[], &weight(1.0));
+    let centres: Vec<f64> = rules.iter().map(|r| r.center().x).collect();
+    assert_eq!(centres, [105.0, 190.0]);
+    assert!(column_rule_rects(&cols, &[], &weight(f64::NAN)).is_empty());
+    assert!(column_rule_rects(&cols, &[], &weight(-1.0)).is_empty());
+    assert!((column_rule_rects(&cols, &[], &weight(1e12))[0].width() - 1000.0).abs() < 1e-9);
+}
+
+#[test]
+fn column_rules_in_right_to_left_and_vertical_frames() {
+    let (_, _, rules) = ruled("نص", Rect::new(0.0, 0.0, 300.0, 200.0), 2, |d, sid| {
+        d.story_mut(sid).unwrap().direction = designcraft_doc::TextDirection::RightToLeft;
+    });
+    assert_eq!(rules.len(), 1);
+    assert!((rules[0].center().x - 150.0).abs() < 1e-9, "{rules:?}");
+    // Vertical type: the columns stack top to bottom, so the rule runs across the frame.
+    let (d, fid, rules) = ruled("縦書き", Rect::new(100.0, 100.0, 400.0, 300.0), 2, |d, sid| d.story_mut(sid).unwrap().vertical = true);
+    assert_eq!(rules.len(), 1);
+    let r = d.text_xf(d.item(fid).unwrap()).transform_rect_bbox(rules[0]);
+    // Text area: x 106..394, y 110..280; the gutter is centred on y 195.
+    assert!((r.x0 - 106.0).abs() < 1e-6 && (r.x1 - 394.0).abs() < 1e-6, "{r:?}");
+    assert!((r.center().y - 195.0).abs() < 1e-6 && (r.height() - 2.0).abs() < 1e-6, "{r:?}");
+}
+
+#[test]
+fn column_rules_break_around_paragraphs_that_span_columns() {
+    let text = format!("A heading that spans both columns\n{LOREM} {LOREM}");
+    let (d, fid, rules) = ruled(&text, Rect::new(0.0, 0.0, 300.0, 400.0), 2, |d, sid| {
+        d.story_mut(sid).unwrap().paras[0].para.span_columns = Some(designcraft_doc::SpanColumns::Span(0));
+    });
+    let sid = d.item(fid).unwrap().text_frame().unwrap().story;
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let span: Vec<&Line> = cs.frames[0].lines.iter().filter(|l| l.para == 0).collect();
+    assert!(!span.is_empty() && span.iter().all(|l| l.x0 < 150.0 && l.x1 > 150.0), "the heading spans");
+    let (top, bottom) = (span[0].baseline - span[0].ascent, span[span.len() - 1].baseline + span[span.len() - 1].descent);
+    assert!(!rules.is_empty());
+    for r in &rules {
+        assert!(r.y1 <= top + 1e-9 || r.y0 >= bottom - 1e-9, "rule {r:?} cuts the span {top}..{bottom}");
+    }
+    // The rule resumes below the span and runs to the bottom of the columns.
+    assert!(rules.iter().any(|r| (r.y0 - bottom).abs() < 1e-9 && (r.y1 - 380.0).abs() < 1e-9), "{rules:?}");
+}
+
+#[test]
+fn column_rules_take_their_offset_insets_and_tint() {
+    let (d, fid, rules) = ruled("Text", Rect::new(0.0, 0.0, 300.0, 200.0), 2, |d, sid| {
+        let fid = d.story(sid).unwrap().frames[0];
+        let o = &mut d.item_mut(fid).unwrap().text_frame_mut().unwrap().options;
+        o.column_rule_offset = 3.0;
+        o.column_rule_top_inset = 15.0;
+        o.column_rule_bottom_inset = 25.0;
+        o.column_rule_tint = 0.4;
+    });
+    // Gutter centre 150 moved 3 pt; columns 10..180 shortened to 25..155.
+    assert_eq!(rules.len(), 1, "{rules:?}");
+    let r = rules[0];
+    assert!((r.center().x - 153.0).abs() < 1e-9 && (r.y0 - 25.0).abs() < 1e-9 && (r.y1 - 155.0).abs() < 1e-9, "{r:?}");
+    let sid = d.item(fid).unwrap().text_frame().unwrap().story;
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    assert!(cs.frames[0].decos.iter().any(|dc| dc.rect == r && (dc.tint - 0.4).abs() < 1e-6));
+    // Insets that meet leave no rule.
+    let (_, _, rules) = ruled("Text", Rect::new(0.0, 0.0, 300.0, 200.0), 2, |d, sid| {
+        let fid = d.story(sid).unwrap().frames[0];
+        let o = &mut d.item_mut(fid).unwrap().text_frame_mut().unwrap().options;
+        o.column_rule_top_inset = 100.0;
+        o.column_rule_bottom_inset = 100.0;
+    });
+    assert!(rules.is_empty(), "{rules:?}");
+}

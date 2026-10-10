@@ -729,6 +729,15 @@ impl<'r> Importer<'r> {
     }
 
     /// A swatch reference (Self id) → our swatch name; unnamed colours become value-named swatches.
+    /// A `TextFramePreference`, with its column rule colour resolved to a swatch.
+    fn frame_options(&mut self, prefs: &[&El]) -> TextFrameOptions {
+        let mut o = text_frame_options(prefs);
+        if let Some(r) = Prefs(prefs).get("ColumnRuleStrokeColor") {
+            o.column_rule_color = self.swatch_ref(r);
+        }
+        o
+    }
+
     fn swatch_ref(&mut self, r: &str) -> String {
         if let Some(n) = self.swatch_names.get(r) {
             return n.clone();
@@ -929,7 +938,7 @@ impl<'r> Importer<'r> {
                 .then(|| e.get("AppliedParagraphStyle").map(|r| self.para_style_ref(r)))
                 .flatten();
             let text_frame = if e.get("EnableTextFrameGeneralOptions") == Some("true") {
-                e.find("TextFramePreference").map(|t| text_frame_options(&[t]))
+                e.find("TextFramePreference").map(|t| self.frame_options(&[t]))
             } else {
                 None
             };
@@ -2101,6 +2110,10 @@ impl<'r> Importer<'r> {
                 // Options the frame doesn't set come from its object style chain.
                 let prefs: Vec<&El> = std::iter::once(e).chain(self.object_style_chain(e)).filter_map(|s| s.find("TextFramePreference")).collect();
                 let mut options = text_frame_options(&prefs);
+                // `prefs` borrows the object styles, so the rule colour's swatch is resolved after it.
+                if let Some(r) = Prefs(&prefs).get("ColumnRuleStrokeColor").map(str::to_string) {
+                    options.column_rule_color = self.swatch_ref(&r);
+                }
                 if let Some(g) = e.find("BaselineFrameGridOption")
                     && g.get("UseCustomBaselineFrameGrid") == Some("true")
                 {
@@ -2437,6 +2450,24 @@ fn text_frame_options(prefs: &[&El]) -> TextFrameOptions {
     }
     if let Some(v) = e.get("AutoSizingReferencePoint") {
         o.auto_size_ref = names::REF_POINTS.iter().position(|p| *p == v).unwrap_or(1) as u8;
+    }
+    // Column rules (the colour is a swatch reference: see `Importer::frame_options`).
+    o.column_rule = e.get("ColumnRuleOverride") == Some("true");
+    let finite = |k: &str| e.num(k).filter(|v| v.is_finite());
+    if let Some(v) = finite("ColumnRuleStrokeWidth") {
+        o.column_rule_weight = v.clamp(0.0, 1000.0);
+    }
+    if let Some(t) = tint(finite("ColumnRuleStrokeTint")) {
+        o.column_rule_tint = t.clamp(0.0, 1.0);
+    }
+    for (k, v) in [
+        ("ColumnRuleOffset", &mut o.column_rule_offset),
+        ("ColumnRuleTopInset", &mut o.column_rule_top_inset),
+        ("ColumnRuleBottomInset", &mut o.column_rule_bottom_inset),
+    ] {
+        if let Some(x) = finite(k) {
+            *v = x.clamp(-1440.0, 1440.0);
+        }
     }
     o
 }
