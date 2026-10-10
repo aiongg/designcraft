@@ -296,6 +296,7 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Ascent", "الصعود"),
     ("Cap Height", "ارتفاع الأحرف الكبيرة"),
     ("x Height", "ارتفاع x"),
+    ("Em Box Height", "ارتفاع مربع em"),
     ("Fixed", "ثابت"),
     ("Never (continuous)", "أبدًا (ترقيم متصل)"),
     ("Spread", "صفحتان متقابلتان"),

@@ -379,6 +379,17 @@ fn imports_scalar_inset_properties_like_lists_and_attributes() {
 }
 
 #[test]
+fn em_box_first_baseline_offset_round_trips() {
+    use designcraft_doc::FirstBaseline;
+    let first = |d: &Document| d.spreads[0].items[0].text_frame().unwrap().options.first_baseline;
+    let d = inset_fixture(r#"<TextFramePreference FirstBaselineOffset="EmboxHeight"/>"#, "");
+    assert_eq!(first(&d), FirstBaseline::EmboxHeight);
+    assert_eq!(first(&import_idml(&export_idml(&d)).unwrap()), FirstBaseline::EmboxHeight);
+    let unknown = inset_fixture(r#"<TextFramePreference FirstBaselineOffset="SomethingElse"/>"#, "");
+    assert_eq!(first(&unknown), FirstBaseline::Ascent);
+}
+
+#[test]
 fn inset_property_keeps_precedence_over_attribute() {
     for (property, expected) in [
         (r#"<Properties><InsetSpacing type="unit">9</InsetSpacing></Properties>"#.to_string(), [9.0; 4]),

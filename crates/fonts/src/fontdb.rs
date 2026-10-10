@@ -122,7 +122,7 @@ pub struct FontFace {
     /// Basic Multilingual Plane coverage bitset, built on first use.
     bmp: std::sync::OnceLock<Box<[u64]>>,
     /// The ideographic em box, read on first use.
-    em: std::sync::OnceLock<(f64, f64)>,
+    em: std::sync::OnceLock<((f64, f64), bool)>,
     /// The font menu group and native family name, read on first use.
     group: std::sync::OnceLock<(FontGroup, Option<String>)>,
 }
@@ -267,7 +267,12 @@ impl FontFace {
     /// -120): `BASE` `idtp`/`ideo`, else the OS/2 typo ascender/descender, else the ascender and
     /// descender, the last two centred on one em.
     pub fn em_box(&self) -> (f64, f64) {
-        *self.em.get_or_init(|| crate::vertical::em_box(self))
+        self.em.get_or_init(|| crate::vertical::em_box(self)).0
+    }
+    /// The em box (top, bottom) in font units, y up, when the font declares one in `BASE`.
+    pub fn declared_em_box(&self) -> Option<(f64, f64)> {
+        let (b, declared) = *self.em.get_or_init(|| crate::vertical::em_box(self));
+        declared.then_some(b)
     }
     /// The font menu group the font is for and, for a CJK group, its family name in that language
     /// (see [`crate::FamilyInfo`]); read from the font once.
