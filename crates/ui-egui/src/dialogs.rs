@@ -8,6 +8,8 @@ use serde_json::{Map, Value, json};
 use crate::DesignApp;
 use crate::theme::semibold;
 
+mod style_cjk;
+
 #[derive(Clone, Debug, Serialize)]
 pub struct Dialog {
     pub id: String,
@@ -2280,6 +2282,7 @@ fn paragraph_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
             &app.ui.language,
             ui,
             d,
+            crate::cjk_features(app),
             &[
                 ("general", "General"),
                 ("chars", "Basic Character Formats"),
@@ -2707,6 +2710,9 @@ fn paragraph_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
                 let lu =
                     ListUi { char_styles: &char_styles, families: &families, fonts: &fonts, scope, family: &cp.font_family, style: &cp.font_style };
                 bullets_and_numbering(&app.ui.language, ui, d, &pv, &doc, &lu);
+            }
+            s if style_cjk::is_section(s) => {
+                style_cjk::section(&app.ui.language, ui, d, s, &CharFields { base: &cv, sparse: false }, Some(&pv), &doc)
             }
             _ => {
                 egui::Grid::new("psg").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
@@ -3572,14 +3578,18 @@ fn paragraph_local(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
     }
 }
 
-fn section_list(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, sections: &[(&str, &str)]) {
+fn section_list(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, cjk: bool, sections: &[(&str, &str)]) {
+    let sections = style_cjk::sections(cjk, d.id == "paragraphStyleOptions", sections);
     ui.vertical(|ui| {
         ui.set_width(170.0);
-        for (id, label) in sections {
-            if ui.selectable_label(d.s("section") == *id, crate::rtl::widget(ui, crate::i18n::tr(lang, label))).clicked() {
-                d.fields.insert("section".into(), json!(id));
+        // The dialog has a fixed height; a long list scrolls.
+        egui::ScrollArea::vertical().id_salt("style_sections").auto_shrink([false, true]).show(ui, |ui| {
+            for (id, label) in &sections {
+                if ui.selectable_label(d.s("section") == *id, crate::rtl::widget(ui, crate::i18n::tr(lang, label))).clicked() {
+                    d.fields.insert("section".into(), json!(id));
+                }
             }
-        }
+        });
     });
 }
 
@@ -3652,6 +3662,7 @@ fn character_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
             &lang,
             ui,
             d,
+            crate::cjk_features(app),
             &[
                 ("general", "General"),
                 ("chars", "Basic Character Formats"),
@@ -3670,6 +3681,7 @@ fn character_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
             "openType" => open_type_features(&lang, ui, d, &cf),
             "underline" => line_options(&lang, ui, d, &cf, &doc, "underline"),
             "strikethrough" => line_options(&lang, ui, d, &cf, &doc, "strikethrough"),
+            s if style_cjk::is_section(s) => style_cjk::section(&lang, ui, d, s, &cf, None, &doc),
             _ => {
                 egui::Grid::new("csg").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
                     crate::rtl::label(ui, crate::i18n::tr(&lang, "Style Name:"));
