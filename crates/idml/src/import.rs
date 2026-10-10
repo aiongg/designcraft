@@ -291,7 +291,7 @@ impl<'r> Importer<'r> {
                 .map(|c| designcraft_doc::cjk::CompositeFontEntry {
                     name: c.get("Name").unwrap_or("").into(),
                     characters: c.get("CustomCharacters").unwrap_or("").into(),
-                    family: c.prop("AppliedFont").unwrap_or_default(),
+                    family: c.prop("AppliedFont").as_deref().and_then(names::font_family_in).unwrap_or_default(),
                     style: c.get("FontStyle").unwrap_or("Regular").trim_start_matches("$ID/").into(),
                     relative_size: c.num("RelativeSize").unwrap_or(100.0) / 100.0,
                     horizontal_scale: c.num("HorizontalScale").unwrap_or(100.0) / 100.0,
@@ -1064,15 +1064,7 @@ impl<'r> Importer<'r> {
     }
 
     fn char_attrs(&mut self, e: &El) -> CharAttrs {
-        let mut a = CharAttrs::default();
-        if let Some(f) = e.prop("AppliedFont") {
-            let f = f.trim();
-            // Some writers append the style after a tab.
-            let fam = f.split('\t').next().unwrap_or(f);
-            if !fam.is_empty() && fam != "$ID/" {
-                a.font_family = Some(fam.to_string());
-            }
-        }
+        let mut a = CharAttrs { font_family: e.prop("AppliedFont").as_deref().and_then(names::font_family_in), ..Default::default() };
         a.font_style = e.prop("FontStyle");
         a.size = e.num("PointSize");
         a.leading = e.prop("Leading").and_then(|l| names::leading_in(l.trim()));
