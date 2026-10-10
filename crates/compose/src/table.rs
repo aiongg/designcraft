@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use designcraft_doc::{Align, Cell, CellStroke, Document, ItemId, ParaProps, RowHeightMode, Story, Table, TextFrameOptions, VerticalJustification};
+use designcraft_doc::{Align, Cell, CellStroke, Document, ItemId, ParaProps, RowHeightMode, Table, TextFrameOptions, VerticalJustification};
 use designcraft_geom::{Point, Rect};
 
 use crate::{ComposeOptions, ComposedStory, Cursor, FrameSpec, Line};
@@ -25,7 +25,8 @@ pub struct PlacedCell {
     pub text: Arc<ComposedStory>,
     /// The cell's story text (exporters map glyphs back to text).
     pub source: Arc<str>,
-    /// Content height available in the cell (for clipping).
+    /// Inset content box. Text baselines fit here; descenders may enter the bottom inset.
+    /// Graphic content is clipped to this box.
     pub clip: Rect,
     pub overset: bool,
     /// A header/footer row repeated in a continuation fragment.
@@ -85,10 +86,25 @@ impl TableFrag {
 struct CellLayout {
     text: Arc<ComposedStory>,
     content_h: f64,
+    line_heights: Vec<f64>,
+}
+
+/// Cell text fits by its baseline, while its typographic/inline-object bounds must still
+/// remain inside the physical cell. The bottom inset can contain ordinary descenders;
+/// adding both the inset and the full descent unnecessarily grows every row.
+struct CellLineExtent {
+    baseline: f64,
+    bottom: f64,
+}
+
+impl CellLineExtent {
+    fn fit_height(&self, bottom_inset: f64) -> f64 {
+        self.baseline.max(self.bottom - bottom_inset)
+    }
 }
 
 /// Compose a cell story at width `w` (content space, top-left at the origin).
-fn compose_cell(doc: &Document, story: &Story, w: f64, opts: &ComposeOptions, left_page: bool) -> CellLayout {
+fn compose_cell(doc: &Document, cell: &Cell, w: f64, opts: &ComposeOptions, left_page: bool) -> CellLayout {
     let spec = FrameSpec {
         id: ItemId(0),
         area: Rect::new(0.0, 0.0, w.max(1.0), 1.0e6),
@@ -101,9 +117,28 @@ fn compose_cell(doc: &Document, story: &Story, w: f64, opts: &ComposeOptions, le
         left_page,
         page_rect: None,
     };
-    let cs = crate::compose(doc, story, std::slice::from_ref(&spec), opts);
-    let content_h = cs.frames.first().map(|f| if f.lines.is_empty() { 0.0 } else { f.content_height }).unwrap_or(0.0);
-    CellLayout { text: Arc::new(cs), content_h }
+    let cs = crate::compose(doc, &cell.text, std::slice::from_ref(&spec), opts);
+    let line_heights: Vec<f64> = cs
+        .frames
+        .first()
+        .map(|f| {
+            let mut extents: Vec<_> = f.lines.iter().map(|l| CellLineExtent { baseline: l.baseline, bottom: l.baseline + l.descent }).collect();
+            // Line metrics include baseline shifts and super/subscript. Include the final
+            // geometry of in-flow objects too, but leave custom anchors out of text flow.
+            for object in &f.objects {
+                if cell.text.objects.get(object.index).is_some_and(|o| !matches!(o.position, designcraft_doc::AnchorPosition::Custom { .. }))
+                    && let Some(extent) = extents.get_mut(object.line)
+                {
+                    extent.bottom = extent.bottom.max(object.origin.y + object.size.1);
+                }
+            }
+            extents.iter().map(|e| e.fit_height(cell.insets[2])).collect()
+        })
+        .unwrap_or_default();
+    // Check all lines: a large descender or lowered inline object on an earlier line can
+    // extend below the final baseline when leading is fixed.
+    let content_h = line_heights.iter().copied().fold(0.0, f64::max);
+    CellLayout { text: Arc::new(cs), content_h, line_heights }
 }
 
 /// Lay out `table` (anchored at byte `anchor` of paragraph `pi`) from the cursor. Returns false
@@ -158,7 +193,7 @@ pub(crate) fn place_table(
             let cell = &table.cells[r * nc + c];
             let cs = (cell.col_span.max(1) as usize).min(nc - c);
             let w = colx[c + cs] - colx[c] - cell.insets[1] - cell.insets[3];
-            layouts.push(Some(compose_cell(doc, &cell.text, w, opts, left_page)));
+            layouts.push(Some(compose_cell(doc, cell, w, opts, left_page)));
         }
     }
     // Row heights.
@@ -351,13 +386,23 @@ fn emit(
                 VerticalJustification::Bottom if space > 0.0 => space,
                 _ => 0.0,
             };
-            let overset = space < -0.01;
+            let overset = space < -0.01 || lay.text.is_overset();
             let mut text = lay.text.clone();
             if overset && let Some(f) = text.frames.first() {
-                // Drop the lines that don't fit the cell.
-                let keep: Vec<Line> = f.lines.iter().filter(|l| l.baseline + l.descent <= clip.height() + 0.01).cloned().collect();
+                // Use the same baseline/bounds test as auto-growth, and retain a prefix:
+                // overset text cannot reappear after a line that did not fit.
+                let keep = lay.line_heights.iter().take_while(|h| **h <= clip.height() + 0.01).count();
+                let overset_at = f.lines.get(keep).map(|l| l.range.start);
                 let mut t = (*text).clone();
-                t.frames[0].lines = keep;
+                if let Some(frame) = t.frames.first_mut() {
+                    frame.lines.truncate(keep);
+                    frame.objects.retain(|o| o.line < keep);
+                    frame.tables.retain(|table| table.line < keep);
+                    frame.range.end = frame.lines.last().map_or(frame.range.start, |l| l.range.end);
+                }
+                if let Some(at) = overset_at {
+                    t.overset_at = Some(at);
+                }
                 text = Arc::new(t);
             }
             cells.push(PlacedCell {
@@ -596,6 +641,283 @@ pub fn cell_caret(cs: &ComposedStory, table: u64, row: usize, col: usize, pos: u
     match crate::caret(&c.text, pos) {
         Some((_, x, bl, a, d)) => Some((fi, x + c.origin.x, bl + c.origin.y, a, d)),
         None => Some((fi, c.origin.x, c.origin.y + 10.0, 9.0, 3.0)),
+    }
+}
+
+#[cfg(test)]
+mod height_tests {
+    use super::*;
+    use designcraft_doc::{AnchorPosition, AnchoredObject, CellRange, LayerId, ParaFormat, Position, SpreadRef, build::NewDocument};
+
+    fn text_cell(text: &str, bottom: f64) -> Cell {
+        let mut cell = Cell::with_text(text, ParaFormat::default());
+        cell.insets = [8.5, 4.0, bottom, 4.0];
+        cell.text.format_chars(0..cell.text.len(), |f| {
+            f.over.font_family = Some("Source Sans 3".into());
+            f.over.font_style = Some("Regular".into());
+            f.over.size = Some(11.0);
+        });
+        cell
+    }
+
+    fn measure(cell: &Cell, width: f64) -> CellLayout {
+        compose_cell(&Document::new(&NewDocument::default()), cell, width, &ComposeOptions::default(), false)
+    }
+
+    fn compose_table(table: Table, height: f64) -> ComposedStory {
+        let mut doc = Document::new(&NewDocument::default());
+        let layer = doc.default_layer();
+        let (_, sid) = doc.add_text_frame(SpreadRef::Doc(0), Rect::new(0.0, 0.0, 200.0, height), layer, "", ParaFormat::default()).unwrap();
+        doc.story_mut(sid).unwrap().insert_table(0, table);
+        crate::compose_story(&doc, sid, &ComposeOptions::default())
+    }
+
+    fn single_table(cell: Cell) -> Table {
+        let mut table = Table::new(77, 1, 1, 0, 0, 100.0);
+        table.cells[0] = cell;
+        table
+    }
+
+    fn object(position: AnchorPosition) -> AnchoredObject {
+        let path = designcraft_geom::shapes::rectangle(Rect::new(0.0, 0.0, 12.0, 30.0));
+        AnchoredObject::new(designcraft_doc::Item::new(ItemId(0), LayerId(0), designcraft_doc::Shape::Rectangle, path), position)
+    }
+
+    #[test]
+    fn cell_bottom_inset_contains_descenders_without_growing_every_row() {
+        let cell = text_cell("gyp", 8.5);
+        let layout = measure(&cell, 92.0);
+        let line = &layout.text.frames[0].lines[0];
+        assert!(line.descent > 0.0 && line.descent < cell.insets[2]);
+        let expected = cell.insets[0] + line.baseline + cell.insets[2];
+        let composed = compose_table(single_table(cell), 200.0);
+        let placed = composed.frames[0].tables[0].cell(0, 0).unwrap();
+        assert!((placed.rect.height() - expected).abs() < 1e-6);
+        assert!(!placed.overset);
+        assert_eq!(placed.text.frames[0].lines.len(), 1);
+        assert!(placed.origin.y + line.baseline + line.descent <= placed.rect.y1);
+        // The shared frame composer keeps its full typographic height for non-cell users.
+        assert!((layout.text.frames[0].content_height - line.baseline - line.descent).abs() < 1e-6);
+    }
+
+    #[test]
+    fn baseline_sized_rows_fit_the_frame_without_losing_the_final_rows() {
+        let cell = text_cell("gyp", 8.5);
+        let layout = measure(&cell, 92.0);
+        let row_height = 17.0 + layout.text.frames[0].lines[0].baseline;
+        let mut table = Table::new(77, 16, 1, 1, 0, 100.0);
+        table.cells.fill(cell);
+        let composed = compose_table(table, 17.0 * row_height + 25.0);
+        assert!(!composed.is_overset());
+        let fragment = &composed.frames[0].tables[0];
+        assert_eq!(fragment.cells.len(), 17);
+        assert!(fragment.cell(16, 0).is_some());
+        assert!((fragment.rect.height() - 17.0 * row_height).abs() < 1e-6);
+    }
+
+    #[test]
+    fn multiline_cells_keep_leading_and_paragraph_spacing() {
+        let mut cell = text_cell("gyp\njqp", 8.5);
+        cell.text.format_paras(0..3, |p| p.para.space_after = Some(6.0));
+        let layout = measure(&cell, 92.0);
+        let lines = &layout.text.frames[0].lines;
+        assert_eq!(lines.len(), 2);
+        assert!((lines[1].baseline - lines[0].baseline - lines[1].leading - 6.0).abs() < 1e-6);
+        let expected = 17.0 + lines[1].baseline;
+        let composed = compose_table(single_table(cell), 200.0);
+        let placed = composed.frames[0].tables[0].cell(0, 0).unwrap();
+        assert_eq!(placed.text.frames[0].lines.len(), 2);
+        assert!((placed.rect.height() - expected).abs() < 1e-6);
+        let wrapped = measure(&text_cell("gyp gyp gyp gyp gyp gyp gyp gyp", 8.5), 30.0);
+        assert!(wrapped.text.frames[0].lines.len() > 2);
+        assert!((wrapped.content_h - wrapped.text.frames[0].lines.last().unwrap().baseline).abs() < 1e-6);
+    }
+
+    #[test]
+    fn small_insets_still_contain_descenders_and_shifted_text() {
+        for bottom in [0.0, 1.0] {
+            for (shift, position) in [(0.0, Position::Normal), (-15.0, Position::Normal), (0.0, Position::Superscript), (0.0, Position::Subscript)] {
+                let mut cell = text_cell("gyp", bottom);
+                cell.text.format_chars(0..3, |f| {
+                    f.over.baseline_shift = Some(shift);
+                    f.over.position = Some(position);
+                });
+                let layout = measure(&cell, 92.0);
+                let line = &layout.text.frames[0].lines[0];
+                let expected = cell.insets[0] + line.baseline + bottom.max(line.descent);
+                let composed = compose_table(single_table(cell), 200.0);
+                let placed = composed.frames[0].tables[0].cell(0, 0).unwrap();
+                assert!((placed.rect.height() - expected).abs() < 1e-6);
+                assert!(placed.origin.y + line.baseline + line.descent <= placed.rect.y1 + 1e-6);
+                assert!(!placed.overset);
+            }
+        }
+    }
+
+    #[test]
+    fn exact_height_uses_the_same_fit_rule_and_keeps_only_a_prefix() {
+        let cell = text_cell("gyp\njqp", 8.5);
+        let layout = measure(&cell, 92.0);
+        let first_height = 17.0 + layout.text.frames[0].lines[0].baseline;
+        let full_height = 17.0 + layout.text.frames[0].lines[1].baseline;
+        for (height, count, overset) in [(full_height, 2, false), (first_height, 1, true), (first_height - 1.0, 0, true)] {
+            let mut table = single_table(cell.clone());
+            table.rows[0].mode = RowHeightMode::Exactly;
+            table.rows[0].height = height;
+            let composed = compose_table(table, 200.0);
+            let placed = composed.frames[0].tables[0].cell(0, 0).unwrap();
+            assert!((placed.rect.height() - height).abs() < 1e-6);
+            assert_eq!(placed.overset, overset);
+            assert_eq!(placed.text.frames[0].lines.len(), count);
+            if overset {
+                assert_eq!(placed.text.overset_at, Some(layout.text.frames[0].lines[count].range.start));
+            }
+        }
+    }
+
+    #[test]
+    fn exact_height_cannot_fit_a_descender_outside_the_physical_cell() {
+        let cell = text_cell("gyp", 0.0);
+        let layout = measure(&cell, 92.0);
+        let line = &layout.text.frames[0].lines[0];
+        let mut table = single_table(cell);
+        table.rows[0].mode = RowHeightMode::Exactly;
+        table.rows[0].height = 8.5 + line.baseline + line.descent / 2.0;
+        let composed = compose_table(table, 200.0);
+        let placed = composed.frames[0].tables[0].cell(0, 0).unwrap();
+        assert!(placed.overset);
+        assert!(placed.text.frames[0].lines.is_empty());
+    }
+
+    #[test]
+    fn earlier_lowered_line_controls_height_and_cannot_be_skipped_on_overset() {
+        let mut cell = text_cell("gyp\njqp", 8.5);
+        cell.text.format_chars(0..cell.text.len(), |f| f.over.leading = Some(designcraft_doc::Leading::Points(6.0)));
+        cell.text.format_chars(0..3, |f| f.over.baseline_shift = Some(-30.0));
+        let layout = measure(&cell, 92.0);
+        let lines = &layout.text.frames[0].lines;
+        assert_eq!(lines.len(), 2);
+        let deep_bottom = lines[0].baseline + lines[0].descent;
+        assert!(deep_bottom > lines[1].baseline + lines[1].descent + 8.5);
+        let composed = compose_table(single_table(cell.clone()), 200.0);
+        let placed = composed.frames[0].tables[0].cell(0, 0).unwrap();
+        assert!((placed.rect.height() - 8.5 - deep_bottom).abs() < 1e-6);
+        assert!(!placed.overset);
+
+        let mut table = single_table(cell);
+        table.rows[0].mode = RowHeightMode::Exactly;
+        table.rows[0].height = 17.0 + lines[1].baseline;
+        let composed = compose_table(table, 200.0);
+        let placed = composed.frames[0].tables[0].cell(0, 0).unwrap();
+        assert!(placed.overset);
+        assert!(placed.text.frames[0].lines.is_empty(), "a later fitting line cannot reappear after the first line oversets");
+    }
+
+    #[test]
+    fn empty_and_trailing_empty_paragraphs_keep_their_baseline_height() {
+        for text in ["", "gyp\n", "gyp\n\n"] {
+            let cell = text_cell(text, 8.5);
+            let layout = measure(&cell, 92.0);
+            let lines = &layout.text.frames[0].lines;
+            assert_eq!(lines.len(), text.matches('\n').count() + 1);
+            assert!(lines.last().unwrap().glyphs.is_empty());
+            let expected = 17.0 + lines.last().unwrap().baseline;
+            let composed = compose_table(single_table(cell), 200.0);
+            let placed = composed.frames[0].tables[0].cell(0, 0).unwrap();
+            assert!((placed.rect.height() - expected).abs() < 1e-6);
+            assert_eq!(placed.text.frames[0].lines.len(), lines.len());
+            assert!(!placed.overset);
+        }
+    }
+
+    #[test]
+    fn vertical_alignment_uses_baseline_fit_without_losing_descenders() {
+        for bottom in [0.0, 8.5] {
+            for (vj, expected_shift) in
+                [(VerticalJustification::Top, 0.0), (VerticalJustification::Center, 10.0), (VerticalJustification::Bottom, 20.0)]
+            {
+                let mut cell = text_cell("gyp", bottom);
+                cell.vj = vj;
+                let layout = measure(&cell, 92.0);
+                let required = cell.insets[0] + layout.content_h + bottom;
+                let mut table = single_table(cell);
+                table.rows[0].mode = RowHeightMode::Exactly;
+                table.rows[0].height = required + 20.0;
+                let composed = compose_table(table, 200.0);
+                let placed = composed.frames[0].tables[0].cell(0, 0).unwrap();
+                let line = &placed.text.frames[0].lines[0];
+                assert!((placed.origin.y - placed.clip.y0 - expected_shift).abs() < 1e-6);
+                assert!(placed.origin.y + line.baseline + line.descent <= placed.rect.y1 + 1e-6);
+                assert!(!placed.overset);
+            }
+        }
+    }
+
+    #[test]
+    fn row_spans_grow_to_the_same_baseline_and_physical_bounds() {
+        let cell = text_cell("gyp\njqp\ngyp", 8.5);
+        let layout = measure(&cell, 92.0);
+        let expected = 17.0 + layout.text.frames[0].lines.last().unwrap().baseline;
+        let mut table = Table::new(77, 2, 1, 0, 0, 100.0);
+        table.merge(CellRange::new(0, 0, 1, 0)).unwrap();
+        table.rows[0].mode = RowHeightMode::Exactly;
+        table.rows[0].height = 3.0;
+        table.cells[0] = Cell { row_span: 2, ..cell };
+        let composed = compose_table(table, 200.0);
+        let placed = composed.frames[0].tables[0].cell(0, 0).unwrap();
+        assert!((placed.rect.height() - expected).abs() < 1e-6);
+        assert_eq!(placed.text.frames[0].lines.len(), 3);
+        assert!(!placed.overset);
+    }
+
+    #[test]
+    fn lowered_inline_objects_are_contained_but_custom_anchors_stay_out_of_flow() {
+        let mut cell = text_cell("gyp", 8.5);
+        cell.text.insert_object(0, object(AnchorPosition::Inline { y_offset: -40.0 }));
+        let composed = compose_table(single_table(cell), 200.0);
+        let placed = composed.frames[0].tables[0].cell(0, 0).unwrap();
+        let object = &placed.text.frames[0].objects[0];
+        assert!((placed.origin.y + object.origin.y + object.size.1 - placed.rect.y1).abs() < 1e-6);
+        assert!(!placed.overset);
+
+        let mut cell = text_cell("gyp", 8.5);
+        let original = measure(&cell, 92.0).content_h;
+        cell.text.insert_object(
+            0,
+            self::object(AnchorPosition::Custom {
+                x_relative: Default::default(),
+                y_relative: Default::default(),
+                x_offset: 0.0,
+                y_offset: 100.0,
+                object_point: 0,
+                ref_point: 0,
+                keep_within_column: false,
+            }),
+        );
+        assert!((measure(&cell, 92.0).content_h - original).abs() < 1e-6);
+    }
+
+    #[test]
+    fn overset_lines_cannot_leave_visible_objects_or_nested_tables_behind() {
+        let plain = text_cell("gyp", 8.5);
+        let first_height = 17.0 + measure(&plain, 92.0).text.frames[0].lines[0].baseline;
+        for nested in [false, true] {
+            let mut cell = text_cell("gyp\nHidden", 8.5);
+            if nested {
+                cell.text.insert_table(4, single_table(text_cell("nested", 8.5)));
+            } else {
+                cell.text.insert_object(4, object(AnchorPosition::Inline { y_offset: 0.0 }));
+            }
+            let mut table = single_table(cell);
+            table.rows[0].mode = RowHeightMode::Exactly;
+            table.rows[0].height = first_height;
+            let composed = compose_table(table, 200.0);
+            let placed = composed.frames[0].tables[0].cell(0, 0).unwrap();
+            assert!(placed.overset);
+            assert_eq!(placed.text.frames[0].lines.len(), 1);
+            assert!(placed.text.frames[0].objects.is_empty());
+            assert!(placed.text.frames[0].tables.is_empty());
+        }
     }
 }
 
