@@ -1664,6 +1664,9 @@ fn layout_line(
     }
     if (justify_this || squeeze_last) && !spaces.is_empty() {
         distribute(&line, &spaces, extra, sp, &mut add, &mut scale);
+    } else if justify_this && spaces.is_empty() && line.len() > 1 && !last && extra < 0.0 {
+        // An overfull single word shrinks only as far as the minimum letter spacing and glyph scaling allow.
+        distribute(&line, &[], extra, sp, &mut add, &mut scale);
     } else if justify_this && spaces.is_empty() && line.len() > 1 && !last {
         // Single word: Single Word Justification.
         match pp.single_word_justify {
@@ -1940,10 +1943,12 @@ fn distribute(line: &[Glyph], spaces: &[usize], extra: f64, sp: &Spacing, add: &
     let tg = rem.min(yg);
     rem -= tg;
     let sign = if stretch { 1.0 } else { -1.0 };
+    // Stretch left over beyond every limit is shared equally by the word spaces; shrink never goes
+    // past the minimums (that would overlap glyphs), so an overfull line stays overfull.
+    let over = if stretch && !spaces.is_empty() { rem / spaces.len() as f64 } else { 0.0 };
     for (k, &i) in spaces.iter().enumerate() {
         let share = if yw > 1e-9 { tw * word[k] / yw } else { 0.0 };
-        // Left over beyond every limit: shared equally by the word spaces.
-        add[i] += sign * (share + rem / spaces.len() as f64);
+        add[i] += sign * share + over;
     }
     if yl > 1e-9 && tl > 0.0 {
         for (i, l) in letter.iter().enumerate() {

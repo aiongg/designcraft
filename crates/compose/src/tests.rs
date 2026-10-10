@@ -1900,6 +1900,34 @@ fn tracked_lines(text: &str, width: f64, para: ParaAttrs, tracking: f64) -> Vec<
 }
 
 #[test]
+fn a_word_longer_than_the_line_breaks_at_the_column_edge() {
+    use designcraft_doc::Composer;
+    let word = "n".repeat(60);
+    let long = format!("Then {word} and on");
+    for tracking in [0.0, 740.0] {
+        // Natural advances, from one unbroken line.
+        let natural: HashMap<usize, f64> =
+            tracked_lines(&long, 1e5, ParaAttrs::default(), tracking)[0].glyphs.iter().map(|g| (g.byte, g.adv)).collect();
+        for composer in [Composer::Paragraph, Composer::SingleLine] {
+            for align in [Align::Left, Align::LeftJustified] {
+                let para = ParaAttrs { composer: Some(composer), align: Some(align), hyphenate: Some(false), ..Default::default() };
+                let lines = tracked_lines(&long, 72.0, para, tracking);
+                let what = format!("{composer:?} {align:?} tracking {tracking}");
+                assert!(lines.len() >= 4, "{what}: {} lines", lines.len());
+                for l in &lines {
+                    let ink: Vec<_> = l.glyphs.iter().filter(|g| g.visible && g.adv > 0.0).collect();
+                    let right = ink.iter().map(|g| g.x + g.adv.min(natural[&g.byte])).fold(l.x0, f64::max);
+                    assert!(l.end_x <= l.x1 + 0.02 && right <= l.x1 + 0.02, "{what}: line {:?} ends at {} past {}", l.range, l.end_x, l.x1);
+                    for w in ink.windows(2) {
+                        assert!(w[1].x >= w[0].x + natural[&w[0].byte] - 1e-6, "{what}: glyphs overlap at {}", w[1].byte);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn a_line_that_exactly_fills_the_measure_fits() {
     use designcraft_doc::Composer;
     let text = "#knowyourplastic";
