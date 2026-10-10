@@ -1744,9 +1744,7 @@ fn corner_guides(app: &mut DesignApp, xf: &Xf, p: Pos2) {
     if !(sp.x.is_finite() && sp.y.is_finite()) {
         return;
     }
-    for (orientation, position, at) in [("horizontal", sp.y, sp.x), ("vertical", sp.x, sp.y)] {
-        let _ = app.run("guide.add", json!({"spread": r, "orientation": orientation, "position": position, "at": at, "spreadGuide": true}));
-    }
+    let _ = app.run("guide.add", json!({"spread": r, "orientation": "both", "point": [sp.x, sp.y], "spreadGuide": true}));
 }
 
 const GUIDE_DRAG: &str = "canvas_guide_drag";
