@@ -29,7 +29,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use designcraft_doc::{
-    Align, Composer, Document, FirstBaseline, GridAlign, ItemId, ParaProps, SpanColumns, StartParagraph, Story, StoryId, TabAlign, TextFrameOptions,
+    Align, Document, FirstBaseline, GridAlign, ItemId, ParaProps, SpanColumns, StartParagraph, Story, StoryId, TabAlign, TextFrameOptions,
     VerticalJustification, WrapMode, story,
 };
 use designcraft_fonts::{FontDb, ScopedFonts};
@@ -681,7 +681,7 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                 let mut gl = sp.glyphs.clone();
                 apply_desired_spacing(&mut gl, &pp);
                 let hy = hyphenation_points(&story.text, &gl, &pp, &hyph_exceptions, &foreign_ranges(doc, story, prange.clone(), &base_chars));
-                let breaks = if pp.composer == Composer::SingleLine || gl.iter().any(|g| g.ch == '\t') || gl.len() > 4000 {
+                let breaks = if pp.composer.single_line() || gl.iter().any(|g| g.ch == '\t') || gl.len() > 4000 {
                     let tab = |j: usize, x: f64, i: usize| {
                         let ind = pp.left_indent + if j == 0 { pp.first_line_indent } else { 0.0 };
                         tab_advance(&pp.tabs, pp.left_indent, ind + x, gl.get(i + 1..).unwrap_or_default()).0
@@ -755,6 +755,14 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
             prepend_label(db, &mut sp.glyphs, label, prange.start, &base_chars, label_env, &mut table);
         }
         let mut glyphs = sp.glyphs;
+        if !pp.composer.japanese() {
+            // Every IDML's root style carries a leading model and character alignment, which only
+            // the Japanese composers use.
+            for g in &mut glyphs {
+                g.leading_model = designcraft_doc::cjk::LeadingModel::Roman;
+                g.character_alignment = designcraft_doc::cjk::CharacterAlignment::Baseline;
+            }
+        }
         let bidi_text = bidi::paragraph_text(&mut glyphs, &story.text);
         let bidi_info = unicode_bidi::BidiInfo::new(
             &bidi_text,
@@ -896,7 +904,7 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
             };
             let rest = &glyphs[g0..];
             let rest_h = &hyph_after[g0..];
-            let breaks: Vec<Break> = if pp.composer == Composer::SingleLine || has_tabs || rest.len() > 4000 {
+            let breaks: Vec<Break> = if pp.composer.single_line() || has_tabs || rest.len() > 4000 {
                 // Where each line starts relative to the tab origin, as `layout_line` places it.
                 let tab = |j: usize, x: f64, i: usize| {
                     let x0 = slots.get(j).map_or(col.x0, |s| s.0);
