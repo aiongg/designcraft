@@ -18,6 +18,7 @@ pub mod hyphen;
 mod mojikumi;
 mod notes;
 mod overlay;
+mod parabox;
 mod ruby;
 pub mod shape;
 pub mod table;
@@ -31,8 +32,8 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use designcraft_doc::{
-    Align, Document, FirstBaseline, GridAlign, ItemId, ParaProps, SpanColumns, StartParagraph, Story, StoryId, TabAlign, TextFrameOptions,
-    VerticalJustification, WrapMode, story,
+    Align, Document, FirstBaseline, GridAlign, ItemId, ListAlign, ListCounter, ParaProps, SpanColumns, StartParagraph, Story, StoryId, TabAlign,
+    TextFrameOptions, VerticalJustification, WrapMode, story,
 };
 use designcraft_fonts::{FontDb, ScopedFonts};
 use designcraft_geom::{Point, Rect};
@@ -41,6 +42,7 @@ use crate::breaker::{Break, Spacing};
 pub use crate::cache::Cache;
 use crate::notes::Notes;
 pub use crate::notes::{find_note, hit_note, hit_note_with, note_caret};
+use crate::parabox::ParaBox;
 use crate::shape::{Glyph, StyleTable, SubstCtx};
 pub use crate::table::{PlacedCell, StrokeSeg, TableFrag, cell_caret, find_cell, hit_cell, hit_cell_with};
 
@@ -217,12 +219,16 @@ pub struct DropCapBox {
     pub rect: Rect,
 }
 
-/// A paragraph rule or shading rectangle in frame inner space.
-#[derive(Clone, Debug, PartialEq)]
+/// A paragraph rule, border or shading in frame inner space: `rect` filled, or `path` (non-zero
+/// winding) when it has one, with `rect` its bounds.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Deco {
     pub rect: Rect,
     pub color: String,
     pub tint: f32,
+    pub path: Option<designcraft_geom::BezPath>,
+    /// Shown on screen only (not printed or exported).
+    pub nonprinting: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -520,10 +526,10 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
     let para_ranges = story.para_ranges();
     let np = para_ranges.len();
     let hyph_exceptions = doc.hyphenation_exception_map();
-    let mut list_counter: u32 = 0;
-    // Named lists number independently of layout: one pass up front.
-    let named_numbers: Vec<Option<u32>> = {
-        let mut counters: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+    let mut list_counter = ListCounter::default();
+    // Named lists number independently of layout: one pass up front, for the labels.
+    let named_labels: Vec<Option<String>> = {
+        let mut counters: std::collections::HashMap<String, ListCounter> = std::collections::HashMap::new();
         story
             .paras
             .iter()
@@ -534,11 +540,13 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                     return None;
                 }
                 let c = counters.entry(pp.list_name.clone()).or_insert_with(|| doc.list_start(story.id, &pp.list_name));
-                *c = pp.start_at.map_or(c.saturating_add(1), |s| s.max(1));
-                Some(*c)
+                c.advance(&pp);
+                Some(pp.number_label_in(c))
             })
             .collect()
     };
+    // Border and shading of each paragraph set, drawn once the lines are in place.
+    let mut boxes: Vec<Option<ParaBox>> = vec![None; np];
     // Keep options: paragraphs are re-laid from a snapshot when a keep is violated, either forced
     // into the next column or with a cap on the lines set before moving on (widow control).
     let mut snaps: Vec<Snapshot> = Vec::with_capacity(np);
@@ -571,7 +579,7 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
         cur.pi = pi;
         cur.limits = Rc::clone(&limits);
         cur.split_limits = Rc::clone(&split_limits);
-        let snap = Snapshot::take(&out, &cur, list_counter);
+        let snap = Snapshot::take(&out, &cur, &list_counter);
         snaps.truncate(pi);
         snaps.push(snap);
         note_snaps.truncate(pi);
@@ -587,7 +595,7 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
             continue 'paras;
         }
         let pf = &story.paras[pi];
-        let (pp, base_chars) = doc.styles.resolve_para(pf);
+        let (mut pp, base_chars) = doc.styles.resolve_para(pf);
         // A break character that ends the previous paragraph sends this one on, like a start option.
         let after_break = pi
             .checked_sub(1)
@@ -624,7 +632,8 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                 keep_first: 1,
                 keep_last: 1,
             });
-            list_counter = 0;
+            list_counter = ListCounter::default();
+            boxes[pi] = None;
             cur.pending += pp.space_after;
             pi += 1;
             continue;
@@ -790,32 +799,52 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
         let list_label = match pp.list_type {
             // An empty paragraph has no bullet or number, and the numbering carries on past it.
             designcraft_doc::ListType::Numbers | designcraft_doc::ListType::Bullets if prange.is_empty() => None,
+            // A named list: carries on past other paragraphs (and from earlier stories).
             designcraft_doc::ListType::Numbers if !pp.list_name.is_empty() => {
-                // A named list: carries on past other paragraphs (and from earlier stories).
-                let n = named_numbers.get(pi).copied().flatten().unwrap_or(1);
-                Some(pp.number_label(n))
+                Some(named_labels.get(pi).cloned().flatten().unwrap_or_else(|| pp.number_label(1)))
             }
             designcraft_doc::ListType::Numbers => {
-                list_counter = pp.start_at.map_or(list_counter.saturating_add(1), |s| s.max(1));
-                Some(pp.number_label(list_counter))
+                list_counter.advance(&pp);
+                Some(pp.number_label_in(&list_counter))
             }
             designcraft_doc::ListType::Bullets => Some(pp.bullet_label()),
             designcraft_doc::ListType::None => {
-                list_counter = 0;
+                list_counter = ListCounter::default();
                 None
             }
         };
-        if let Some(label) = list_label {
-            let n = prepend_label(db, &mut sp.glyphs, &label, prange.start, &base_chars, label_env, &mut table);
+        // The label's glyphs at the paragraph start, and how many of them (up to its first tab)
+        // the list alignment places.
+        let mut label_aligned = 0usize;
+        let mut label_tab = false;
+        if let Some(label) = &list_label {
+            let chars = label_chars(doc, &pp, &base_chars);
+            let n = prepend_label(db, &mut sp.glyphs, label, prange.start, &chars, label_env, &mut table);
             for g in sp.glyphs.iter_mut().take(n) {
                 g.list_label = true;
+            }
+            label_aligned = sp.glyphs.get(..n).unwrap_or_default().iter().position(|g| g.ch == '\t').unwrap_or(n);
+            label_tab = label_aligned < n;
+            // Tab Position: a stop for the text after the label.
+            if let Some(t) = pp.list_tab.filter(|t| t.is_finite() && *t >= 0.0)
+                && !pp.tabs.iter().any(|s| (s.position - t).abs() < 1e-6)
+            {
+                pp.tabs.push(designcraft_doc::TabStop { position: t, align: TabAlign::Left, leader: String::new(), align_on: String::new() });
+                pp.tabs.sort_by(|a, b| a.position.total_cmp(&b.position));
             }
         }
         if pi == 0
             && let Some(label) = &opts.label
         {
             prepend_label(db, &mut sp.glyphs, label, prange.start, &base_chars, label_env, &mut table);
+            label_aligned = 0;
         }
+        let list_align = match pp.list_type {
+            _ if label_aligned == 0 || pp.direction == designcraft_doc::TextDirection::RightToLeft => designcraft_doc::ListAlign::Left,
+            designcraft_doc::ListType::Bullets => pp.bullet_align,
+            _ => pp.number_align,
+        };
+        boxes[pi] = ParaBox::of(doc, &pp);
         let mut glyphs = sp.glyphs;
         if !pp.composer.japanese() {
             // Every IDML's root style carries a leading model and character alignment, which only
@@ -884,6 +913,8 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
         if cur.last_baseline.is_some() {
             go(&mut cur, pp.start_paragraph);
         }
+        // Text in the columns above a spanning paragraph, or a split block starting below text.
+        let mut text_above = cur.split.is_none() && split_cfg.is_some();
         if spanning && cur.fi < frames.len() {
             // Close the band: the paragraph goes below the deepest of its columns, which are
             // balanced first.
@@ -920,13 +951,14 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                 cur.col = 0;
                 cur.last_baseline = Some(baseline);
                 cur.last_descent = descent;
+                text_above = true;
             } else if cur.col != 0 {
                 cur.col = 0;
                 cur.resume();
             }
         }
         if cur.last_baseline.is_some() {
-            cur.pending += pp.space_before;
+            cur.pending += if text_above { pp.space_before.max(pp.span_space_before) } else { pp.space_before };
         }
         if let Some(cfg) = split_cfg
             && cur.split.is_none()
@@ -954,8 +986,6 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                     continue 'paras;
                 }
                 out.overset_at = Some(glyphs.get(g0).map(|g| g.byte).unwrap_or(prange.start));
-                // The part of the paragraph that fits keeps its shading and border.
-                para_box_decos(&mut out, pi, &pp);
                 break 'paras;
             }
             let f = &frames[cur.fi];
@@ -1154,6 +1184,7 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                 let forced_mid = brk == Some(story::FORCED_LINE_BREAK) && !last;
                 let (mut placed, end_x, ratio) =
                     layout_line(&glyphs, s, e, b.hyphen, lx0, lx1, col.x0, &pp, &spacing, ends_para, forced_mid, f.left_page, &bidi_info);
+                let end_x = if line_no == 0 && s == 0 { align_label(&mut placed, label_aligned, label_tab, list_align, end_x) } else { end_x };
                 // Warichu runs before ruby so a reading is placed over the stacked note, and before
                 // the trimmed spaces and the drop cap join the line, so neither is stacked.
                 let end_x = end_x + warichu::place(&styles_tab, &mut placed);
@@ -1280,7 +1311,7 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                 baseline: l.baseline,
                 descent: l.descent,
                 reference: cur.last_reference,
-                pending: pp.space_after,
+                pending: pp.space_after.max(pp.span_space_after),
             };
             cur.band = Band { para: pi + 1, line0: ft.lines.len(), above: Some(above) };
         }
@@ -1297,10 +1328,14 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                     .map(|l| if r.column_width { (l.x0, l.x1) } else { (l.x0, l.end_x) })
                     .unwrap_or((0.0, 0.0));
                 let (color, tint) = rule_color(r, &above);
-                ft.decos.push(Deco { rect: Rect::new(col.0 + r.left_indent, y - r.weight, col.1 - r.right_indent, y), color, tint });
+                ft.decos.push(Deco {
+                    rect: Rect::new(col.0 + r.left_indent, y - r.weight, col.1 - r.right_indent, y),
+                    color,
+                    tint,
+                    ..Deco::default()
+                });
             }
         }
-        para_box_decos(&mut out, pi, &pp);
         if pp.rule_below.on
             && let Some(ft) = out.frames.get_mut(cur.fi.min(frames.len().saturating_sub(1)))
             && let Some(l) = ft.lines.iter().rev().find(|l| l.para == pi)
@@ -1309,15 +1344,17 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
             let y = l.baseline + r.offset;
             let (x0, x1) = if r.column_width { (l.x0, l.x1) } else { (l.x0, l.end_x) };
             let (color, tint) = rule_color(r, &below);
-            ft.decos.push(Deco { rect: Rect::new(x0 + r.left_indent, y, x1 - r.right_indent, y + r.weight), color, tint });
+            ft.decos.push(Deco { rect: Rect::new(x0 + r.left_indent, y, x1 - r.right_indent, y + r.weight), color, tint, ..Deco::default() });
         }
         // The end of a split block: text after it continues below its deepest sub-column, which
         // are balanced first. A block that ends the story fills its sub-columns in turn.
+        let mut ends_split = false;
         if let Some(sb) = cur.split {
             let next =
                 story.paras.get(pi + 1).filter(|_| story.para_table(pi + 1).is_none()).and_then(|p| SplitCfg::of(&doc.styles.resolve_para(p).0));
             if next != Some(sb.cfg) {
                 cur.split = None;
+                ends_split = true;
                 let part = out.frames.get(cur.fi).and_then(|ft| {
                     let lines = ft.lines.get(sb.line0?..)?;
                     let top = lines.first().map(|l| l.baseline - l.ascent)?;
@@ -1352,48 +1389,7 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                 }
             }
         }
-        // The end of a split block: text after it continues below its deepest sub-column, which
-        // are balanced first. A block that ends the story fills its sub-columns in turn.
-        if let Some(sb) = cur.split {
-            let next =
-                story.paras.get(pi + 1).filter(|_| story.para_table(pi + 1).is_none()).and_then(|p| SplitCfg::of(&doc.styles.resolve_para(p).0));
-            if next != Some(sb.cfg) {
-                cur.split = None;
-                let part = out.frames.get(cur.fi).and_then(|ft| {
-                    let lines = ft.lines.get(sb.line0?..)?;
-                    let top = lines.first().map(|l| l.baseline - l.ascent)?;
-                    let deepest = lines.iter().map(|l| (l.baseline, l.descent)).max_by(|a, b| (a.0 + a.1).total_cmp(&(b.0 + b.1)))?;
-                    Some((sb.top.unwrap_or(top), deepest))
-                });
-                if pi + 1 < np
-                    && let Some((top, (baseline, descent))) = part
-                {
-                    let key = (cur.fi, cur.col, sb.para);
-                    let active = split_trial.as_ref().is_some_and(|t| t.key == key);
-                    if !active && let Some(t) = split_trial.take() {
-                        set_limit(&mut split_limits, t.key, None);
-                    }
-                    if sb.part_lines > 1 && (active || limit_of(&split_limits, key).is_none() && split_runs < split_budget) {
-                        let bottom = baseline + descent;
-                        let mut t = split_trial.take().unwrap_or(Trial { key, span: pi, lo: top, hi: bottom, tries: 0, done: false });
-                        // This layout fits: its bottom is the best so far.
-                        t.hi = t.hi.min(bottom);
-                        let next = if t.done { t.hi } else { t.next() };
-                        set_limit(&mut split_limits, key, Some(next));
-                        if !t.done {
-                            split_trial = Some(t);
-                            split_runs += 1;
-                            rewind(key.2, &snaps, &note_snaps, &mut notes, &mut out, &mut cur, &mut list_counter, &mut force_col, &mut line_cap);
-                            pi = key.2;
-                            continue 'paras;
-                        }
-                    }
-                    cur.last_baseline = Some(baseline);
-                    cur.last_descent = descent;
-                }
-            }
-        }
-        cur.pending += pp.space_after;
+        cur.pending += if spanning || ends_split { pp.space_after.max(pp.span_space_after) } else { pp.space_after };
         pi += 1;
     }
     notes.finish(doc, story, frames, &cols, &mut out);
@@ -1476,12 +1472,14 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
             last_end = ft.range.end;
         }
     }
-    // Column rules, once vertical justification has put the lines in place.
+    // Paragraph borders and shading (the part of a paragraph that fits keeps its box), and column
+    // rules, once vertical justification has put the lines in place.
+    parabox::draw(&mut out, &boxes, frames);
     for (ft, f) in out.frames.iter_mut().zip(frames) {
         if f.opts.column_rule {
             let rects = column_rule_rects(&ft.columns, &ft.lines, &f.opts);
             let tint = if f.opts.column_rule_tint.is_finite() { f.opts.column_rule_tint.clamp(0.0, 1.0) } else { 1.0 };
-            ft.decos.extend(rects.into_iter().map(|rect| Deco { rect, color: f.opts.column_rule_color.clone(), tint }));
+            ft.decos.extend(rects.into_iter().map(|rect| Deco { rect, color: f.opts.column_rule_color.clone(), tint, ..Deco::default() }));
         }
     }
     out.styles = styles_tab;
@@ -1537,51 +1535,6 @@ fn mark_keep_violations(doc: &Document, story: &Story, out: &mut ComposedStory) 
         for l in &mut ft.lines {
             if bad.contains(&l.para) {
                 l.keep_violation = true;
-            }
-        }
-    }
-}
-
-/// Paragraph shading and border, per column the paragraph sits in (a split paragraph gets one box
-/// per part; the border's top edge on the first part, its bottom edge on the last).
-fn para_box_decos(out: &mut ComposedStory, pi: usize, pp: &ParaProps) {
-    if !pp.shading_on && !pp.border_on {
-        return;
-    }
-    let mut parts: Vec<(usize, Rect)> = Vec::new();
-    for (fi, ft) in out.frames.iter().enumerate() {
-        // A part ends where the next line moves to another column or sub-column.
-        let lines: Vec<&Line> = ft.lines.iter().filter(|l| l.para == pi).collect();
-        for part in lines.chunk_by(|a, b| a.column == b.column && b.baseline > a.baseline) {
-            if let (Some(a), Some(z)) = (part.first(), part.last()) {
-                parts.push((fi, Rect::new(a.x0, a.baseline - a.ascent, a.x1, z.baseline + z.descent)));
-            }
-        }
-    }
-    let n = parts.len();
-    for (k, (fi, r)) in parts.into_iter().enumerate() {
-        let ft = &mut out.frames[fi];
-        if pp.shading_on {
-            let [t, l, b, rr] = pp.shading_offsets;
-            ft.decos
-                .insert(0, Deco { rect: Rect::new(r.x0 - l, r.y0 - t, r.x1 + rr, r.y1 + b), color: pp.shading_color.clone(), tint: pp.shading_tint });
-        }
-        if pp.border_on {
-            let [t, l, b, rr] = pp.border_offsets;
-            let o = Rect::new(r.x0 - l, r.y0 - t, r.x1 + rr, r.y1 + b);
-            let [wt, wl, wb, wr] = pp.border_weights.map(|w| w.max(0.0));
-            let mut edge = |rect: Rect| ft.decos.push(Deco { rect, color: pp.border_color.clone(), tint: pp.border_tint });
-            if k == 0 && wt > 0.0 {
-                edge(Rect::new(o.x0 - wl, o.y0 - wt, o.x1 + wr, o.y0));
-            }
-            if k + 1 == n && wb > 0.0 {
-                edge(Rect::new(o.x0 - wl, o.y1, o.x1 + wr, o.y1 + wb));
-            }
-            if wl > 0.0 {
-                edge(Rect::new(o.x0 - wl, o.y0, o.x0, o.y1));
-            }
-            if wr > 0.0 {
-                edge(Rect::new(o.x1, o.y0, o.x1 + wr, o.y1));
             }
         }
     }
@@ -1734,18 +1687,18 @@ fn apply_desired_spacing(glyphs: &mut [Glyph], pp: &ParaProps) {
 /// paragraphs from here). Only the cursor's frame and later ones can change afterwards.
 struct Snapshot {
     cur: Cursor,
-    list_counter: u32,
+    list_counter: ListCounter,
     lines: usize,
     decos: usize,
     tables: usize,
 }
 
 impl Snapshot {
-    fn take(out: &ComposedStory, cur: &Cursor, list_counter: u32) -> Snapshot {
+    fn take(out: &ComposedStory, cur: &Cursor, list_counter: &ListCounter) -> Snapshot {
         let (lines, decos, tables) = out.frames.get(cur.fi).map_or((0, 0, 0), |f| (f.lines.len(), f.decos.len(), f.tables.len()));
-        Snapshot { cur: cur.clone(), list_counter, lines, decos, tables }
+        Snapshot { cur: cur.clone(), list_counter: list_counter.clone(), lines, decos, tables }
     }
-    fn restore(&self, out: &mut ComposedStory, cur: &mut Cursor, list_counter: &mut u32) {
+    fn restore(&self, out: &mut ComposedStory, cur: &mut Cursor, list_counter: &mut ListCounter) {
         let fi = self.cur.fi;
         for (i, f) in out.frames.iter_mut().enumerate().skip(fi) {
             let (l, d, t) = if i == fi { (self.lines, self.decos, self.tables) } else { (0, 0, 0) };
@@ -1755,7 +1708,7 @@ impl Snapshot {
             f.objects.retain(|o| o.line < l);
         }
         *cur = self.cur.clone();
-        *list_counter = self.list_counter;
+        *list_counter = self.list_counter.clone();
         out.overset_at = None;
     }
 }
@@ -1770,7 +1723,7 @@ fn rewind(
     notes: &mut Notes,
     out: &mut ComposedStory,
     cur: &mut Cursor,
-    list_counter: &mut u32,
+    list_counter: &mut ListCounter,
     force_col: &mut [bool],
     line_cap: &mut [Option<usize>],
 ) {
@@ -3111,6 +3064,43 @@ fn place_drop_cap(dc: &DropCap, at: f64, rtl: bool) -> Vec<PlacedGlyph> {
         x += g.adv;
     }
     out
+}
+
+/// The character attributes of a list label: the paragraph's, under the bullet's or number's
+/// character style, in the bullet font.
+fn label_chars(doc: &Document, pp: &ParaProps, base: &designcraft_doc::CharProps) -> designcraft_doc::CharProps {
+    let bullets = pp.list_type == designcraft_doc::ListType::Bullets;
+    let style = if bullets { &pp.bullet_char_style } else { &pp.number_char_style };
+    let mut cp = if style.is_empty() || style == designcraft_doc::NO_CHAR_STYLE {
+        base.clone()
+    } else {
+        doc.styles.resolve_char(base, &designcraft_doc::CharFormat { style: style.clone(), over: Default::default() })
+    };
+    if bullets && !pp.bullet_font.is_empty() {
+        cp.font_family = pp.bullet_font.clone();
+        if !pp.bullet_font_style.is_empty() {
+            cp.font_style = pp.bullet_font_style.clone();
+        }
+    }
+    cp
+}
+
+/// List alignment on a paragraph's first line: the label's first `n` glyphs (its text before the
+/// tab) are centred on or end at the line start. Text after the label's tab stays at its stop;
+/// without a tab the whole line moves with the label. Returns the line's end x.
+fn align_label(placed: &mut [PlacedGlyph], n: usize, tab: bool, align: ListAlign, end_x: f64) -> f64 {
+    let Some(label) = placed.get(..n).filter(|l| l.iter().all(|g| g.len == 0)) else { return end_x };
+    let w: f64 = label.iter().map(|g| g.adv).sum();
+    let dx = match align {
+        ListAlign::Left => return end_x,
+        ListAlign::Center => -w / 2.0,
+        ListAlign::Right => -w,
+    };
+    let moved = if tab { n } else { placed.len() };
+    for g in placed.iter_mut().take(moved) {
+        g.x += dx;
+    }
+    if tab { end_x } else { end_x + dx }
 }
 
 /// Put generated `label` text before the paragraph's glyphs; returns how many glyphs it added.
