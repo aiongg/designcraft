@@ -18,7 +18,8 @@
 //! app caught (see `gpu::finish`), that entry is cleared. An entry still there at the next start
 //! means the previous start never got that far — the driver crashed, or the app was killed
 //! meanwhile — so that backend joins `failed`, the next candidate is tried and the status bar says
-//! so. Backends a restart left out (`DESIGNCRAFT_GPU_SKIP`, see `gpu`) join `failed` as well. When
+//! so. Backends a restart left out (`--gpu-skip=`, see `gpu`) aren't chosen for that start but
+//! aren't recorded: the restart caught their failure, and a later launch may try them again. When
 //! every candidate has failed the list starts over, and so does a new DesignCraft version (drivers
 //! and wgpu move on). `DESIGNCRAFT_NO_PREFS` records nothing.
 
@@ -61,7 +62,7 @@ impl Backend {
         }
     }
 
-    /// How [`SKIP_ENV`](super::SKIP_ENV) names the whole backend: wgpu's name for it, which also
+    /// How a restart's skip list ([`super::skip_arg`]) names the whole backend: wgpu's name for it, which also
     /// starts each of its adapters' keys (`Dx12:10de:2204`).
     pub fn key(self) -> &'static str {
         match self {
@@ -125,31 +126,32 @@ pub struct Choice {
     pub switched_from: Option<Backend>,
 }
 
-/// The backends [`SKIP_ENV`](super::SKIP_ENV) leaves out: a restart found no adapter of them
-/// that could show the window.
+/// The backends a restart's skip list leaves out ([`super::skip_arg`]): a restart found no adapter
+/// of them that could show the window.
 pub fn skipped_backends(skip: &[String]) -> Vec<Backend> {
     skip.iter().filter_map(|k| Backend::from_key(k)).collect()
 }
 
 /// Pick the backend for this start from the candidates (best first), the previous start's record
-/// and the backends a restart left out (`skipped`); `None` without candidates.
+/// and the backends a restart left out (`skipped`, not recorded); `None` without candidates.
 pub fn choose(candidates: &[Backend], previous: &Record, version: &str, skipped: &[Backend]) -> Option<Choice> {
     let first = *candidates.first()?;
     let same_version = previous.version == version;
     let mut failed: Vec<Backend> = if same_version { previous.failed.clone() } else { Vec::new() };
     let unfinished = previous.trying.filter(|_| same_version);
-    for b in unfinished.iter().chain(skipped) {
-        if !failed.contains(b) {
-            failed.push(*b);
-        }
+    if let Some(b) = unfinished
+        && !failed.contains(&b)
+    {
+        failed.push(b);
     }
     failed.retain(|b| candidates.contains(b));
-    let backend = match candidates.iter().copied().find(|b| !failed.contains(b)) {
+    let pick = |failed: &[Backend]| candidates.iter().copied().find(|b| !failed.contains(b) && !skipped.contains(b));
+    let backend = match pick(&failed) {
         Some(b) => b,
         // Every candidate has failed: start over rather than never starting.
         None => {
             failed.clear();
-            first
+            pick(&failed).unwrap_or(first)
         }
     };
     let switched_from = unfinished.filter(|b| *b != backend);
@@ -259,8 +261,19 @@ impl Fallback {
 
     /// The start got past the point where a driver fault could take the process down: a frame was
     /// presented, the app exited normally, or the graphics failed with an error the app caught.
-    pub fn finished(&mut self) {
-        if self.record.trying.take().is_some() {
+    /// Returns the backend that was being tried, for [`Fallback::retry`].
+    pub fn finished(&mut self) -> Option<Backend> {
+        let trying = self.record.trying.take();
+        if trying.is_some() {
+            self.save();
+        }
+        trying
+    }
+
+    /// Undo [`Fallback::finished`]: the start isn't over after all (starting again failed).
+    pub fn retry(&mut self, trying: Option<Backend>) {
+        if self.record.trying != trying {
+            self.record.trying = trying;
             self.save();
         }
     }
@@ -374,11 +387,11 @@ mod tests {
         assert_eq!(c.record.failed, &[Backend::Vulkan]);
     }
 
-    /// A restart that found no adapter of DirectX 12 names the backend in `DESIGNCRAFT_GPU_SKIP`:
-    /// the next start takes the next candidate even without a record (`DESIGNCRAFT_NO_PREFS`), and
-    /// the record keeps it as failed.
+    /// A restart that found no adapter of DirectX 12 names the backend in its skip list: that start
+    /// takes the next candidate, with or without a record, and the record doesn't keep it as failed
+    /// (a later launch tries it again).
     #[test]
-    fn backends_a_restart_left_out_count_as_failed() {
+    fn backends_a_restart_left_out_are_not_chosen_or_recorded() {
         let skip: Vec<String> = ["Dx12:10de:2204", "Dx12", "Metal:Intel Iris Pro Graphics", "dx12", ""].map(String::from).to_vec();
         assert_eq!(skipped_backends(&skip), [Backend::Dx12]);
         // A backend's key is wgpu's name for it, the prefix of its adapters' keys.
@@ -389,10 +402,12 @@ mod tests {
         }
         let c = choose(WIN, &Record::default(), V, &[Backend::Dx12]).unwrap();
         assert_eq!(c.backend, Backend::Gl);
-        assert_eq!(c.record, record(Some(Backend::Gl), &[Backend::Dx12]));
-        // With the record of the start that restarted (DirectX 12 unfinished), listed once.
-        let c = choose(WIN, &record(Some(Backend::Dx12), &[]), V, &[Backend::Dx12]).unwrap();
-        assert_eq!(c.record, record(Some(Backend::Gl), &[Backend::Dx12]));
+        assert_eq!(c.record, record(Some(Backend::Gl), &[]));
+        let c = choose(WIN, &record(None, &[Backend::Gl]), V, &[Backend::Dx12]).unwrap();
+        assert_eq!(c.record, record(Some(Backend::Vulkan), &[Backend::Gl]));
+        // Every candidate failed or left out: the record starts over, still without the left-out one.
+        let c = choose(WIN, &record(Some(Backend::Vulkan), &[Backend::Gl]), V, &[Backend::Dx12]).unwrap();
+        assert_eq!(c.record, record(Some(Backend::Gl), &[]));
         // A backend that is no candidate here is ignored.
         let c = choose(WIN, &Record::default(), V, &[Backend::Metal]).unwrap();
         assert_eq!(c.backend, Backend::Dx12);
@@ -460,9 +475,14 @@ mod tests {
         // wgpu actually picked OpenGL (the chosen backend had no adapter): blame that one.
         s.started_with(Backend::Gl);
         assert_eq!(read(&path).trying, Some(Backend::Gl));
+        // A restart takes the entry and puts it back when starting again failed.
+        let trying = s.finished();
+        assert_eq!((trying, read(&path)), (Some(Backend::Gl), record(None, &[])));
+        s.retry(trying);
+        assert_eq!(read(&path).trying, Some(Backend::Gl));
         s.finished();
         assert_eq!(read(&path), record(None, &[]));
-        s.finished();
+        assert_eq!(s.finished(), None);
         assert_eq!(read(&path), record(None, &[]));
 
         // The next start after one that never presented: switches, says so, and leaves OpenGL

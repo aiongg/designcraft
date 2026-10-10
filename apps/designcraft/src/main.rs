@@ -34,6 +34,10 @@ struct App {
 
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.startup.enter();
+        if let Some(note) = self.startup.take_notice() {
+            self.app.status(note);
+        }
         // The third call: two frames went through `ui`, so the first was presented and the driver
         // survived it (a fault at the first present is what the fallback in `gpu` is for).
         if self.frames == 2 {
@@ -50,16 +54,19 @@ impl eframe::App for App {
             }
         }
         self.app.logic(ctx);
+        self.startup.leave();
     }
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
         self.app.raw_input_hook(raw);
     }
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.startup.enter();
         self.app.ui(ui);
         #[cfg(target_os = "macos")]
         if self.app.take_ime_discard() {
             discard_marked_text();
         }
+        self.startup.leave();
     }
     fn on_exit(&mut self) {
         // A normal exit before the third frame is not a crash.
@@ -249,6 +256,7 @@ fn main() -> std::process::ExitCode {
     let mut control_port = control_port_from("DESIGNCRAFT_CONTROL_PORT", std::env::var("DESIGNCRAFT_CONTROL_PORT").ok());
     let mut files = Vec::new();
     let mut sample = false;
+    let mut skip = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -258,7 +266,10 @@ fn main() -> std::process::ExitCode {
                 println!("designcraft {}", env!("CARGO_PKG_VERSION"));
                 return std::process::ExitCode::SUCCESS;
             }
-            _ => files.push(a),
+            _ => match gpu::skip_arg(&a) {
+                Some(list) => skip = list,
+                None => files.push(a),
+            },
         }
     }
     // The log file lives under the settings directory; opened after the arguments, so `--version`
@@ -287,14 +298,13 @@ fn main() -> std::process::ExitCode {
     }
     // The graphics backend, decided before the window exists: a driver that faults takes the
     // process down before any Rust code can catch it (see `gpu::backend`).
-    let skip = gpu::skipped();
     let fallback = gpu::backend::Fallback::begin(
         if no_prefs() { None } else { config_dir().map(|d| d.join(gpu::backend::FILE)) },
         env!("CARGO_PKG_VERSION"),
         &gpu::backend::skipped_backends(&skip),
     );
     let instance_backends = fallback.as_ref().map(gpu::backend::Fallback::backends);
-    let startup = std::sync::Arc::new(gpu::Startup::new(fallback));
+    let startup = std::sync::Arc::new(gpu::Startup::new(fallback, skip.clone()));
     // The adapter: the GPU that drives the (primary) display unless `WGPU_POWER_PREF` chooses a
     // kind; a GPU without a monitor reset its driver and took every monitor down. Logged first:
     // the first question in every black-window report.
