@@ -251,3 +251,64 @@ fn named_lists_round_trip_through_idml() {
     assert_eq!(st.paras[0].para.list_name.as_deref(), Some("Steps"));
     assert_eq!(st.paras[0].para.start_at, Some(Some(5)));
 }
+
+/// IDML says which page of a placed PDF shows and which box its graphic spans, so InDesign opens
+/// it at the same size and position; importing it back gives the same page and geometry.
+#[test]
+fn placed_pdf_page_and_crop_round_trip_through_idml() {
+    let mut s = Session::new();
+    s.execute("file.new", &json!({"pages": 2})).unwrap();
+    s.execute("layout.documentSetup", &json!({"bleed": 9})).unwrap();
+    let b64 = s.execute("file.exportPdf", &json!({"bleed": true})).unwrap()["base64"].as_str().unwrap().to_string();
+    let mut t = Session::new();
+    t.execute("file.new", &json!({})).unwrap();
+    // Page 2, cropped to its trim box: the frame is smaller than the page with its bleed.
+    let place = json!({"base64": b64, "name": "a.pdf", "pdfPage": 2, "pdfCrop": "trim", "width": 315, "x": 20, "y": 30});
+    let r = t.execute("file.place", &place).unwrap();
+    let d = t.doc().unwrap().doc.clone();
+    let item = d.item(ItemId(r["id"].as_u64().unwrap())).unwrap();
+    let (bounds, g) = (item.bounds(), item.graphic().unwrap().clone());
+    assert_eq!(d.assets[&g.asset].page, 1);
+
+    let bytes = designcraft_idml::export_idml(&d);
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes.as_slice())).unwrap();
+    let mut spreads = String::new();
+    for i in 0..zip.len() {
+        let mut f = zip.by_index(i).unwrap();
+        if f.name().starts_with("Spreads/") {
+            std::io::Read::read_to_string(&mut f, &mut spreads).unwrap();
+        }
+    }
+    let attr = spreads.split("<PDFAttribute ").nth(1).and_then(|a| a.split("/>").next()).expect("a PDFAttribute");
+    assert!(attr.contains(r#"PageNumber="2""#) && attr.contains(r#"PDFCrop="CropPDF""#), "{attr}");
+
+    let back = designcraft_idml::import_idml(&bytes).unwrap();
+    let bi = back.spreads.iter().flat_map(|sp| sp.items.iter()).find(|i| i.graphic().is_some()).unwrap();
+    let bg = bi.graphic().unwrap();
+    assert_eq!(back.assets[&bg.asset].page, 1);
+    let bb = bi.bounds();
+    assert!([bb.x0 - bounds.x0, bb.y0 - bounds.y0, bb.x1 - bounds.x1, bb.y1 - bounds.y1].iter().all(|v| v.abs() < 1e-3), "{bb:?} vs {bounds:?}");
+    assert!((bg.size.0 - g.size.0).abs() < 1e-3 && (bg.size.1 - g.size.1).abs() < 1e-3);
+    let (a, b) = ((bi.xf * bg.xf).as_coeffs(), (item.xf * g.xf).as_coeffs());
+    assert!(a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-3), "{a:?} vs {b:?}");
+
+    // A page the PDF doesn't have imports, and the PDF export leaves it out with a warning.
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes.as_slice())).unwrap();
+    let mut out = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    for i in 0..zip.len() {
+        let mut f = zip.by_index(i).unwrap();
+        let mut body = String::new();
+        std::io::Read::read_to_string(&mut f, &mut body).unwrap();
+        out.start_file(f.name(), zip::write::SimpleFileOptions::default()).unwrap();
+        std::io::Write::write_all(&mut out, body.replace(r#"PageNumber="2""#, r#"PageNumber="4294967295""#).as_bytes()).unwrap();
+    }
+    let hostile = designcraft_idml::import_idml(&out.finish().unwrap().into_inner()).unwrap();
+    assert_eq!(hostile.assets.values().map(|a| a.page).collect::<Vec<_>>(), [u32::MAX - 1]);
+    t.edit(|doc, _| {
+        *doc = hostile;
+        Ok(())
+    })
+    .unwrap();
+    let r = t.execute("file.exportPdf", &json!({})).unwrap();
+    assert!(r["warnings"].to_string().contains("has no page 4294967295"), "{r}");
+}

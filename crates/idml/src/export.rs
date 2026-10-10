@@ -1802,6 +1802,17 @@ impl<'a> Ex<'a> {
                 .attr("ImportPolicy", "NoAutoImport")
                 .attr("ExportPolicy", "NoAutoExport"),
         );
+        if is_pdf {
+            // The graphic spans the page's crop box (the page as it shows): InDesign's "Crop to:
+            // Crop". Without `PDFAttribute` InDesign crops the page to its visible content, which
+            // changes the graphic's size and so its scale and position.
+            el.push(
+                El::new("PDFAttribute")
+                    .attr("PageNumber", asset.page.saturating_add(1))
+                    .attr("PDFCrop", "CropPDF")
+                    .attr("TransparentBackground", "true"),
+            );
+        }
         el
     }
 

@@ -2220,7 +2220,8 @@ impl<'r> Importer<'r> {
             uri.as_deref().and_then(|p| p.rsplit(['/', '\\']).next()).filter(|n| !n.is_empty()).map(str::to_string).unwrap_or_else(|| "image".into());
         let id = AssetId(self.alloc());
         let link_path = uri.filter(|p| p.contains('/') || p.contains('\\'));
-        self.assets.insert(id, Arc::new(Asset { page: 0, id, name, mime, link: link_path, data: Arc::new(data), pixels }));
+        let page = pdf_page_in(g);
+        self.assets.insert(id, Arc::new(Asset { page, id, name, mime, link: link_path, data: Arc::new(data), pixels }));
         Content::Graphic(designcraft_doc::Graphic {
             asset: id,
             size,
@@ -2529,6 +2530,11 @@ fn path_of(pg: &El) -> PathData {
         }
     }
     PathData::new(subs)
+}
+
+/// The page a placed PDF shows (0-based), from its `PDFAttribute` (`PageNumber` is 1-based).
+fn pdf_page_in(g: &El) -> u32 {
+    g.find("PDFAttribute").and_then(|a| a.get("PageNumber")).and_then(|v| v.trim().parse::<u32>().ok()).map_or(0, |n| n.saturating_sub(1))
 }
 
 /// IDML link URI → file system path (`file:/a%20b` → `/a b`, `file:///C:/x` → `C:/x`).

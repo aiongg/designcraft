@@ -35,6 +35,9 @@
 //! - Mixed inks, gradient stop opacity and gradient feathers, effects other than drop shadow and
 //!   basic feather, EPS/PDF/AI placed graphics (imported as images when the data is available),
 //!   clipping paths, compound-path fill rules.
+//! - Placed PDFs: the page (`PDFAttribute` `PageNumber`) round-trips and export writes
+//!   `PDFCrop="CropPDF"`, the box DesignCraft draws. On import, a `PDFCrop` naming another box
+//!   (trim, bleed, media, content) is not mapped: the page's crop box fills `GraphicBounds`.
 //! - Unknown elements are ignored; nothing is preserved opaquely for round-trip yet.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
