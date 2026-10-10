@@ -1882,42 +1882,6 @@ fn forward_to_text_field(app: &mut DesignApp, ctx: &egui::Context, id: &str) -> 
     true
 }
 
-/// [`egui::Ui::menu_button`] for every DesignCraft menu: a menu taller than the window scrolls
-/// with the mouse wheel inside the larger of the spaces below and above its button, as native
-/// menus do. Shorter menus are unchanged.
-pub fn menu_button<'a, R>(
-    ui: &mut egui::Ui,
-    atoms: impl egui::IntoAtoms<'a>,
-    add_contents: impl FnOnce(&mut egui::Ui) -> R,
-) -> egui::InnerResponse<Option<R>> {
-    // The button's rect from the last frame: a menu only opens on a button that was shown.
-    let button = ui.ctx().read_response(ui.next_auto_id()).map(|r| r.rect);
-    let max_height = menu_max_height(ui, button);
-    ui.menu_button(atoms, |ui| {
-        let mut scroll = egui::ScrollArea::vertical().max_height(max_height).auto_shrink([true, true]);
-        if ui.is_sizing_pass() {
-            // A menu that just opened starts at its top.
-            scroll = scroll.vertical_scroll_offset(0.0);
-        }
-        scroll.show(ui, add_contents).inner
-    })
-}
-
-/// The tallest a menu's contents may be. It depends only on the button and the window (never on
-/// where the popup ended up), so the popup's placement cannot oscillate between frames.
-fn menu_max_height(ui: &egui::Ui, button: Option<egui::Rect>) -> f32 {
-    let screen = ui.ctx().content_rect();
-    let space = match button {
-        // Submenus open beside their item, going down from its top or up from its bottom.
-        Some(r) if egui::containers::menu::is_in_menu(ui) => (screen.bottom() - r.top()).max(r.bottom() - screen.top()),
-        Some(r) => (screen.bottom() - r.bottom()).max(r.top() - screen.top()),
-        None => screen.height(),
-    };
-    // The popup's frame and a small gap to the window edge.
-    let chrome = egui::Frame::menu(ui.style()).total_margin().sum().y + 8.0;
-    (space - chrome).max(ui.spacing().interact_size.y)
-}
-
 /// The menu bar contents (inside the app bar; macOS uses the native menu instead).
 pub fn menu_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
     let lang = app.ui.language.clone();
@@ -1926,7 +1890,7 @@ pub fn menu_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
         menus.reverse();
     }
     for (menu, entries) in menus {
-        menu_button(ui, crate::rtl::widget(ui, crate::i18n::tr(&lang, menu)), |ui| {
+        ui.menu_button(crate::rtl::widget(ui, crate::i18n::tr(&lang, menu)), |ui| {
             if crate::i18n::is_rtl(&lang) {
                 ui.set_max_width(320.0);
             }
@@ -1960,7 +1924,7 @@ fn menu_items(app: &mut DesignApp, ui: &mut egui::Ui, items: &[Item], path: &str
             Item::Sub(name, children) => {
                 let sub = format!("{path}/{name}");
                 let shown = crate::i18n::tr(&app.ui.language, name).to_owned();
-                menu_button(ui, crate::rtl::widget(ui, shown), |ui| {
+                ui.menu_button(crate::rtl::widget(ui, shown), |ui| {
                     hidden += menu_items(app, ui, children, &sub);
                 });
             }
@@ -3028,54 +2992,5 @@ mod tests {
         run_ui(&mut app, "window.hideMenuItem", &json!({"item": key, "hidden": false})).unwrap().unwrap();
         assert!(app.ui.hidden_menu_items.is_empty());
         assert!(items.len() > 100, "every menu's items are listed: {}", items.len());
-    }
-
-    #[test]
-    fn menu_taller_than_the_window_scrolls() {
-        // Issue #267: at a large UI scale the menus ran off the bottom of the window.
-        let ctx = egui::Context::default();
-        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 300.0));
-        let last = std::cell::Cell::new(None::<egui::Rect>);
-        let button = std::cell::Cell::new(None::<egui::Response>);
-        let frame = |t: f64, events: Vec<egui::Event>| {
-            let input = egui::RawInput { screen_rect: Some(screen), time: Some(t), events, ..Default::default() };
-            let mut out = ctx.run_ui(input, |ui| {
-                let r = menu_button(ui, "Long", |ui| {
-                    for i in 0..60 {
-                        let r = ui.button(format!("Item {i}"));
-                        if i == 59 {
-                            last.set(Some(r.rect));
-                        }
-                    }
-                });
-                button.set(Some(r.response));
-            });
-            out.textures_delta.clear();
-        };
-        frame(0.0, vec![]);
-        let b = button.take().unwrap();
-        let p = b.rect.center();
-        let click = |pressed| egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
-        frame(0.1, vec![egui::Event::PointerMoved(p), click(true)]);
-        frame(0.2, vec![click(false)]);
-        frame(0.3, vec![]);
-        frame(0.4, vec![]);
-        let popup = ctx.memory(|m| m.area_rect(egui::Popup::default_response_id(&b))).unwrap();
-        assert!(popup.top() >= b.rect.bottom() - 1.0, "the menu opens below its button: {popup:?}");
-        assert!(popup.bottom() <= screen.bottom(), "the menu fits in the window: {popup:?}");
-        assert!(last.get().unwrap().top() > screen.bottom(), "the last item starts out of view");
-        let inside = egui::pos2(popup.center().x, popup.bottom() - 20.0);
-        let wheel = egui::Event::MouseWheel {
-            unit: egui::MouseWheelUnit::Point,
-            delta: egui::vec2(0.0, -5000.0),
-            phase: egui::TouchPhase::Move,
-            modifiers: Default::default(),
-        };
-        frame(0.5, vec![egui::Event::PointerMoved(inside), wheel]);
-        for i in 0..30 {
-            frame(0.6 + f64::from(i) * 0.1, vec![]);
-        }
-        let l = last.get().unwrap();
-        assert!(popup.contains_rect(l), "the wheel scrolls the last item into view: {l:?} in {popup:?}");
     }
 }
