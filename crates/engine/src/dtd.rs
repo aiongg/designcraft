@@ -97,12 +97,19 @@ fn tokens(s: &str) -> Vec<String> {
     out
 }
 
-/// Parse a content particle from `t[*i..]`.
-fn particle(t: &[String], i: &mut usize) -> Result<Cp, String> {
+/// How deeply groups may nest in a content model; parsing, matching (`ends`) and printing (`show`)
+/// recurse once per level.
+const MAX_CONTENT_MODEL_DEPTH: usize = 64;
+
+/// Parse a content particle from `t[*i..]`, inside `depth` enclosing groups.
+fn particle(t: &[String], i: &mut usize, depth: usize) -> Result<Cp, String> {
     let base = match t.get(*i).map(String::as_str) {
         Some("(") => {
+            if depth >= MAX_CONTENT_MODEL_DEPTH {
+                return Err(format!("content model nested more than {MAX_CONTENT_MODEL_DEPTH} levels"));
+            }
             *i += 1;
-            let mut items = vec![particle(t, i)?];
+            let mut items = vec![particle(t, i, depth + 1)?];
             let mut sep = None;
             loop {
                 match t.get(*i).map(String::as_str) {
@@ -116,7 +123,7 @@ fn particle(t: &[String], i: &mut usize) -> Result<Cp, String> {
                         }
                         sep = Some(if s == "," { "," } else { "|" });
                         *i += 1;
-                        items.push(particle(t, i)?);
+                        items.push(particle(t, i, depth + 1)?);
                     }
                     other => return Err(format!("unexpected `{}` in a content model", other.unwrap_or("end"))),
                 }
@@ -151,11 +158,66 @@ fn parse_model(s: &str) -> Result<Model, String> {
     }
     let t = tokens(s);
     let mut i = 0;
-    let cp = particle(&t, &mut i)?;
+    let cp = particle(&t, &mut i, 0)?;
     if i != t.len() {
         return Err(format!("unexpected `{}` after the content model", t[i]));
     }
     Ok(Model::Children(cp))
+}
+
+const MAX_PARAMETER_ENTITY_EXPANSION: usize = 16 * 1024 * 1024;
+/// How deeply parameter entities may nest: a reference in the DTD is level 1, a reference in its
+/// value level 2, and so on.
+const MAX_PARAMETER_ENTITY_DEPTH: usize = 64;
+
+/// Expand `%name;` references, one level per round, until a round changes nothing.
+fn expand_parameter_entities(src: &str, ents: &[(String, String)]) -> Result<String, String> {
+    let mut entities = HashMap::new();
+    for (name, value) in ents {
+        entities.entry(name.as_str()).or_insert(value.as_str());
+    }
+    let limit = MAX_PARAMETER_ENTITY_EXPANSION.max(src.len());
+    let append = |out: &mut String, value: &str| -> Result<(), String> {
+        if value.len() > limit.saturating_sub(out.len()) {
+            return Err(format!("parameter entities expand to more than {limit} bytes"));
+        }
+        out.push_str(value);
+        Ok(())
+    };
+    let too_deep = || format!("parameter entities refer to themselves or nest deeper than {MAX_PARAMETER_ENTITY_DEPTH} levels");
+    let mut text = src.to_string();
+    // The round after the deepest level changes nothing, hence one more round than levels.
+    for _ in 0..=MAX_PARAMETER_ENTITY_DEPTH {
+        let mut out = String::with_capacity(text.len());
+        let mut rest = text.as_str();
+        let mut changed = false;
+        while let Some(i) = rest.find('%') {
+            let (prefix, reference) = rest.split_at(i);
+            append(&mut out, prefix)?;
+            // `find` points to an ASCII `%`, so both split positions are UTF-8 boundaries.
+            rest = reference.split_at(1).1;
+            // A name can't contain `%`: stopping at the next one keeps a round linear in the text.
+            if let Some(end) = rest.bytes().take(256).take_while(|&b| b != b'%').position(|b| b == b';')
+                && let Some(value) = rest.get(..end).and_then(|name| entities.get(name))
+            {
+                // A value that is its own reference (`<!ENTITY % a "%a;">`) never gets anywhere.
+                if reference.get(..end + 2) == Some(*value) {
+                    return Err(too_deep());
+                }
+                append(&mut out, value)?;
+                changed = true;
+                rest = rest.split_at(end + 1).1;
+                continue;
+            }
+            append(&mut out, "%")?;
+        }
+        append(&mut out, rest)?;
+        text = out;
+        if !changed {
+            return Ok(text);
+        }
+    }
+    Err(too_deep())
 }
 
 /// Parse a DTD (its element and attribute-list declarations; parameter entities are expanded).
@@ -176,16 +238,7 @@ pub fn parse(src: &str) -> Result<Dtd, String> {
             }
         }
     }
-    let mut text = src.to_string();
-    for _ in 0..8 {
-        let before = text.clone();
-        for (n, v) in &ents {
-            text = text.replace(&format!("%{n};"), v);
-        }
-        if text == before {
-            break;
-        }
-    }
+    let text = expand_parameter_entities(src, &ents)?;
     let mut dtd = Dtd::default();
     for d in declarations(&text) {
         if let Some(rest) = d.strip_prefix("ELEMENT") {
@@ -257,7 +310,13 @@ fn ends(cp: &Cp, seq: &[&str], i: usize) -> Vec<usize> {
                 vec![]
             }
         }
-        Cp::Seq(items) => items.iter().fold(vec![i], |at, c| at.into_iter().flat_map(|p| ends(c, seq, p)).collect()),
+        // Keep the positions after each item a set: as a list of every path, `(a?, a?, …)` doubles per item.
+        Cp::Seq(items) => items.iter().fold(vec![i], |at, c| {
+            let mut next: Vec<usize> = at.into_iter().flat_map(|p| ends(c, seq, p)).collect();
+            next.sort_unstable();
+            next.dedup();
+            next
+        }),
         Cp::Choice(items) => items.iter().flat_map(|c| ends(c, seq, i)).collect(),
         Cp::Rep(c, r) => {
             let mut all = if *r == '+' { vec![] } else { vec![i] };
@@ -269,6 +328,9 @@ fn ends(cp: &Cp, seq: &[&str], i: usize) -> Vec<usize> {
                     let new: Vec<usize> = frontier.iter().copied().filter(|p| !all.contains(p)).collect();
                     all.extend(&new);
                     frontier = new.into_iter().filter(|&p| p > i).flat_map(|p| ends(c, seq, p)).filter(|p| !all.contains(p)).collect();
+                    // Two paths to one position are one position: kept apart they multiply per round.
+                    frontier.sort_unstable();
+                    frontier.dedup();
                 }
             }
             all
@@ -448,5 +510,155 @@ mod tests {
         ] {
             assert_eq!(validate(&dtd, xml).is_empty(), ok, "{xml}");
         }
+    }
+
+    #[test]
+    fn parameter_entity_bomb_is_rejected() {
+        let mut src = String::new();
+        for i in (0..10).rev() {
+            let value = if i == 0 { "x".to_string() } else { format!("%e{};", i - 1).repeat(8) };
+            src.push_str(&format!("<!ENTITY % e{i} \"{value}\">\n"));
+        }
+        src.push_str("<!ELEMENT root (%e9;)>");
+        match parse(&src) {
+            Err(error) => assert!(error.contains("parameter entities expand"), "{error}"),
+            Ok(_) => panic!("parameter entity expansion bomb was accepted"),
+        }
+    }
+
+    /// `n` parameter entities, `e{i}` referring to `e{i-1}` and `e0` being `x`, declared in ascending
+    /// or descending order, and an element `root` whose model uses the last one.
+    fn entity_chain(n: usize, ascending: bool) -> String {
+        let mut order: Vec<usize> = (0..n).collect();
+        if !ascending {
+            order.reverse();
+        }
+        let mut src = String::new();
+        for i in order {
+            let value = if i == 0 { "x".to_string() } else { format!("%e{};", i - 1) };
+            src.push_str(&format!("<!ENTITY % e{i} \"{value}\">\n"));
+        }
+        src.push_str(&format!("<!ELEMENT root (%e{};)><!ELEMENT x EMPTY>", n - 1));
+        src
+    }
+
+    #[test]
+    fn parameter_entity_reverse_chain_expands_completely() {
+        let dtd = parse(&entity_chain(20, false)).unwrap();
+        assert_eq!(validate(&dtd, "<root><x/></root>"), vec![]);
+    }
+
+    #[test]
+    fn parameter_entity_ascending_chain_expands_completely() {
+        // With `e0` declared first, replacing the entities in declaration order resolves one level per pass.
+        let dtd = parse(&entity_chain(20, true)).unwrap();
+        assert_eq!(validate(&dtd, "<root><x/></root>"), vec![]);
+    }
+
+    #[test]
+    fn parameter_entity_cycle_is_refused() {
+        // Two entities that refer to each other, and one whose value is its own reference.
+        for src in ["<!ENTITY % a \"%b;\"><!ENTITY % b \"%a;\"><!ELEMENT root (%a;)>", "<!ENTITY % a \"%a;\"><!ELEMENT root (%a;)>"] {
+            match parse(src) {
+                Err(error) => assert!(error.contains("refer to themselves"), "{src}: {error}"),
+                Ok(dtd) => panic!("a cycle was accepted ({src}): {:?}", dtd.model("root")),
+            }
+        }
+    }
+
+    #[test]
+    fn parameter_entity_chain_deeper_than_the_limit_is_refused() {
+        for ascending in [true, false] {
+            for n in [65, 70] {
+                match parse(&entity_chain(n, ascending)) {
+                    Err(error) => assert!(error.contains("deeper than 64 levels"), "{n}, {ascending}: {error}"),
+                    Ok(dtd) => panic!("a chain of {n} ({ascending}) was accepted: {:?}", dtd.model("root")),
+                }
+            }
+            let dtd = parse(&entity_chain(64, ascending)).unwrap();
+            assert_eq!(validate(&dtd, "<root><x/></root>"), vec![], "{ascending}");
+        }
+    }
+
+    #[test]
+    fn parameter_entity_name_scan_stops_at_the_next_percent() {
+        // A name never contains `%`, so the search for the closing `;` stops at the next one: the
+        // searches of a run of `%` don't overlap and a round stays linear. (Looking past the next
+        // `%` would expand this reference to an entity that is named `a%b`.)
+        let entities = [("a%b".to_string(), "X".to_string())];
+        assert_eq!(expand_parameter_entities("%a%b;", &entities), Ok("%a%b;".to_string()));
+        // A run of `%` around a real reference still finds it.
+        let entities = [("model".to_string(), "EMPTY".to_string())];
+        assert_eq!(expand_parameter_entities("%%%model;%%", &entities), Ok("%%EMPTY%%".to_string()));
+    }
+
+    #[test]
+    fn repetition_of_a_sequence_of_optional_elements_validates() {
+        // `(a, a?, a?, a?, a?, a?)*` over 90 children: every way to split the children among the
+        // repetitions reaches the same positions, and the paths used to be kept apart in each round.
+        let dtd = parse("<!ELEMENT r (a, a?, a?, a?, a?, a?)*><!ELEMENT a EMPTY><!ELEMENT b EMPTY>").unwrap();
+        assert_eq!(validate(&dtd, &format!("<r>{}</r>", "<a/>".repeat(90))), vec![]);
+        let problems = validate(&dtd, &format!("<r>{}<b/></r>", "<a/>".repeat(90)));
+        assert_eq!(problems.len(), 1, "{problems:?}");
+    }
+
+    #[test]
+    fn parameter_entity_first_declaration_wins() {
+        let dtd = parse("<!ENTITY % model \"EMPTY\"><!ENTITY % model \"ANY\"><!ELEMENT root %model;>").unwrap();
+        assert_eq!(dtd.model("root"), Some(&Model::Empty));
+    }
+
+    #[test]
+    fn parameter_entity_unknown_and_lone_percent_are_preserved() {
+        let src = "%nothing; <!ELEMENT root EMPTY> %";
+        let dtd = parse(src).unwrap();
+        assert_eq!(dtd.model("root"), Some(&Model::Empty));
+        assert_eq!(expand_parameter_entities("%nothing; %", &[]), Ok("%nothing; %".to_string()));
+    }
+
+    #[test]
+    fn parameter_entity_many_flat_declarations_parse() {
+        let mut src = String::new();
+        for i in 0..5000 {
+            src.push_str(&format!("<!ENTITY % e{i} \"x\">\n"));
+        }
+        src.push_str("<!ELEMENT root (%e0;, %e2499;, %e4999;)><!ELEMENT x EMPTY>");
+        let dtd = parse(&src).unwrap();
+        assert_eq!(validate(&dtd, "<root><x/><x/><x/></root>"), vec![]);
+    }
+
+    /// An element `root` whose content model is `a` inside `depth` nested groups.
+    fn nested_model(depth: usize) -> String {
+        format!("<!ELEMENT root {}a{}><!ELEMENT a EMPTY>", "(".repeat(depth), ")".repeat(depth))
+    }
+
+    #[test]
+    fn content_model_nested_100000_deep_is_refused() {
+        // One recursion per `(` overflowed the stack: an abort, not a panic.
+        match parse(&nested_model(100_000)) {
+            Err(error) => assert!(error.contains("nested more than 64 levels"), "{error}"),
+            Ok(_) => panic!("a content model nested 100000 deep was accepted"),
+        }
+    }
+
+    #[test]
+    fn content_model_nesting_limit() {
+        let dtd = parse(&nested_model(64)).unwrap();
+        assert_eq!(validate(&dtd, "<root><a/></root>"), vec![]);
+        assert_eq!(validate(&dtd, "<root/>").len(), 1);
+        match parse(&nested_model(65)) {
+            Err(error) => assert_eq!(error, "<!ELEMENT root>: content model nested more than 64 levels"),
+            Ok(_) => panic!("a content model nested 65 deep was accepted"),
+        }
+    }
+
+    #[test]
+    fn sequence_of_40_optional_elements_validates() {
+        // Keeping every path through the sequence meant 2^40 positions here.
+        let dtd = parse(&format!("<!ELEMENT r ({})><!ELEMENT a EMPTY>", ["a?"; 40].join(", "))).unwrap();
+        assert_eq!(validate(&dtd, &format!("<r>{}</r>", "<a/>".repeat(40))), vec![]);
+        let problems = validate(&dtd, &format!("<r>{}</r>", "<a/>".repeat(41)));
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(problems[0].message.starts_with("`r` contains a, a, a"), "{problems:?}");
     }
 }
