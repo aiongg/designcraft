@@ -1036,6 +1036,13 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
             last_end = ft.range.end;
         }
     }
+    // Column rules, once vertical justification has put the lines in place.
+    for (ft, f) in out.frames.iter_mut().zip(frames) {
+        if f.opts.column_rule {
+            let rects = column_rule_rects(&ft.columns, &ft.lines, f.opts.column_rule_weight);
+            ft.decos.extend(rects.into_iter().map(|rect| Deco { rect, color: f.opts.column_rule_color.clone(), tint: 1.0 }));
+        }
+    }
     out.styles = styles_tab;
     mark_keep_violations(doc, story, &mut out);
     out
@@ -1130,6 +1137,63 @@ fn para_box_decos(out: &mut ComposedStory, pi: usize, pp: &ParaProps) {
             }
         }
     }
+}
+
+/// Thickest column rule drawn (points).
+const MAX_COLUMN_RULE_WEIGHT: f64 = 1000.0;
+
+/// Text Frame Options › Column Rules: one bar per gutter, `weight` wide and centred between the
+/// facing edges of the two columns, from the columns' top to their bottom (the text area, inside
+/// the insets). Works in the composed space, so right-to-left and vertical frames (whose columns
+/// are laid out in the turned box) get their rules between the columns too.
+///
+/// A paragraph that spans columns interrupts the rule: the bar stops at the top of its first line
+/// and resumes below its last line. Nothing is drawn for a single column or a weight that is not a
+/// positive finite number.
+pub fn column_rule_rects(columns: &[Rect], lines: &[Line], weight: f64) -> Vec<Rect> {
+    if !weight.is_finite() || weight <= 0.0 || columns.len() < 2 {
+        return Vec::new();
+    }
+    let half = weight.min(MAX_COLUMN_RULE_WEIGHT) / 2.0;
+    let mut cols: Vec<Rect> =
+        columns.iter().copied().filter(|c| c.x0.is_finite() && c.x1.is_finite() && c.y0.is_finite() && c.y1.is_finite()).collect();
+    cols.sort_by(|a, b| a.x0.total_cmp(&b.x0));
+    let mut out = Vec::new();
+    for pair in cols.windows(2) {
+        let [a, b] = [pair[0], pair[1]];
+        let cx = (a.x1 + b.x0) / 2.0;
+        let (top, bottom) = (a.y0.max(b.y0), a.y1.min(b.y1));
+        if bottom <= top {
+            continue;
+        }
+        // Vertical bands of the paragraphs whose lines cross this gutter.
+        let mut spans: Vec<(usize, f64, f64)> = Vec::new();
+        for l in lines.iter().filter(|l| l.x0 < cx && l.x1 > cx) {
+            let (t, z) = (l.baseline - l.ascent, l.baseline + l.descent);
+            match spans.iter_mut().find(|s| s.0 == l.para) {
+                Some(s) => {
+                    s.1 = s.1.min(t);
+                    s.2 = s.2.max(z);
+                }
+                None => spans.push((l.para, t, z)),
+            }
+        }
+        spans.sort_by(|p, q| p.1.total_cmp(&q.1));
+        let mut y = top;
+        for (_, t, z) in spans {
+            if t > y {
+                out.push(Rect::new(cx - half, y, cx + half, t.min(bottom)));
+            }
+            y = y.max(z);
+            if y >= bottom {
+                break;
+            }
+        }
+        if y < bottom {
+            out.push(Rect::new(cx - half, y, cx + half, bottom));
+        }
+    }
+    out
 }
 
 /// Breaker parameters from the paragraph's settings.

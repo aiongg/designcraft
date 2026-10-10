@@ -41,6 +41,11 @@ fn item_json(it: &Item) -> Value {
         Content::Text(t) => {
             v["story"] = json!(t.story.0);
             v["columns"] = json!(t.options.columns);
+            v["columnRule"] = json!(t.options.column_rule);
+            if t.options.column_rule {
+                v["columnRuleWeight"] = json!(t.options.column_rule_weight);
+                v["columnRuleColor"] = json!(t.options.column_rule_color);
+            }
         }
         Content::Graphic(g) => v["asset"] = json!(g.asset.0),
         Content::Group { items } => v["children"] = Value::Array(items.iter().map(|c| item_json(c)).collect()),
