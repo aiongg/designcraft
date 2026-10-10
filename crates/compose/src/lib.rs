@@ -1144,7 +1144,7 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                 // Wrap: push the line down to the first position with a slot (back on the grid).
                 let (mut x0, mut x1) = (col.x0, col.x1);
                 if !f.exclusions.is_empty() {
-                    let jump = cur.jump(f, lead, asc, tops);
+                    let jump = cur.jump(f, advance, asc, tops);
                     let mut tries = 0;
                     loop {
                         let Some((nb, (a, z))) = wrap_slot(f, col, baseline, asc, desc, jump, base_size) else {
