@@ -1950,3 +1950,20 @@ fn complete_uniform_native_style_fields_keep_legacy_identity_on_idml_roundtrip()
     assert_eq!(table.border.as_ref(), Some(&stroke));
     assert!(table.borders.iter().all(designcraft_doc::CellStrokeAttrs::is_empty));
 }
+
+#[test]
+fn split_columns_import_and_round_trip() {
+    let story = r#"<idPkg:Story xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging"><Story Self="s1">
+      <ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/$ID/[No paragraph style]" SpanColumnType="SplitColumns" SplitColumnInsideGutter="27" SplitColumnOutsideGutter="4.5">
+        <Properties><SpanSplitColumnCount type="short">3</SpanSplitColumnCount></Properties>
+        <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]"><Content>Split list</Content></CharacterStyleRange>
+      </ParagraphStyleRange></Story></idPkg:Story>"#;
+    let doc = import_idml(&fixture_with_story(story)).unwrap();
+    let para = |d: &Document| d.stories.values().find(|s| s.text.contains("Split list")).unwrap().paras[0].para.clone();
+    let a = para(&doc);
+    assert_eq!(a.span_columns, Some(designcraft_doc::SpanColumns::Split(3)));
+    assert_eq!(a.split_inside_gutter, Some(27.0));
+    assert_eq!(a.split_outside_gutter, Some(4.5));
+    let b = para(&import_idml(&export_idml(&doc)).unwrap());
+    assert_eq!((b.span_columns, b.split_inside_gutter, b.split_outside_gutter), (a.span_columns, a.split_inside_gutter, a.split_outside_gutter));
+}

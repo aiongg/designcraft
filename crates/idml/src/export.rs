@@ -1429,6 +1429,8 @@ impl<'a> Ex<'a> {
                 }
             }
         }
+        n!(split_inside_gutter, "SplitColumnInsideGutter");
+        n!(split_outside_gutter, "SplitColumnOutsideGutter");
         if let Some(r) = &a.rule_above {
             self.rule(el, props, "RuleAbove", r);
         }
