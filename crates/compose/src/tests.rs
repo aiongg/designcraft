@@ -4054,3 +4054,59 @@ fn mojikumi_justification_after_a_tab_keeps_the_text_before_it() {
         assert!((x_of(l, byte) - x_of(r, byte)).abs() < 1e-6, "byte {byte} before the tab moved: {} vs {}", x_of(l, byte), x_of(r, byte));
     }
 }
+
+#[test]
+fn list_first_line_wraps_at_the_column_edge_after_its_label() {
+    use designcraft_doc::{ListType, TabStop};
+    // A hanging indent (left 18, first line −18): the label sits at the column start, a tab
+    // after it reaches the left indent (an implicit stop when no explicit stop comes first), and
+    // the first line wraps at the same right edge as the others.
+    let right_edge = |l: &Line, source: &str| {
+        let space = |g: &&PlacedGlyph| g.len > 0 && source.get(g.byte..).and_then(|s| s.chars().next()).is_some_and(char::is_whitespace);
+        l.glyphs.iter().filter(|g| g.visible && !space(g)).map(|g| g.x + g.adv).fold(0.0, f64::max)
+    };
+    let text_start = |l: &Line| l.glyphs.iter().find(|g| g.len > 0 && g.visible).map_or(f64::NAN, |g| g.x);
+    let stop = |position: f64| TabStop { position, align: TabAlign::Left, leader: String::new(), align_on: String::new() };
+    let text = format!("{LOREM}\n{LOREM}");
+    // (list, separator, explicit tab stops, where line 0's text starts past the column start:
+    // None = right after the label, wherever that is).
+    let cases = [
+        (ListType::Bullets, "\t", None, Some(18.0)),
+        (ListType::Numbers, "\t", None, Some(18.0)),
+        (ListType::Numbers, "\t", Some(vec![stop(12.0)]), Some(12.0)),
+        (ListType::Numbers, "\t", Some(vec![stop(30.0)]), Some(18.0)),
+        (ListType::Bullets, " ", None, None),
+        (ListType::Numbers, "\u{2003}", None, None),
+    ];
+    for (list, sep, tabs, first_at) in cases {
+        let para = ParaAttrs {
+            list_type: Some(list),
+            list_separator: Some(sep.into()),
+            left_indent: Some(18.0),
+            first_line_indent: Some(-18.0),
+            tabs: tabs.clone(),
+            ..Default::default()
+        };
+        let (d, sid, _) = doc_with(&text, Rect::new(36.0, 36.0, 300.0, 400.0), para);
+        let cs = compose_story(&d, sid, &ComposeOptions::default());
+        let col = cs.frames[0].columns[0];
+        let lines = &cs.frames[0].lines;
+        let what = format!("{list:?} {sep:?} {tabs:?}");
+        assert!(lines.len() >= 6, "{what}: {} lines", lines.len());
+        for (i, l) in lines.iter().enumerate() {
+            let right = right_edge(l, &text);
+            assert!(right <= col.x1 + 0.01, "{what}: line {i} ends at {right}, past the column's {}", col.x1);
+            let start = text_start(l) - col.x0;
+            if !l.first_in_para {
+                assert!((start - 18.0).abs() < 0.01, "{what}: line {i} text starts at {start}, not the left indent");
+            } else if let Some(at) = first_at {
+                assert!((start - at).abs() < 0.01, "{what}: line {i} text starts at {start}, not {at}");
+            } else {
+                assert!(start > 0.0, "{what}: line {i} text starts at {start}");
+            }
+            if l.first_in_para {
+                assert!(l.glyphs.first().is_some_and(|g| g.len == 0 && (g.x - col.x0).abs() < 0.01), "{what}: the label leads line {i}");
+            }
+        }
+    }
+}

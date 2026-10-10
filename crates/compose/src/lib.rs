@@ -703,7 +703,7 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                 let breaks = if pp.composer == Composer::SingleLine || gl.iter().any(|g| g.ch == '\t') || gl.len() > 4000 {
                     let tab = |j: usize, x: f64, i: usize| {
                         let ind = pp.left_indent + if j == 0 { pp.first_line_indent } else { 0.0 };
-                        tab_advance(&pp.tabs, ind + x, gl.get(i + 1..).unwrap_or_default()).0
+                        tab_advance(&pp.tabs, pp.left_indent, ind + x, gl.get(i + 1..).unwrap_or_default()).0
                     };
                     breaker::greedy(&gl, &hy, &spacing, &width, &tab)
                 } else if pp.balance_ragged && !spacing.justify {
@@ -943,7 +943,7 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                             _ if line_no + j == 0 => pp.first_line_indent,
                             _ => 0.0,
                         };
-                    tab_advance(&pp.tabs, x0 + ind + x - col.x0, rest.get(i + 1..).unwrap_or_default()).0
+                    tab_advance(&pp.tabs, pp.left_indent, x0 + ind + x - col.x0, rest.get(i + 1..).unwrap_or_default()).0
                 };
                 breaker::greedy(rest, rest_h, &spacing, &width, &tab)
             } else if pp.balance_ragged && !spacing.justify {
@@ -2188,13 +2188,18 @@ pub fn hj_severity(ratio: f64, min: f64, max: f64) -> u8 {
     }
 }
 
-/// Advance of a tab that starts `abs` from the tab origin and is followed by `after`, and the tab
-/// stop it reaches (none: the next default stop, left aligned). Right, centre and character
-/// alignment look at the text up to the next tab or forced break.
-fn tab_advance<'a>(tabs: &'a [designcraft_doc::TabStop], abs: f64, after: &[Glyph]) -> (f64, Option<&'a designcraft_doc::TabStop>) {
-    let stop = tabs.iter().find(|t| t.position > abs + 0.01);
+/// Advance of a tab that starts `abs` from the tab origin and is followed by `after`, and the
+/// explicit tab stop it reaches (none: the left indent or the next default stop, left aligned).
+/// Right, centre and character alignment look at the text up to the next tab or forced break.
+///
+/// The left indent is a left stop of its own: in a hanging indent, the tab after a bullet or
+/// number reaches it unless an explicit stop comes first.
+fn tab_advance<'a>(tabs: &'a [designcraft_doc::TabStop], left_indent: f64, abs: f64, after: &[Glyph]) -> (f64, Option<&'a designcraft_doc::TabStop>) {
+    let indent_ahead = left_indent > abs + 0.01;
+    let stop = tabs.iter().find(|t| t.position > abs + 0.01).filter(|t| !indent_ahead || t.position <= left_indent);
     let (pos, align) = match stop {
         Some(t) => (t.position, t.align),
+        None if indent_ahead => (left_indent, TabAlign::Left),
         None => (((abs / DEFAULT_TAB).floor() + 1.0) * DEFAULT_TAB, TabAlign::Left),
     };
     let seg = after.iter().take_while(|g| g.ch != '\t' && !breaker::is_forced(g.ch));
@@ -2253,7 +2258,7 @@ fn layout_line(
     let mut last_tab: Option<(usize, bool)> = None;
     while i < line.len() {
         if line[i].ch == '\t' {
-            let (w, stop) = tab_advance(&pp.tabs, x0 + x - tab_origin, line.get(i + 1..).unwrap_or_default());
+            let (w, stop) = tab_advance(&pp.tabs, pp.left_indent, x0 + x - tab_origin, line.get(i + 1..).unwrap_or_default());
             if let Some(t) = stop
                 && !t.leader.is_empty()
             {
