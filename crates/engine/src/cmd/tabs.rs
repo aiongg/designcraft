@@ -245,7 +245,8 @@ struct Measure {
     width: f64,
 }
 
-/// The stops and indents of the first selected paragraph, or of style `style`.
+/// The stops ([`TabStop::sanitized_list`]) and indents of the first selected paragraph, or of
+/// style `style`.
 fn current(s: &Session, style: Option<&str>, c: &str) -> Result<(Vec<TabStop>, Measure)> {
     let st = s.doc()?;
     let props = match style {
@@ -263,8 +264,8 @@ fn current(s: &Session, style: Option<&str>, c: &str) -> Result<(Vec<TabStop>, M
         }
     };
     let width = if style.is_none() { column_of(s).map(|(_, r)| r.width()) } else { None }.unwrap_or_else(|| page_column_width(s));
-    let mut tabs = props.tabs;
-    sort(&mut tabs);
+    // A list that never went through the checks (one set by code) reads as a file's would.
+    let tabs = TabStop::sanitized_list(props.tabs);
     Ok((tabs, Measure { left_indent: props.left_indent, first_line_indent: props.first_line_indent, right_indent: props.right_indent, width }))
 }
 
