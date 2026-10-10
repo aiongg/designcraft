@@ -806,6 +806,8 @@ fn typo_ascent(f: &skrifa::FontRef<'_>, location: &Location, upem: f64) -> Optio
         v += mvar.metric_delta(skrifa::raw::tables::mvar::tags::HASC, location.coords()).map_or(0.0, |d| d.to_f64());
     }
     plausible(Some(v), upem)
+}
+
 /// `family` without what layout apps add to a family name, if it has any: InDesign's `$ID/`
 /// prefix (`$ID/Arial` → `Arial`) and the font-format suffix appended when a family is installed
 /// in several formats (`Minion Pro (OTF)` → `Minion Pro`).
