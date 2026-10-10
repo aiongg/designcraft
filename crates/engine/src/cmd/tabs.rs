@@ -312,6 +312,7 @@ fn get(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// Apply `op` to the current stops and write the list to the selected paragraphs or the style.
+/// Returns the list as stored ([`TabStop::checked_list`]) and the index of `op`'s stop in it.
 fn edit(
     s: &mut Session,
     p: &Value,
@@ -321,6 +322,10 @@ fn edit(
     let style = str_param(p, "style").map(str::to_string);
     let (mut tabs, m) = current(s, style.as_deref(), c)?;
     let index = op(&mut tabs, m).map_err(|e| bad(c, e))?;
+    let at = index.and_then(|i| tabs.get(i)).map(|t| t.position);
+    let tabs = TabStop::checked_list(tabs).map_err(|e| bad(c, e))?;
+    // Checking can drop stops that share a position, which moves the indices after them.
+    let index = at.and_then(|x| tabs.iter().position(|t| (t.position - x).abs() < SAME));
     let list = serde_json::to_value(&tabs).map_err(|e| bad(c, e.to_string()))?;
     match style {
         Some(name) => s.edit(|d, _| {
@@ -445,6 +450,26 @@ mod tests {
         let tabs = d.styles.para("Old").unwrap().para.tabs.clone().unwrap();
         let at: Vec<(f64, TabAlign, &str)> = tabs.iter().map(|t| (t.position, t.align, t.align_on.as_str())).collect();
         assert_eq!(at, [(50.0, TabAlign::Char, "."), (72.001, TabAlign::Right, ""), (120.0, TabAlign::Left, "")]);
+    }
+
+    /// A command returns the list as it stores it, though the list it started from was never
+    /// checked.
+    #[test]
+    fn tab_commands_return_the_stored_list() {
+        let (mut s, _) = session("x");
+        s.execute("style.paragraph.create", &json!({"name": "Old"})).unwrap();
+        let stop = |position, align| TabStop { position, align, leader: String::new(), align_on: String::new() };
+        s.edit(|d, _| {
+            let st = d.styles_mut().para_mut("Old").unwrap();
+            st.para.tabs = Some(vec![stop(50.0, TabAlign::Char), stop(72.0, TabAlign::Left), stop(72.001, TabAlign::Right)]);
+            Ok(())
+        })
+        .unwrap();
+        let out = s.execute("type.tabs.add", &json!({"style": "Old", "position": 120})).unwrap();
+        let d = s.doc().unwrap().doc.clone();
+        let stored = d.styles.para("Old").unwrap().para.tabs.clone().unwrap();
+        assert_eq!(out["tabs"], serde_json::to_value(&stored).unwrap());
+        assert_eq!(out["index"], 2, "the added stop, in the stored list");
     }
 
     /// `type.para` and the paragraph style commands take a whole `tabs` list; it gets the checks
