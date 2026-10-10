@@ -3015,6 +3015,65 @@ const TABLE: &[(&str, [&str; 5])] = &[
     ),
     ("Book Name:", ["Buchname:", "Nom du livre :", "Nombre del libro:", "ブック名:", "书籍名称："]),
     ("N/A", ["–", "S.O.", "N/D", "なし", "不适用"]),
+    // Paragraph Style Options: Paragraph Border, Paragraph Shading, Keep Options, Span Columns, Bullets and Numbering.
+    ("Paragraph Border", ["Absatzrahmen", "Contour de paragraphe", "Borde de párrafo", "段落囲み罫", "段落边框"]),
+    ("Paragraph Shading", ["Absatzschattierung", "Ombrage de paragraphe", "Sombreado de párrafo", "段落の背景色", "段落底纹"]),
+    ("Keep Options", ["Umbruchoptionen", "Options d'enchaînement", "Opciones de separación", "段落分離禁止オプション", "保持选项"]),
+    ("Span Columns", ["Spalten überspannen", "Étendre sur les colonnes", "Abarcar columnas", "段抜きと段分割", "跨栏"]),
+    ("Top:", ["Oben:", "Haut:", "Arriba:", "上:", "上："]),
+    ("Left:", ["Links:", "Gauche:", "Izquierda:", "左:", "左："]),
+    ("Bottom:", ["Unten:", "Bas:", "Abajo:", "下:", "下："]),
+    ("Right:", ["Rechts:", "Droite:", "Derecha:", "右:", "右："]),
+    ("Keep with Next:", ["Nicht trennen von nächsten:", "Lier aux suivantes:", "Conservar con siguientes:", "次の段落と分離禁止:", "与下一段保持："]),
+    ("Keep Lines Together", ["Zeilen nicht trennen", "Lignes solidaires", "Conservar líneas juntas", "行を分離しない", "保持各行同页"]),
+    (
+        "All Lines in Paragraph",
+        ["Alle Zeilen im Absatz", "Toutes les lignes du paragraphe", "Todas las líneas del párrafo", "段落のすべての行", "段落中所有行"],
+    ),
+    (
+        "At Start/End of Paragraph",
+        ["Am Anfang/Ende des Absatzes", "Au début/à la fin du paragraphe", "Al inicio/final del párrafo", "段落の始めと終わり", "在段落开头/结尾"],
+    ),
+    ("End:", ["Ende:", "Fin:", "Final:", "終了位置:", "结束："]),
+    ("Start Paragraph:", ["Absatzbeginn:", "Début de paragraphe:", "Inicio de párrafo:", "段落の開始位置:", "段落开始："]),
+    ("Anywhere", ["Überall", "N'importe où", "En cualquier lugar", "任意の位置", "任意位置"]),
+    ("In Next Column", ["In nächster Spalte", "Dans la colonne suivante", "En la siguiente columna", "次の段", "于下一栏"]),
+    ("In Next Frame", ["In nächstem Rahmen", "Dans le bloc suivant", "En el siguiente marco", "次のフレーム", "于下一框架"]),
+    ("On Next Page", ["Auf nächster Seite", "Sur la page suivante", "En la página siguiente", "次のページ", "于下一页"]),
+    (
+        "On Next Odd Page",
+        ["Auf nächster ungerader Seite", "Sur la page impaire suivante", "En la siguiente página impar", "次の奇数ページ", "于下一奇数页"],
+    ),
+    (
+        "On Next Even Page",
+        ["Auf nächster gerader Seite", "Sur la page paire suivante", "En la siguiente página par", "次の偶数ページ", "于下一偶数页"],
+    ),
+    ("Paragraph Layout:", ["Absatzlayout:", "Disposition du paragraphe:", "Diseño de párrafo:", "段落レイアウト:", "段落版面："]),
+    ("Single Column", ["Eine Spalte", "Colonne simple", "Una columna", "単一段", "单栏"]),
+    ("Split Column", ["Spalte unterteilen", "Diviser la colonne", "Dividir columna", "段分割", "拆分栏"]),
+    ("Columns:", ["Spalten:", "Colonnes:", "Columnas:", "段:", "栏数："]),
+    ("All", ["Alle", "Toutes", "Todas", "すべて", "全部"]),
+    ("Inside Gutter:", ["Innerer Spaltenabstand:", "Gouttière intérieure:", "Medianil interior:", "内側の間隔:", "内栏间距："]),
+    ("Outside Gutter:", ["Äußerer Spaltenabstand:", "Gouttière extérieure:", "Medianil exterior:", "外側の間隔:", "外栏间距："]),
+    ("List Type:", ["Listentyp:", "Type de liste:", "Tipo de lista:", "リストタイプ:", "列表类型："]),
+    ("Bullets", ["Aufzählungszeichen", "Puces", "Viñetas", "箇条書き記号", "项目符号"]),
+    ("Numbers", ["Nummerierung", "Numéros", "Números", "自動番号", "编号"]),
+    ("Bullet Character:", ["Aufzählungszeichen:", "Caractère de puce:", "Carácter de viñeta:", "箇条書き記号:", "项目符号字符："]),
+    ("Text After:", ["Text danach:", "Texte après:", "Texto después:", "後続テキスト:", "后续文本："]),
+    ("List:", ["Liste:", "Liste:", "Lista:", "リスト:", "列表："]),
+    ("Number:", ["Zahl:", "Numéro:", "Número:", "番号:", "编号："]),
+    ("Mode:", ["Modus:", "Mode:", "Modo:", "モード:", "模式："]),
+    (
+        "Continue from Previous Number",
+        [
+            "Ab vorheriger Zahl fortfahren",
+            "Continuer à partir du numéro précédent",
+            "Continuar desde el número anterior",
+            "前の番号から継続",
+            "从上一编号继续",
+        ],
+    ),
+    ("Start At", ["Beginnen bei", "Commencer à", "Empezar en", "開始番号", "起始编号"]),
 ];
 
 /// Interface direction; independent of document binding and paragraph direction.
@@ -3080,6 +3139,9 @@ pub fn tr<'a>(lang: &str, s: &'a str) -> &'a str {
 pub fn tr_context<'a>(lang: &str, s: &'a str, context: &str) -> &'a str {
     if lang == "uk" {
         return uk::CONTEXT.iter().find(|(key, scope, _)| *key == s && *scope == context).map_or_else(|| tr(lang, s), |(_, _, text)| text);
+    }
+    if lang == "ja" {
+        return ja::CONTEXT.iter().find(|(key, scope, _)| *key == s && *scope == context).map_or_else(|| tr(lang, s), |(_, _, text)| text);
     }
     tr(lang, s)
 }
@@ -3213,6 +3275,8 @@ mod tests {
         assert_eq!(tr_context("uk", "Group", "selection"), "Група");
         assert_eq!(tr("uk", "Group"), "Згрупувати");
         assert_eq!(tr_context("", "Columns", "table"), "Columns");
+        assert_eq!(tr_context("ja", "Span Columns", "paragraphLayout"), "段抜き");
+        assert_eq!(tr("ja", "Span Columns"), "段抜きと段分割");
         assert_eq!(tr_context("uk", "Custom caption", "custom"), "Custom caption");
         assert_eq!(tr("uk", "through"), "включно");
         assert_eq!(tr("uk", "up to"), "не включно");
