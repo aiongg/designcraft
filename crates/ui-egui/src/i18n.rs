@@ -2307,7 +2307,7 @@ const TABLE: &[(&str, [&str; 5])] = &[
     ("Baseline Shift:", ["Baseline Shift:", "Baseline Shift:", "Baseline Shift:", "Baseline Shift:", "基线偏移："]),
     ("Skew:", ["Skew:", "Skew:", "Skew:", "Skew:", "倾斜："]),
     ("Language:", ["Language:", "Language:", "Language:", "Language:", "语言："]),
-    ("Tint:", ["Tint:", "Tint:", "Tint:", "Tint:", "色调："]),
+    ("Tint:", ["Farbton:", "Teinte:", "Matiz:", "濃淡:", "色调："]),
     ("Figure Style:", ["Figure Style:", "Figure Style:", "Figure Style:", "Figure Style:", "数字样式："]),
     ("Underline On", ["Underline On", "Underline On", "Underline On", "Underline On", "启用下划线"]),
     ("Strikethrough On", ["Strikethrough On", "Strikethrough On", "Strikethrough On", "Strikethrough On", "启用删除线"]),
@@ -2787,7 +2787,6 @@ const TABLE: &[(&str, [&str; 5])] = &[
     ("Paragraph Rules…", ["Absatzlinien …", "Filets de paragraphe…", "Filetes de párrafo…", "段落境界線…", "段落线…"]),
     ("Paragraph Rules", ["Absatzlinien", "Filets de paragraphe", "Filetes de párrafo", "段落境界線", "段落线"]),
     ("Rule Below", ["Linie unterhalb", "Filet après", "Filete después", "後境界線", "下方横线"]),
-    ("Tint:", ["Farbton:", "Teinte:", "Matiz:", "濃淡:", "色调："]),
     ("Column", ["Spalte", "Colonne", "Columna", "段", "栏"]),
 ];
 
