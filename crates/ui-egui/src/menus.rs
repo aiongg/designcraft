@@ -1785,8 +1785,6 @@ pub fn menu_enabled(app: &DesignApp, id: &str) -> bool {
     enabled(app, id)
 }
 
-/// A menu item was chosen. An engine command whose label ends in "…" and that takes parameters
-/// opens a dialog built from its parameter documentation (see [`crate::dialogs::command_fields`]).
 /// Close document `index` (the active one when `None`) the way the user asks for it: with the
 /// tab's ×, File ▸ Close or its shortcut. A document with unsaved changes asks first, because
 /// closing also discards its recovery data. Scripts and agents use `file.close`, which never asks.
@@ -1802,6 +1800,8 @@ pub fn close_document(app: &mut DesignApp, index: Option<usize>) {
     }
 }
 
+/// A menu item was chosen. An engine command whose label ends in "…" and that takes parameters
+/// opens a dialog built from its parameter documentation (see [`crate::dialogs::command_fields`]).
 pub fn activate(app: &mut DesignApp, id: &str, params: &Value) {
     if params.is_null() && id == "file.close" {
         close_document(app, None);

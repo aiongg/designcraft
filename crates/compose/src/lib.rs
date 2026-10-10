@@ -2491,7 +2491,8 @@ fn layout_line(
                 leaders.push((i, t.leader.clone()));
             }
             line[i].adv = w;
-            last_tab = Some((i, stop.is_none_or(|t| t.align == TabAlign::Left)));
+            // A default tab stop is a left tab.
+            last_tab = Some((i, stop.as_ref().is_none_or(|t| t.align == TabAlign::Left)));
         } else if line[i].ch == story::RIGHT_INDENT_TAB {
             let rest: f64 = line[i + 1..].iter().map(|g| g.adv).sum();
             line[i].adv = (measure - x - rest).max(0.0);
