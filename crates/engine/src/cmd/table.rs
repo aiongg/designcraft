@@ -1504,9 +1504,9 @@ mod style_tests {
         s.execute("text.select", &json!({"story": sid, "anchor": 0, "focus": 0})).unwrap();
         s.execute("table.insert", &json!({"rows": 3, "cols": 2, "headerRows": 1})).unwrap();
         s.execute("style.paragraph.create", &json!({"name": "Cell Head"})).unwrap();
-        s.execute("style.cell.create", &json!({"name": "Head", "fill": "Black", "paragraphStyle": "Cell Head", "insets": 6})).unwrap();
+        s.execute("style.cell.create", &json!({"name": "Head", "fill": "[Black]", "paragraphStyle": "Cell Head", "insets": 6})).unwrap();
         s.execute("style.cell.create", &json!({"name": "Body", "fill": "[Paper]"})).unwrap();
-        s.execute("style.table.create", &json!({"name": "Data", "header": "Head", "body": "Body", "border": {"weight": 2, "color": "Black"}}))
+        s.execute("style.table.create", &json!({"name": "Data", "header": "Head", "body": "Body", "border": {"weight": 2, "color": "[Black]"}}))
             .unwrap();
         s.execute("style.table.apply", &json!({"name": "Data"})).unwrap();
         let t = |s: &Session| -> designcraft_doc::Table {
@@ -1517,7 +1517,7 @@ mod style_tests {
         assert_eq!(tb.style, "Data");
         assert_eq!(tb.options.border.weight, 2.0);
         let head = tb.cell(0, 0).unwrap();
-        assert_eq!((head.fill.as_str(), head.style.as_str(), head.insets), ("Black", "Head", [6.0; 4]));
+        assert_eq!((head.fill.as_str(), head.style.as_str(), head.insets), ("[Black]", "Head", [6.0; 4]));
         assert_eq!(head.text.paras[0].style, "Cell Head");
         assert_eq!(tb.cell(1, 1).unwrap().style, "Body");
         // Editing the cell style updates its cells.
