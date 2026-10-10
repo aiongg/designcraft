@@ -111,11 +111,10 @@ fn strip(story: &mut Story) {
 fn fit(d: &Document, sid: StoryId) -> (Option<usize>, usize, usize) {
     let cs = designcraft_compose::compose_story(d, sid, &Default::default());
     let text = d.story(sid).map_or("", |s| s.text.as_str());
-    let is_break = |c: char| matches!(c, designcraft_doc::COLUMN_BREAK | designcraft_doc::FRAME_BREAK | designcraft_doc::PAGE_BREAK);
     let (mut held, mut full) = (0, 0);
     for f in &cs.frames {
         let Some(shown) = text.get(f.range.clone()) else { continue };
-        if !shown.is_empty() && !shown.chars().any(is_break) {
+        if !shown.is_empty() && !shown.chars().any(designcraft_doc::is_break_char) {
             held += shown.len();
             full += 1;
         }
@@ -290,6 +289,29 @@ mod tests {
             assert_eq!(d.story(StoryId(r["story"].as_u64().unwrap())).unwrap().frames.len(), pages, "{name}");
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn autoflow_adds_the_pages_odd_and_even_page_breaks_ask_for() {
+        // From page 1, an odd page break needs pages 2 and 3 (2 stays empty), an even one page 2.
+        // A frame such a break ends early holds few characters; taken for a full frame, it made
+        // autoflow add a page per few characters left.
+        use designcraft_doc::{EVEN_PAGE_BREAK, ODD_PAGE_BREAK, build::NewDocument};
+        for (brk, added) in [(ODD_PAGE_BREAK, 2), (EVEN_PAGE_BREAK, 1)] {
+            let mut d = Document::new(&NewDocument { pages: 1, facing_pages: false, primary_text_frame: true, ..Default::default() });
+            let sid = d.settings.primary_story.unwrap();
+            d.story_mut(sid).unwrap().insert(
+                0,
+                &format!(
+                    "a{brk}
+{}",
+                    "word ".repeat(200)
+                ),
+            );
+            assert_eq!(autoflow(&mut d, sid, 50).unwrap(), added, "{brk:?}");
+            assert_eq!(d.page_count(), added + 1, "{brk:?}");
+            assert_eq!(designcraft_compose::compose_story(&d, sid, &Default::default()).overset_at, None, "{brk:?}");
+        }
     }
 }
 
