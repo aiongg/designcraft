@@ -94,7 +94,15 @@ pub fn specs() -> Vec<CommandSpec> {
                         Some(Some((bytes, name, link, px))) => {
                             let fresh = AssetId(d.alloc());
                             let mime = designcraft_render::image_mime(&bytes).to_string();
-                            Some(Some(d.add_asset(Asset { id: fresh, name, mime, link, data: Arc::new(bytes), pixels: Some(px), ..Default::default() })))
+                            Some(Some(d.add_asset(Asset {
+                                id: fresh,
+                                name,
+                                mime,
+                                link,
+                                data: Arc::new(bytes),
+                                pixels: Some(px),
+                                ..Default::default()
+                            })))
                         }
                         Some(None) => Some(None),
                         None => None,

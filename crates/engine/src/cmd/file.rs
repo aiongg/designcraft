@@ -572,7 +572,15 @@ fn place_load(s: &mut Session, p: &Value) -> Result<Value> {
     let aid = s.edit(|d, _| {
         let fresh = AssetId(d.alloc());
         let mime = designcraft_render::image_mime(&bytes).to_string();
-        Ok(d.add_asset(Asset { id: fresh, name: name.clone(), mime, link: link.clone(), data: Arc::new(bytes), pixels: Some((pw, ph)), ..Default::default() }))
+        Ok(d.add_asset(Asset {
+            id: fresh,
+            name: name.clone(),
+            mime,
+            link: link.clone(),
+            data: Arc::new(bytes),
+            pixels: Some((pw, ph)),
+            ..Default::default()
+        }))
     })?;
     s.loaded = Some((aid, (pw as f64, ph as f64)));
     s.set_tool("placeGun");

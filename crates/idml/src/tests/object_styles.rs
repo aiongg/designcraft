@@ -212,7 +212,10 @@ fn feathers_come_from_the_object_style_unless_its_category_turns_them_off() {
         &[
             (r#"AppliedObjectStyle="ObjectStyle/Fade""#, ""),
             (r#"AppliedObjectStyle="ObjectStyle/NoGradient""#, ""),
-            (r#"AppliedObjectStyle="ObjectStyle/Fade""#, r#"<TransparencySetting><DirectionalFeatherSetting Applied="false"/></TransparencySetting>"#),
+            (
+                r#"AppliedObjectStyle="ObjectStyle/Fade""#,
+                r#"<TransparencySetting><DirectionalFeatherSetting Applied="false"/></TransparencySetting>"#,
+            ),
         ],
     );
     let fx: Vec<&designcraft_doc::Effects> = d.spreads[0].items.iter().map(|i| &i.effects).collect();

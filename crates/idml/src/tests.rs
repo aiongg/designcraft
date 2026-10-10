@@ -9,10 +9,10 @@ use super::*;
 
 mod assets;
 mod decorations;
+mod object_styles;
 mod rtl_binding;
 mod variables;
 mod wrap;
-mod object_styles;
 
 fn zip_files(files: &[(&str, &str)]) -> Vec<u8> {
     use zip::write::SimpleFileOptions;

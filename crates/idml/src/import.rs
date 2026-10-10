@@ -2606,7 +2606,8 @@ impl<'r> Importer<'r> {
             None => (0.0, 0.0, 0.0, 0.0),
         };
         let size = ((r - l).abs(), (b - t).abs());
-        let wrap = if g.get("AppliedObjectStyle").is_some() { self.with_style(g, "TextWrapPreference") } else { g.find("TextWrapPreference").cloned() };
+        let wrap =
+            if g.get("AppliedObjectStyle").is_some() { self.with_style(g, "TextWrapPreference") } else { g.find("TextWrapPreference").cloned() };
         let wrap = wrap.map(|w| text_wrap(&w)).unwrap_or_default();
         let link = g.find("Link");
         let uri = link.and_then(|k| k.get("LinkResourceURI")).map(uri_to_path);
