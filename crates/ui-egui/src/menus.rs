@@ -38,7 +38,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
         "app.language",
         "Interface Language",
         None,
-        "{lang: \"\"|de|fr|es|ja|zh|ar|pt-br} — menus and panel names (the macOS menu bar follows on the next launch)",
+        "{lang: \"\"|de|fr|es|ja|zh|ar|pt-br|uk} — menus and panel names (the macOS menu bar follows on the next launch)",
     ),
     (
         "app.flattener",
@@ -129,6 +129,13 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("window.split", "Split Window", None, "{on?: bool} — two views of the document side by side, each with its own zoom and scroll"),
     ("window.newWindow", "New Window", None, "{on?: bool} — another view of the active document in its own window"),
     ("window.taskBar", "Contextual Task Bar", None, "{}"),
+    (
+        "window.taskBarPin",
+        "Pin Bar Position",
+        None,
+        "{on?: bool, at?: [x, y] (points from the canvas's top-left)} — the Contextual Task Bar stays where it is (or at `at`) instead of following the selection; with neither, toggles",
+    ),
+    ("window.taskBarReset", "Reset Bar Position", None, "{} — the Contextual Task Bar follows the selection again, under it"),
     ("help.discord", "Join the ArtCraft Discord…", None, "{} — opens https://discord.gg/artcraft in the browser"),
     ("help.appPage", "DesignCraft Website…", None, "{} — opens https://getartcraft.com/apps/designcraft"),
     ("help.github", "DesignCraft on GitHub…", None, "{} — opens https://github.com/storytold/designcraft"),
@@ -234,6 +241,7 @@ pub const MENUS: &[(&str, &[&str])] = &[
             "ui:app.language|简体中文|{\"lang\": \"zh\"}",
             "ui:app.language|العربية|{\"lang\": \"ar\"}",
             "ui:app.language|Português (Brasil)|{\"lang\": \"pt-br\"}",
+            "ui:app.language|Українська|{\"lang\": \"uk\"}",
             "<",
             ">Transparency Flattener Presets",
             "ui:app.flattener|None (keep transparency)|{\"preset\": \"\"}",
@@ -576,6 +584,7 @@ pub const MENUS: &[(&str, &[&str])] = &[
             "cmd:table.splitHorizontally",
             "cmd:table.splitVertically",
             "cmd:table.distributeColumns",
+            "cmd:table.distributeRows",
             "-",
             "ui:app.tablePanel",
         ],
@@ -849,8 +858,9 @@ pub fn run_ui(app: &mut DesignApp, id: &str, p: &Value) -> Option<Result<Value, 
                     None => Ok(Value::Null),
                 });
             }
+            let request = app.import_request("swatches");
             if let Some(open) = app.services.open_async.as_mut() {
-                open("swatches");
+                open(request);
             }
             Ok(Value::Null)
         }
@@ -1284,6 +1294,26 @@ pub fn run_ui(app: &mut DesignApp, id: &str, p: &Value) -> Option<Result<Value, 
             Ok(json!(app.second_window))
         }
         "window.taskBar" => flag(&mut app.ui.task_bar),
+        "window.taskBarPin" => {
+            let at = match p.get("at") {
+                None | Some(Value::Null) => None,
+                Some(v) => match v.as_array().map(|a| a.iter().map(Value::as_f64).collect::<Vec<_>>()).as_deref() {
+                    Some([Some(x), Some(y)]) if x.is_finite() && y.is_finite() => Some([x.clamp(-1e6, 1e6) as f32, y.clamp(-1e6, 1e6) as f32]),
+                    _ => return Some(Err("window.taskBarPin: `at` is [x, y] in points".into())),
+                },
+            };
+            let on = p.get("on").and_then(Value::as_bool).unwrap_or(at.is_some() || app.ui.task_bar_pin.is_none());
+            app.ui.task_bar_pin = match (on, at.or(app.ui.task_bar_pin).or(app.ui.task_bar_at)) {
+                (false, _) => None,
+                (true, Some(at)) => Some(at),
+                (true, None) => return Some(Err("window.taskBarPin: the Contextual Task Bar isn't showing; give `at`".into())),
+            };
+            Ok(json!(app.ui.task_bar_pin))
+        }
+        "window.taskBarReset" => {
+            app.ui.task_bar_pin = None;
+            Ok(Value::Null)
+        }
         "help.about" => {
             if let Some(tab) = p.get("tab").and_then(Value::as_str) {
                 let Some(i) = crate::about::ABOUT_TABS.iter().position(|t| t.eq_ignore_ascii_case(tab)) else {
@@ -1318,6 +1348,7 @@ pub fn run_ui(app: &mut DesignApp, id: &str, p: &Value) -> Option<Result<Value, 
                 name: name.to_string(),
                 control_bar: u.control_bar,
                 task_bar: u.task_bar,
+                task_bar_pin: u.task_bar_pin,
                 tools_double_column: u.tools_double_column,
                 dock_tab: u.dock_tab.clone(),
                 dock_expanded: u.dock_expanded,
@@ -1350,6 +1381,7 @@ pub fn run_ui(app: &mut DesignApp, id: &str, p: &Value) -> Option<Result<Value, 
             if let Some(w) = app.ui.custom_workspaces.iter().find(|w| w.name == name).cloned() {
                 app.ui.control_bar = w.control_bar;
                 app.ui.task_bar = w.task_bar;
+                app.ui.task_bar_pin = w.task_bar_pin;
                 app.ui.tools_double_column = w.tools_double_column;
                 app.ui.dock_tab = w.dock_tab;
                 app.ui.dock_expanded = w.dock_expanded;
@@ -1701,6 +1733,7 @@ pub fn checked(app: &DesignApp, id: &str, params: &Value) -> Option<bool> {
         "app.language" => app.ui.language == params.get("lang").and_then(Value::as_str).unwrap_or(""),
         "app.flattener" => app.ui.flattener == params.get("preset").and_then(Value::as_str).unwrap_or(""),
         "window.taskBar" => app.ui.task_bar,
+        "window.taskBarPin" => app.ui.task_bar_pin.is_some(),
         "window.toolsDoubleColumn" => app.ui.tools_double_column,
         "view.togglePreview" => app.ui.screen_mode == crate::ScreenMode::Preview,
         "window.brightness" => params.get("brightness").and_then(Value::as_str) == Some(app.ui.brightness.id()),
@@ -1739,6 +1772,20 @@ pub fn activate(app: &mut DesignApp, id: &str, params: &Value) {
     if params.is_null() && id == "object.textFrameOptions" {
         app.ui.dialog = Some(crate::dialogs::Dialog::new("textFrameOptions", json!({})));
         return;
+    }
+    // New Paragraph/Character Style…: the style options for the new style.
+    if params.is_null() && matches!(id, "style.paragraph.create" | "style.character.create") {
+        crate::dialogs::open_new_style(app, id == "style.paragraph.create");
+        return;
+    }
+    // Paragraph/Character Style Options…: those of the selected text's style.
+    if params.is_null() && matches!(id, "style.paragraph.edit" | "style.character.edit") {
+        let para = id == "style.paragraph.edit";
+        let cur = crate::panels::text_attrs(app).and_then(|a| a[if para { "paragraphStyle" } else { "characterStyle" }].as_str().map(str::to_string));
+        if let Some(name) = cur {
+            crate::dialogs::open_style_options(app, para, &name);
+            return;
+        }
     }
     if params.is_null()
         && ui_label(id).is_none()
@@ -1803,7 +1850,7 @@ pub fn menu_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
             if crate::i18n::is_rtl(&lang) {
                 ui.set_max_width(320.0);
             }
-            ui.with_layout(egui::Layout::top_down(if crate::i18n::is_rtl(&lang) { egui::Align::Max } else { egui::Align::Min }), |ui| {
+            ui.with_layout(egui::Layout::top_down_justified(if crate::i18n::is_rtl(&lang) { egui::Align::Max } else { egui::Align::Min }), |ui| {
                 ui.set_min_width(240.0);
                 let hidden = menu_items(app, ui, &entries, menu);
                 if hidden > 0 && !app.ui.show_full_menus {
@@ -2206,6 +2253,30 @@ mod tests {
     }
 
     #[test]
+    fn ukrainian_language_is_selectable_persisted_and_keeps_document_data() {
+        let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"pages": 4, "facingPages": true})).unwrap();
+        app.run("frame.create", json!({"rect": [36, 36, 200, 200], "content": "text", "text": "My words · Мої слова"})).unwrap();
+        let before = serde_json::to_value(&app.session.doc().unwrap().doc).unwrap();
+        run_ui(&mut app, "app.language", &json!({"lang": "uk"})).unwrap().unwrap();
+        assert_eq!(checked(&app, "app.language", &json!({"lang": "uk"})), Some(true));
+        assert_eq!(before, serde_json::to_value(&app.session.doc().unwrap().doc).unwrap());
+        for (title, _) in menu_tree() {
+            assert_ne!(crate::i18n::tr("uk", title), title, "{title}");
+        }
+        let bytes = serde_json::to_vec(&app.ui).unwrap();
+        let restored: crate::UiState = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(restored.language, "uk");
+        assert_eq!(crate::i18n::tr(&restored.language, "File"), "Файл");
+        assert_eq!(crate::i18n::tr(&restored.language, "A custom name"), "A custom name");
+        assert!(menu_tree().iter().flat_map(|(_, entries)| entries.iter()).any(|entry| {
+            matches!(entry, Item::Sub(label, children) if label == "Interface Language" && children.iter().any(|child| {
+                matches!(child, Item::Cmd { label, id, params, .. } if label == "Українська" && id == "app.language" && params["lang"] == "uk")
+            }))
+        }));
+    }
+
+    #[test]
     fn arabic_dialog_and_language_switch_keep_finite_widget_geometry() {
         let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
         let ctx = egui::Context::default();
@@ -2232,7 +2303,7 @@ mod tests {
         crate::dialogs::confirm(&mut app).unwrap();
         frame(&mut app);
         assert_eq!(app.session.documents().len(), 1);
-        for lang in ["zh", "", "ar", "pt-br"] {
+        for lang in ["uk", "zh", "", "ar", "pt-br"] {
             app.run("app.language", json!({"lang": lang})).unwrap();
             frame(&mut app);
         }
@@ -2706,12 +2777,32 @@ mod tests {
     }
 
     #[test]
+    fn distribute_rows_menu_dispatches_an_undoable_edit() {
+        let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({})).unwrap();
+        let frame = app.run("frame.create", json!({"rect": [72, 72, 500, 700], "content": "text", "text": ""})).unwrap();
+        app.run("text.select", json!({"story": frame["story"], "anchor": 0, "focus": 0})).unwrap();
+        app.run("table.insert", json!({"rows": 2, "cols": 2})).unwrap();
+        app.run("table.setRowHeight", json!({"row": 0, "height": 40, "mode": "exactly"})).unwrap();
+        app.run("table.setRowHeight", json!({"row": 1, "height": 80, "mode": "exactly"})).unwrap();
+        app.run("table.selectTable", json!({})).unwrap();
+        activate(&mut app, "table.distributeRows", &Value::Null);
+        assert!(app.ui.dialog.is_none());
+        let info = app.run("table.get", json!({})).unwrap();
+        assert_eq!(info["rows"][0]["height"], 60.0);
+        assert_eq!(info["rows"][1]["height"], 60.0);
+        app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(app.run("table.get", json!({})).unwrap()["rows"][0]["height"], 40.0);
+    }
+
+    #[test]
     fn every_menu_entry_is_a_command() {
         let mut all = Vec::new();
         for (_, items) in menu_tree() {
             walk(&items, &mut all);
         }
         assert!(all.len() > 80, "{}", all.len());
+        assert!(all.iter().any(|(label, id, _)| label == "Distribute Rows Evenly" && id == "table.distributeRows"));
         for (label, id, params) in &all {
             assert!(ui_label(id).is_some() || designcraft_engine::find_command(id).is_some(), "menu entry {label}: unknown command {id}");
             assert!(!label.is_empty() && label != id, "menu entry {id} has no label");

@@ -24,6 +24,23 @@ Other MCP clients use the same command line, e.g. in a JSON config:
 {"mcpServers": {"designcraft": {"command": "/path/to/designcraft-cli", "args": ["mcp"]}}}
 ```
 
+### From an installed release
+
+The release packages ship `designcraft-cli` alongside the desktop app, so no build is needed:
+
+| Install | CLI |
+|---|---|
+| Windows (MSI) | `C:\Program Files\DesignCraft\designcraft-cli.exe` by default (wherever you installed it otherwise), not on `PATH` |
+| Linux (deb, rpm) | `/usr/bin/designcraft-cli` |
+| macOS | the separate `designcraft-cli-<version>-macos-<arch>.zip` release asset (the `.app` holds only the desktop app) |
+
+```sh
+# Windows, default install folder
+claude mcp add designcraft -- "C:\Program Files\DesignCraft\designcraft-cli.exe" mcp
+# Linux, or macOS with the CLI unzipped onto PATH
+claude mcp add designcraft -- designcraft-cli mcp
+```
+
 ## Modes
 
 | | Headless (`mcp`) | Connected (`mcp --connect PORT` or `HOST:PORT`) |

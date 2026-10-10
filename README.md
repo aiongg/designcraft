@@ -123,6 +123,23 @@ include it.
 To drive a running app, send JSON lines to `127.0.0.1:7979`. The protocol is described in
 [`docs/control-protocol.md`](docs/control-protocol.md).
 
+### Logs
+
+The desktop app writes its `log` records to standard error and to `logs/designcraft.log` in the
+settings directory, beside `ui.json` and `prefs.json` (Linux `~/.config/designcraft/logs/`, or
+`$XDG_CONFIG_HOME/designcraft/logs/`; macOS `~/Library/Application Support/DesignCraft/logs/`;
+Windows `%APPDATA%\DesignCraft\logs\`). A start launched from a desktop menu or the Dock has no
+terminal, so this file is what to attach to a bug report: the crash guard's panic report and a
+failed crash-recovery save land there. Each launch moves the previous log to `designcraft.1.log`
+(and that one to `designcraft.2.log`), so the log of a run that crashed survives the next start.
+The file stops growing at 16 MiB. `--version` writes no file.
+
+| Variable | Effect |
+|---|---|
+| `RUST_LOG` | Log levels for standard error and the log file. Default: `info` for DesignCraft's own crates, `warn` for everything else. env_logger-style directives replace that, e.g. `RUST_LOG=debug`, `RUST_LOG=warn,designcraft_render=trace` or `RUST_LOG=info,wgpu_core=warn`; a directive ending in `*` covers every target starting with it (`designcraft*=debug`). |
+
+The logger is `apps/designcraft/src/logging.rs`; the web build logs to the browser console instead.
+
 ### Web
 
 ```sh

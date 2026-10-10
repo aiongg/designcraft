@@ -100,7 +100,7 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
                 run(app, "table.deleteRow", json!({"table": tid, "rows": [n, rows.len() - 1]}));
             }
         }
-        caption(ui, crate::i18n::tr(&app.ui.language, "Columns"));
+        caption(ui, crate::i18n::tr_context(&app.ui.language, "Columns", "table"));
         if let Some(v) = number(ui, "tp_cols", Some(cols.len() as f64), "", 52.0, 0) {
             let n = v.round().max(1.0) as usize;
             if n > cols.len() {
@@ -139,6 +139,14 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
         }
         ui.end_row();
     });
+    if ui
+        .button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Distribute Rows Evenly")))
+        .on_hover_text("Equal fixed heights for the selected rows; cell text may become overset.")
+        .clicked()
+        && let Err(e) = app.run("table.distributeRows", json!({}))
+    {
+        app.status(format!("Table: {e}"));
+    }
     divider(ui);
     caption(ui, crate::i18n::tr(&app.ui.language, "Cell Text"));
     ui.horizontal(|ui| {

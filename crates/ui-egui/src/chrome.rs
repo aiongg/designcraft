@@ -164,7 +164,7 @@ pub fn control_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
             // Wider than the window: the bar scrolls sideways.
             crate::widgets::overflow_scrolling(ui);
             egui::ScrollArea::horizontal().id_salt("control_bar_scroll").auto_shrink([false, true]).show(ui, |ui| {
-                ui.horizontal(|ui| {
+                ui.horizontal_top(|ui| {
                     let text_mode =
                         matches!(app.session.tool_id(), "type" | "verticalType") || app.session.active().is_some_and(|d| d.selection.text.is_some());
                     if text_mode {
@@ -589,7 +589,14 @@ pub fn status_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
                     egui::RichText::new(if errors == 0 {
                         format!("{} ▾", crate::i18n::tr(&app.ui.language, "No errors"))
                     } else {
-                        format!("{errors} {} ▾", crate::i18n::tr(&app.ui.language, if errors == 1 { "error" } else { "errors" }))
+                        format!(
+                            "{} ▾",
+                            crate::i18n::count_label(
+                                &app.ui.language,
+                                if errors == 1 && app.ui.language != "uk" { "error" } else { "errors" },
+                                errors
+                            )
+                        )
                     })
                     .font(small.clone()),
                 );
@@ -671,7 +678,7 @@ pub fn start_screen(app: &mut DesignApp, ui: &mut egui::Ui) {
             ));
             ui.add_space(8.0);
             ui.horizontal_wrapped(|ui| {
-                for p in designcraft_doc::build::PRESETS.iter().take(10) {
+                for p in designcraft_doc::build::PRESETS.iter().filter(|p| p.intent == designcraft_doc::Intent::Print) {
                     let (cr, resp) = ui.allocate_exact_size(vec2(120.0, 150.0), Sense::click());
                     let hov = resp.hovered();
                     ui.painter().rect_filled(cr, 6.0, if hov { t.hover } else { t.panel });

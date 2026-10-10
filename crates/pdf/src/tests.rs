@@ -240,6 +240,31 @@ fn place(d: &mut Document, data: Vec<u8>, px: (u32, u32)) {
     d.insert_item(SpreadRef::Doc(0), it, None).unwrap();
 }
 
+/// krilla reads PNG, GIF and WebP lazily, so a damaged one passed the exporter's "does it decode"
+/// check and failed the whole export when the PDF was written ("PDF writer error: … unexpected
+/// end of file"). A cut-off download must be skipped with a warning, as a damaged TIFF is.
+#[test]
+fn a_cut_off_image_is_skipped_not_fatal() {
+    let px = image::RgbaImage::from_fn(64, 64, |x, y| image::Rgba([(x * 37 + y * 11) as u8, (x * 5) as u8, (y * 91) as u8, 255]));
+    for format in [image::ImageFormat::Png, image::ImageFormat::Gif, image::ImageFormat::WebP] {
+        let mut whole = Vec::new();
+        px.write_to(&mut std::io::Cursor::new(&mut whole), format).unwrap();
+        let cut = whole[..whole.len() * 9 / 10].to_vec();
+        let mut d = doc_with_text("still here");
+        place(&mut d, cut, (64, 64));
+        let r = export_pdf_with_report(&d, &Cache::new(), &PdfOptions::default()).unwrap_or_else(|e| panic!("{format:?}: {e}"));
+        assert!(r.warnings.iter().any(|w| w.contains("could not be decoded and was skipped")), "{format:?}: {:?}", r.warnings);
+        assert!(image_xobjects(&r.bytes).is_empty(), "{format:?}");
+        assert!(extract_text(&r.bytes).concat().contains("still"), "{format:?}: the rest of the page is exported");
+        // The undamaged file still goes in.
+        let mut d = doc_with_text("x");
+        place(&mut d, whole, (64, 64));
+        let r = export_pdf_with_report(&d, &Cache::new(), &PdfOptions::default()).unwrap();
+        assert!(r.warnings.is_empty(), "{format:?}: {:?}", r.warnings);
+        assert_eq!(image_xobjects(&r.bytes).len(), 1, "{format:?}");
+    }
+}
+
 /// Every image XObject in a PDF: its /ColorSpace name (`?` when not a name) and decoded samples.
 fn image_xobjects(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {
     use hayro_syntax::object::Name;
