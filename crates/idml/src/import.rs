@@ -2221,7 +2221,10 @@ impl<'r> Importer<'r> {
         let id = AssetId(self.alloc());
         let link_path = uri.filter(|p| p.contains('/') || p.contains('\\'));
         let page = pdf_page_in(g);
-        self.assets.insert(id, Arc::new(Asset { page, id, name, mime, link: link_path, data: Arc::new(data), pixels }));
+        // Where the box sits on the page needs the PDF parsed: the engine finds it after import.
+        let pdf_crop = g.find("PDFAttribute").and_then(|a| a.get("PDFCrop")).map_or(designcraft_doc::PdfCrop::Crop, names::pdf_crop_in);
+        self.assets
+            .insert(id, Arc::new(Asset { page, id, name, mime, link: link_path, data: Arc::new(data), pixels, pdf_crop, ..Default::default() }));
         Content::Graphic(designcraft_doc::Graphic {
             asset: id,
             size,

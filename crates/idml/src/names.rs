@@ -44,6 +44,26 @@ pub fn anchor_rel_in(s: &str) -> designcraft_doc::anchored::AnchorRelative {
     }
 }
 
+/// `PDFAttribute` `PDFCrop` for a placed PDF's crop choice.
+pub fn pdf_crop_out(c: designcraft_doc::PdfCrop) -> &'static str {
+    use designcraft_doc::PdfCrop as C;
+    match c {
+        C::Crop => "CropPDF",
+        C::Art => "CropArt",
+        C::Trim => "CropTrim",
+        C::Bleed => "CropBleed",
+        C::Media => "CropMedia",
+        C::ContentVisible => "CropContentVisibleLayers",
+        C::ContentAll => "CropContentAllLayers",
+    }
+}
+
+/// A placed PDF's crop choice from `PDFCrop` (the crop box when unknown).
+pub fn pdf_crop_in(s: &str) -> designcraft_doc::PdfCrop {
+    use designcraft_doc::PdfCrop as C;
+    C::ALL.into_iter().find(|c| pdf_crop_out(*c) == s).unwrap_or(C::Crop)
+}
+
 pub fn anchor_out(i: u8) -> &'static str {
     ANCHORS[(i as usize).min(8)]
 }

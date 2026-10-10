@@ -1308,7 +1308,11 @@ impl Exporter<'_> {
         if let Some(asset) = doc.assets.get(&g.asset)
             && asset.data.starts_with(b"%PDF")
         {
-            let Some(size) = Size::from_wh(g.size.0.max(1e-3) as f32, g.size.1.max(1e-3) as f32) else { return };
+            // Cropped to a box: the whole page, placed so that the box spans graphic space.
+            let shown = asset.shown_box();
+            let [l, t, r, b] = shown.unwrap_or([0.0, 0.0, 1.0, 1.0]);
+            let (page_w, page_h) = (g.size.0 / (r - l), g.size.1 / (b - t));
+            let Some(size) = Size::from_wh(page_w.max(1e-3) as f32, page_h.max(1e-3) as f32) else { return };
             let placed = match self.pdfs.get(&g.asset) {
                 Some(p) => p.clone(),
                 None => {
@@ -1324,7 +1328,16 @@ impl Exporter<'_> {
                 }
                 Some((placed, _)) => {
                     s.push_transform(&tf(g.xf));
+                    let clip = shown.and_then(|_| to_path(&Rect::new(0.0, 0.0, g.size.0, g.size.1).to_path(0.1)));
+                    if let Some(clip) = &clip {
+                        s.push_clip_path(clip, &FillRule::NonZero);
+                    }
+                    s.push_transform(&tf(Affine::translate((-l * page_w, -t * page_h))));
                     s.draw_pdf_page(&placed, size, asset.page as usize);
+                    s.pop();
+                    if clip.is_some() {
+                        s.pop();
+                    }
                     s.pop();
                 }
                 None => {}
@@ -1561,10 +1574,7 @@ mod image_content_cache_tests {
     }
     fn asset(doc: &mut Document, bytes: Vec<u8>, name: &str) -> AssetId {
         let id = AssetId(doc.alloc());
-        doc.assets.insert(
-            id,
-            Arc::new(Asset { id, name: name.into(), mime: "image/png".into(), link: None, data: Arc::new(bytes), pixels: None, page: 0 }),
-        );
+        doc.assets.insert(id, Arc::new(Asset { id, name: name.into(), mime: "image/png".into(), data: Arc::new(bytes), ..Default::default() }));
         id
     }
     fn exporter<'a>(doc: &'a Document, cache: &'a Cache, opts: &'a PdfOptions) -> Exporter<'a> {
