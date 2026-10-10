@@ -68,6 +68,14 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
         None,
         "{rule?: ruleAbove|ruleBelow} — Rule Above / Rule Below of the selected paragraphs (type.para)",
     ),
+    (
+        "app.paragraphBordersDialog",
+        "Paragraph Borders and Shading…",
+        None,
+        "{tab?: border|shading} — border and shading of the selected paragraphs (type.para)",
+    ),
+    ("app.spanColumnsDialog", "Span Columns…", None, "{} — span or split columns of the selected paragraphs (type.para)"),
+    ("app.bulletsNumberingDialog", "Bullets and Numbering…", None, "{} — bullets or numbers of the selected paragraphs (type.para)"),
     ("app.findFontDialog", "Find/Replace Font…", None, "{} — fonts used (missing ones flagged) and replacing them"),
     ("app.insertXrefDialog", "Insert Cross-Reference…", None, "{} — New Cross-Reference dialog (paragraph or text anchor, format)"),
     ("app.deleteAllGuides", "Delete All Guides on Spread", None, "{} — the spread in view"),
@@ -378,6 +386,9 @@ pub const MENUS: &[(&str, &[&str])] = &[
             "cmd:type.alignRight",
             "cmd:type.justify",
             "ui:app.paragraphRulesDialog",
+            "ui:app.paragraphBordersDialog",
+            "ui:app.spanColumnsDialog",
+            "ui:app.bulletsNumberingDialog",
             "-",
             "cmd:type.bold",
             "cmd:type.italic",
@@ -944,6 +955,23 @@ pub fn run_ui(app: &mut DesignApp, id: &str, p: &Value) -> Option<Result<Value, 
             let rule = if p.get("rule").and_then(Value::as_str) == Some("ruleBelow") { "ruleBelow" } else { "ruleAbove" };
             let current = json!({"ruleAbove": a["para"]["ruleAbove"], "ruleBelow": a["para"]["ruleBelow"]});
             app.ui.dialog = Some(crate::dialogs::Dialog::new("paragraphRules", json!({"rule": rule, "current": current})));
+            Ok(Value::Null)
+        }
+        "app.paragraphBordersDialog" | "app.spanColumnsDialog" | "app.bulletsNumberingDialog" => {
+            let Some(a) = crate::panels::text_attrs(app) else { return Some(Err("select text or a text frame".into())) };
+            let section = match id {
+                "app.spanColumnsDialog" => "span",
+                "app.bulletsNumberingDialog" => "bullets",
+                _ if p.get("tab").and_then(Value::as_str) == Some("shading") => "shading",
+                _ => "border",
+            };
+            let fields = json!({
+                "section": section,
+                "current": a["para"],
+                "family": a["chars"]["fontFamily"],
+                "style": a["chars"]["fontStyle"],
+            });
+            app.ui.dialog = Some(crate::dialogs::Dialog::new("paragraphLocal", fields));
             Ok(Value::Null)
         }
         "app.footnoteOptionsDialog" => {
