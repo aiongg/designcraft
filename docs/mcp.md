@@ -30,19 +30,16 @@ The release packages ship `designcraft-cli` alongside the desktop app, so no bui
 
 | Install | CLI |
 |---|---|
-| Windows (MSI) | `C:\Program Files\DesignCraft\designcraft-cli.exe`, not added to `PATH` |
+| Windows (MSI) | `C:\Program Files\DesignCraft\designcraft-cli.exe` by default (wherever you installed it otherwise), not on `PATH` |
 | Linux (deb, rpm) | `/usr/bin/designcraft-cli` |
-| macOS | the separate `designcraft-cli-<version>-macos-universal.zip` release asset (the `.app` holds only the desktop app) |
+| macOS | the separate `designcraft-cli-<version>-macos-<arch>.zip` release asset (the `.app` holds only the desktop app) |
 
 ```sh
-# Windows
+# Windows, default install folder
 claude mcp add designcraft -- "C:\Program Files\DesignCraft\designcraft-cli.exe" mcp
 # Linux, or macOS with the CLI unzipped onto PATH
 claude mcp add designcraft -- designcraft-cli mcp
 ```
-
-An unofficial community plugin, [artcraft-claude-plugin](https://github.com/sawizzle/artcraft-claude-plugin),
-registers the installed ArtCraft apps in Claude Code in one step and adds usage notes for agents.
 
 ## Modes
 
