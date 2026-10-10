@@ -41,3 +41,8 @@ muda = { version = "0.21", default-features = false }
 # The input context, to drop the IME's marked text when the Type tool ends a composition.
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSTextInputContext"] }
+# Finder double-clicks, Open With, Dock drops and `open -a DesignCraft brochure.idml` arrive as a
+# kAEOpenDocuments Apple event, which winit 0.30 doesn't handle. This crate (also used by PhotoCraft,
+# PdfCraft and WordCraft) registers the handler behind a safe API (Objective-C interop needs unsafe,
+# which the workspace forbids). Pinned exactly: review the diff before bumping.
+fmv-macos-events = "=0.1.0"

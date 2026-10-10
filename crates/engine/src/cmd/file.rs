@@ -39,13 +39,14 @@ pub fn specs() -> Vec<CommandSpec> {
             ok()
         }),
         cmd!(noundo "file.open", "Open…", ["File"], Some("Cmd+O"),
-            "{path} — .designcraft, .idml, or an InDesign .indd/.indt (converted to IDML; its conversion warnings join `warnings`); the fonts in a `Document Fonts` folder beside it load first → {index, documentFonts: faces loaded, warnings: font files skipped and, for IDML and InDesign files, package parts missing}",
+            "{path} — a DesignCraft or IDML file (recognised by its content, so the extension may be missing), or an InDesign .indd/.indt (recognised by its signature or extension, converted to IDML; its conversion warnings join `warnings`); the fonts in a `Document Fonts` folder beside it load first → {index, documentFonts: faces loaded, warnings: font files skipped and, for IDML and InDesign files, package parts missing}",
             always, file_open),
         cmd!(noundo "file.openBytes", "Open Bytes", [], None, "{name, base64} — DesignCraft JSON, an IDML package or an InDesign .indd/.indt", always, file_open_bytes),
-        cmd!(noundo "file.save", "Save", ["File"], Some("Cmd+S"), "{path?}", has_doc, file_save),
-        cmd!(noundo "file.saveAs", "Save As…", ["File"], Some("Cmd+Shift+S"), "{path}", has_doc, file_save),
-        cmd!(noundo "file.saveACopy", "Save a Copy…", ["File"], None, "{path} — writes the document without changing which file it is or its unsaved state", has_doc, |s, p| {
-            let path = str_param(p, "path").ok_or_else(|| bad("file.saveACopy", "missing `path`"))?.to_string();
+        cmd!(noundo "file.save", "Save", ["File"], Some("Cmd+S"), "{path?} — a `path` without the .designcraft extension gets it → {path: the file written, bytes}", has_doc, file_save),
+        cmd!(noundo "file.saveAs", "Save As…", ["File"], Some("Cmd+Shift+S"), "{path} — a path without the .designcraft extension gets it → {path: the file written, bytes}", has_doc, file_save),
+        cmd!(noundo "file.saveACopy", "Save a Copy…", ["File"], None, "{path} — writes the document without changing which file it is or its unsaved state; a path without the .designcraft extension gets it → {path: the file written, bytes}", has_doc, |s, p| {
+            let path = str_param(p, "path").ok_or_else(|| bad("file.saveACopy", "missing `path`"))?;
+            let path = with_document_extension(path);
             let bytes = to_bytes(&s.doc()?.doc);
             #[cfg(not(target_arch = "wasm32"))]
             std::fs::write(&path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
@@ -130,6 +131,22 @@ pub fn specs() -> Vec<CommandSpec> {
 
 pub fn to_bytes(d: &Document) -> Vec<u8> {
     designcraft_format::save(d).unwrap_or_default()
+}
+
+/// `path` ending in `.designcraft`: the extension is added when it is missing or another one, so
+/// the file opens from the file manager. A path without a file name is left for the write to fail.
+pub fn with_document_extension(path: &str) -> String {
+    let p = std::path::Path::new(path);
+    let ext = p.extension().and_then(|e| e.to_str());
+    if p.file_name().is_none() || ext.is_some_and(|e| e.eq_ignore_ascii_case(designcraft_format::EXTENSION)) {
+        return path.to_string();
+    }
+    format!("{path}.{}", designcraft_format::EXTENSION)
+}
+
+/// Whether `bytes` are a document `file.open` reads: a DesignCraft package or an IDML package.
+pub fn is_document(bytes: &[u8]) -> bool {
+    designcraft_idml::is_idml(bytes) || designcraft_format::is_designcraft(bytes)
 }
 
 pub fn from_bytes(b: &[u8]) -> Result<Document> {
@@ -242,10 +259,17 @@ fn file_open(s: &mut Session, p: &Value) -> Result<Value> {
     let path = str_param(p, "path").ok_or_else(|| bad("file.open", "missing `path`"))?;
     #[cfg(not(target_arch = "wasm32"))]
     {
-        if path.to_ascii_lowercase().ends_with(".idml") || super::interchange::has_indd_extension(path) {
+        let bytes = std::fs::read(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+        // The content decides first: a file's extension may be missing or wrong. The extension
+        // then routes files whose content isn't recognised to the reader that explains why.
+        let ext = std::path::Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
+        let native = designcraft_format::is_designcraft(&bytes) || bytes.trim_ascii_start().starts_with(b"{");
+        if designcraft_idml::is_idml(&bytes) || (!native && (super::interchange::is_indd(path, &bytes) || ext == "idml")) {
             return super::interchange::open_idml(s, p);
         }
-        let bytes = std::fs::read(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+        if !native && ext != designcraft_format::EXTENSION {
+            return Err(bad("file.open", format!("{path}: not a DesignCraft or IDML file")));
+        }
         let mut d = from_bytes(&bytes)?;
         super::interchange::resolve_packaged_links(&mut d, std::path::Path::new(path).parent());
         super::datamerge::resolve_sources_on_open(&mut d, Some(std::path::Path::new(path)));
@@ -317,8 +341,9 @@ fn file_open_bytes(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn file_save(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.doc_mut()?;
+    // Saving to the document's own file keeps its name, even one opened without the extension.
     let path = str_param(p, "path")
-        .map(str::to_string)
+        .map(with_document_extension)
         .or_else(|| st.path.clone())
         .ok_or_else(|| bad("file.save", "missing `path` (document has never been saved)"))?;
     {
@@ -1186,6 +1211,63 @@ mod document_fonts_tests {
         assert_eq!(r["fontStyle"], "Regular", "{r}");
         let r = s.execute("type.italic", &json!({"on": false})).unwrap();
         assert_eq!(r["fontStyle"], "Regular", "{r}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod extension_tests {
+    use serde_json::json;
+
+    use super::{is_document, with_document_extension};
+    use crate::Session;
+
+    #[test]
+    fn the_document_extension_is_added_when_missing_or_different() {
+        assert_eq!(with_document_extension("/a/Brochure"), "/a/Brochure.designcraft");
+        assert_eq!(with_document_extension("/a/Brochure.idml"), "/a/Brochure.idml.designcraft");
+        assert_eq!(with_document_extension("/a/v1.2 Brochure"), "/a/v1.2 Brochure.designcraft");
+        assert_eq!(with_document_extension("/a/Brochure.DesignCraft"), "/a/Brochure.DesignCraft");
+        assert_eq!(with_document_extension("/a/.."), "/a/..");
+    }
+
+    #[test]
+    fn save_adds_the_extension_and_open_recognises_files_by_content() {
+        let dir = std::env::temp_dir().join(format!("dc-file-extension-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut s = Session::new();
+        s.execute("file.new", &json!({})).unwrap();
+
+        let bare = dir.join("Brochure");
+        let written = dir.join("Brochure.designcraft");
+        let r = s.execute("file.saveAs", &json!({"path": bare.to_string_lossy()})).unwrap();
+        assert_eq!(r["path"], json!(written.to_string_lossy()), "{r}");
+        assert!(written.is_file() && !bare.exists());
+        assert_eq!(s.doc().unwrap().path.as_deref(), written.to_str());
+        let r = s.execute("file.saveACopy", &json!({"path": dir.join("Copy").to_string_lossy()})).unwrap();
+        assert_eq!(r["path"], json!(dir.join("Copy.designcraft").to_string_lossy()), "{r}");
+
+        // A native file without the extension opens, and Save writes back to that same file.
+        std::fs::rename(&written, &bare).unwrap();
+        let mut t = Session::new();
+        t.execute("file.open", &json!({"path": bare.to_string_lossy()})).unwrap();
+        let r = t.execute("file.save", &json!({})).unwrap();
+        assert_eq!(r["path"], json!(bare.to_string_lossy()), "{r}");
+        assert!(!written.exists());
+
+        // An IDML package without the extension opens as IDML, unsaved.
+        let idml = dir.join("Package");
+        std::fs::write(&idml, designcraft_idml::export_idml(&s.doc().unwrap().doc)).unwrap();
+        assert!(is_document(&std::fs::read(&idml).unwrap()) && is_document(&std::fs::read(&bare).unwrap()));
+        t.execute("file.open", &json!({"path": idml.to_string_lossy()})).unwrap();
+        assert_eq!(t.doc().unwrap().path, None);
+
+        let notes = dir.join("Notes");
+        std::fs::write(&notes, b"plain text").unwrap();
+        assert!(!is_document(b"plain text"));
+        let e = t.execute("file.open", &json!({"path": notes.to_string_lossy()})).unwrap_err();
+        assert!(e.to_string().contains("not a DesignCraft or IDML file"), "{e}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

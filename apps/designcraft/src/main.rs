@@ -13,6 +13,8 @@
 #![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+#[cfg(target_os = "macos")]
+mod apple_events;
 mod control_server;
 mod gpu;
 mod logging;
@@ -28,6 +30,9 @@ struct App {
     menu: Option<native_menu::NativeMenu>,
     /// The window's start: the adapter and backend chosen for it; see `gpu`.
     startup: std::sync::Arc<gpu::Startup>,
+    /// Documents and quit requests from Finder, the Dock and Open With.
+    #[cfg(target_os = "macos")]
+    apple_events: fmv_macos_events::Inbox,
     /// Frames begun so far.
     frames: u32,
 }
@@ -52,6 +57,8 @@ impl eframe::App for App {
             if let Some(m) = &mut self.menu {
                 m.poll(&mut self.app, ctx);
             }
+            // Noted for a start again after a graphics failure, which reopens them (`gpu::restart`).
+            self.startup.opening(apple_events::poll(&self.apple_events, &mut self.app, ctx));
         }
         self.app.logic(ctx);
         self.startup.leave();
@@ -204,8 +211,64 @@ fn open_filters(purpose: &str) -> &'static [OpenFilter] {
             OpenFilter { name: "DesignCraft", extensions: &["designcraft"] },
             OpenFilter { name: "InDesign Markup (IDML)", extensions: &["idml"] },
             OpenFilter { name: "InDesign document or template (INDD, INDT)", extensions: &["indd", "indt"] },
+            // Files saved without an extension; `file.open` tells the formats apart by content.
+            OpenFilter { name: "All files", extensions: &[ALL_FILES] },
         ],
     }
+}
+
+/// The "All files" pattern. The macOS panel merges every filter into one list of allowed types,
+/// which takes type identifiers as well as extensions: `public.data` admits any file.
+const ALL_FILES: &str = if cfg!(target_os = "macos") { "public.data" } else { "*" };
+
+/// The extension of the file name a save dialog suggests (`Brochure.designcraft`), if it has one.
+/// The dialog filters on it, so the macOS and Windows dialogs add it to a name typed without it.
+fn suggested_extension(name: &str) -> Option<&str> {
+    std::path::Path::new(name).extension().and_then(|e| e.to_str()).filter(|e| !e.is_empty() && !e.contains(char::is_whitespace))
+}
+
+/// The file a save dialog's answer writes: `picked` with the suggested extension added when it has
+/// none (Linux dialogs don't add it). A document always ends in `.designcraft`, as `file.save`
+/// writes it.
+fn picked_save_path(picked: std::path::PathBuf, ext: Option<&str>) -> std::path::PathBuf {
+    let Some(ext) = ext else { return picked };
+    if ext.eq_ignore_ascii_case("designcraft") {
+        let p = picked.to_string_lossy();
+        return designcraft_engine::cmd::with_document_extension(&p).into();
+    }
+    if picked.extension().is_some() || picked.file_name().is_none() {
+        return picked;
+    }
+    let mut s = picked.into_os_string();
+    s.push(".");
+    s.push(ext);
+    s.into()
+}
+
+/// The save dialog: the suggested name's extension as its filter, and the extension added to a
+/// name typed without it. Adding it names another file than the one the dialog checked, so
+/// replacing an existing one asks again.
+fn pick_save(name: &str) -> Option<String> {
+    let ext = suggested_extension(name);
+    let mut dialog = rfd::FileDialog::new().set_file_name(name);
+    if let Some(ext) = ext {
+        dialog = dialog.add_filter(ext.to_ascii_uppercase(), &[ext]);
+    }
+    let picked = dialog.save_file()?;
+    let path = picked_save_path(picked.clone(), ext);
+    if path != picked && path.exists() {
+        let file = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let answer = rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Warning)
+            .set_title("Replace File?")
+            .set_description(format!("“{file}” already exists. Do you want to replace it?"))
+            .set_buttons(rfd::MessageButtons::YesNo)
+            .show();
+        if answer != rfd::MessageDialogResult::Yes {
+            return None;
+        }
+    }
+    Some(path.to_string_lossy().to_string())
 }
 
 fn services() -> Services {
@@ -217,7 +280,7 @@ fn services() -> Services {
             }
             dialog.pick_file().map(|p| p.to_string_lossy().to_string())
         })),
-        pick_save: Some(Box::new(|name: &str| rfd::FileDialog::new().set_file_name(name).save_file().map(|p| p.to_string_lossy().to_string()))),
+        pick_save: Some(Box::new(pick_save)),
         read: Some(Box::new(|p: &str| std::fs::read(p).map_err(|e| e.to_string()))),
         write: Some(Box::new(|p: &str, b: &[u8]| std::fs::write(p, b).map_err(|e| e.to_string()))),
         clipboard_text: Some(Box::new(|| arboard::Clipboard::new().and_then(|mut c| c.get_text()).ok())),
@@ -338,6 +401,12 @@ fn main() -> std::process::ExitCode {
             b.with_x11();
         }));
     }
+    // Registered before the event loop starts, so it catches the Finder event that launched the app
+    // as well as later ones. Lives until the event loop returns; the app creator only borrows it.
+    #[cfg(target_os = "macos")]
+    let apple_events = apple_events::AppleEvents::install();
+    #[cfg(target_os = "macos")]
+    let events = &apple_events;
     let created = startup.clone();
     // A panic that ends the window (egui-wgpu's own) is caught here: never a crash.
     let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -403,6 +472,8 @@ fn main() -> std::process::ExitCode {
                     #[cfg(target_os = "macos")]
                     menu: None,
                     startup: created,
+                    #[cfg(target_os = "macos")]
+                    apple_events: events.connect(&cc.egui_ctx),
                     frames: 0,
                 }))
             }),
@@ -411,6 +482,9 @@ fn main() -> std::process::ExitCode {
     .map_err(|payload| designcraft_engine::guard::panic_message(payload.as_ref()));
     // The window's end, or a graphics failure that starts the app again. A failure is logged:
     // standard error and the log file, since a Windows start has no console to show it.
+    // Documents that arrived after the last frame, for a start again to open too.
+    #[cfg(target_os = "macos")]
+    startup.opening(apple_events.queued());
     match gpu::finish(run, &startup) {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(e) => {
@@ -447,5 +521,18 @@ mod tests {
         for ext in ["designcraft", "idml", "indd", "indt"] {
             assert!(documents.first().is_some_and(|filter| filter.extensions.contains(&ext)), "{ext} is missing from the first Open filter");
         }
+        assert!(documents.last().is_some_and(|filter| filter.extensions == [super::ALL_FILES]), "files without an extension can be picked");
+    }
+
+    #[test]
+    fn save_dialog_answers_get_the_suggested_extension() {
+        use std::path::PathBuf;
+        let save = |picked: &str, name: &str| super::picked_save_path(PathBuf::from(picked), super::suggested_extension(name));
+        assert_eq!(save("/d/Brochure", "Untitled.designcraft"), PathBuf::from("/d/Brochure.designcraft"));
+        assert_eq!(save("/d/Brochure.idml", "Untitled.designcraft"), PathBuf::from("/d/Brochure.idml.designcraft"));
+        assert_eq!(save("/d/Brochure.designcraft", "Untitled.designcraft"), PathBuf::from("/d/Brochure.designcraft"));
+        assert_eq!(save("/d/Brochure", "Untitled.pdf"), PathBuf::from("/d/Brochure.pdf"));
+        assert_eq!(save("/d/Brochure.txt", "Untitled.rtf"), PathBuf::from("/d/Brochure.txt"), "another export format is kept");
+        assert_eq!(save("/d/Package", "Untitled 1.2 Folder"), PathBuf::from("/d/Package"), "a folder has no extension");
     }
 }

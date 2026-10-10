@@ -352,6 +352,9 @@ pub struct Startup {
     notice: Mutex<Option<String>>,
     /// The backend fallback of this start (`gpu.json`); `None` when `WGPU_BACKEND` chooses.
     fallback: Mutex<Option<backend::Fallback>>,
+    /// Documents the OS handed this run outside its arguments (macOS Apple events), for a start
+    /// again to open: the OS doesn't send them twice.
+    documents: Mutex<Vec<String>>,
 }
 
 impl Startup {
@@ -369,6 +372,12 @@ impl Startup {
     pub fn leave(&self) {
         self.busy.store(false, Ordering::Relaxed);
         self.leaves.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Note documents the OS handed this run outside its arguments, for [`restart`] to pass on.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub fn opening(&self, paths: impl IntoIterator<Item = String>) {
+        self.documents.lock().unwrap_or_else(PoisonError::into_inner).extend(paths);
     }
 
     /// The note [`watch_first_frame`] left for the status bar, once.
@@ -722,7 +731,8 @@ fn next_start(
     None
 }
 
-/// Start the app again with the same arguments and the skip list `skip` ([`SKIP_ARG`]). On Unix
+/// Start the app again with the same arguments, the documents the OS handed this run
+/// ([`Startup::opening`]) and the skip list `skip` ([`SKIP_ARG`]). On Unix
 /// the new app replaces this process (same process id, so an AppImage keeps its files mounted),
 /// and this returns only on failure; on Windows it starts beside this one, which then exits. The
 /// failure was caught, so `gpu.json` stops blaming the backend first, and blames it again when
@@ -731,6 +741,7 @@ fn restart(skip: &[String], startup: &Startup) -> std::io::Result<()> {
     log::logger().flush();
     let mut c = std::process::Command::new(std::env::current_exe()?);
     c.args(std::env::args_os().skip(1).filter(|a| a.to_str().is_none_or(|a| skip_arg(a).is_none())));
+    c.args(startup.documents.lock().unwrap_or_else(PoisonError::into_inner).iter());
     c.arg(format!("{SKIP_ARG}{}", skip.join(",")));
     let trying = startup.caught();
     #[cfg(unix)]
