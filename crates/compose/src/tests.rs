@@ -1029,6 +1029,46 @@ fn footnotes_sit_at_the_column_bottom_and_push_text() {
 }
 
 #[test]
+fn footnote_first_line_wraps_at_the_column_edge_after_its_number() {
+    // InDesign sets the footnote number and separator as part of the first line: that line
+    // wraps at the same right edge as the others, whatever the separator. A tab separator
+    // reaches the footnote style's tab stop.
+    let tab_at = |position: f64| {
+        let stop = designcraft_doc::TabStop { position, align: TabAlign::Left, leader: String::new(), align_on: String::new() };
+        ParaAttrs { tabs: Some(vec![stop]), ..Default::default() }
+    };
+    let right_edge = |l: &Line, source: &str| {
+        let space = |g: &&PlacedGlyph| g.len > 0 && source.get(g.byte..).and_then(|s| s.chars().next()).is_some_and(char::is_whitespace);
+        l.glyphs.iter().filter(|g| g.visible && !space(g)).map(|g| g.x + g.adv).fold(0.0, f64::max)
+    };
+    let cases =
+        [("\t", tab_at(100.0)), ("\t", ParaAttrs::default()), (" ", ParaAttrs::default()), (".\u{2003}\u{2003}\u{2003}", ParaAttrs::default())];
+    for (sep, para) in cases {
+        let (mut d, sid, _) = doc_with("Short text.", Rect::new(36.0, 36.0, 300.0, 400.0), ParaAttrs::default());
+        d.footnote_options.separator = sep.into();
+        d.footnote_options.start_at = 1234;
+        d.story_mut(sid).unwrap().insert_note(5, &LOREM.repeat(2), ParaFormat { para, ..Default::default() });
+        let cs = compose_story(&d, sid, &ComposeOptions::default());
+        let n = &cs.frames[0].notes[0];
+        let width = n.rect.width();
+        let lines = &n.text.frames[0].lines;
+        assert!(lines.len() >= 3, "{sep:?}: {} lines", lines.len());
+        for (i, l) in lines.iter().enumerate() {
+            let right = right_edge(l, &n.source);
+            assert!(right <= width + 0.01, "{sep:?}: line {i} ends at {right}, past the column's {width}");
+        }
+        assert!(lines[0].glyphs.first().is_some_and(|g| g.len == 0 && g.x < 1.0), "{sep:?}: the number leads line 0");
+    }
+    // The same holds for a tab in body text.
+    let text = format!("Term\t{LOREM}");
+    let (d, sid, _) = doc_with(&text, Rect::new(36.0, 36.0, 300.0, 400.0), tab_at(100.0));
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let l = &cs.frames[0].lines[0];
+    let edge = cs.frames[0].columns[0].x1;
+    assert!(right_edge(l, &text) <= edge + 0.01, "body line 0 ends at {}, past {edge}", right_edge(l, &text));
+}
+
+#[test]
 fn footnote_line_at_column_top_still_sets() {
     // A note taller than the frame can't push its reference line forever.
     let (mut d, sid, _) = doc_with("Short text.", Rect::new(0.0, 0.0, 200.0, 40.0), ParaAttrs::default());
