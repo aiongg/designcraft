@@ -12,13 +12,13 @@ use super::{CommandSpec, bad, cmd, has_doc, str_param};
 use crate::{Result, Session};
 
 /// Most stops a paragraph holds.
-pub const MAX_TABS: usize = 100;
+pub const MAX_TABS: usize = designcraft_doc::MAX_TAB_STOPS;
 /// Furthest stop position: 216 in, the largest page.
-pub const MAX_POSITION: f64 = 15_552.0;
+pub const MAX_POSITION: f64 = designcraft_doc::MAX_TAB_POSITION;
 /// Longest leader, in characters.
-pub const MAX_LEADER: usize = 8;
+pub const MAX_LEADER: usize = designcraft_doc::MAX_TAB_LEADER;
 /// Stops closer than this share a position.
-const SAME: f64 = 0.01;
+const SAME: f64 = designcraft_doc::SAME_TAB_POSITION;
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -101,7 +101,7 @@ pub fn sort(tabs: &mut [TabStop]) {
 
 /// A finite position clamped to `0..=MAX_POSITION`.
 pub fn clamp_position(v: f64) -> std::result::Result<f64, String> {
-    if v.is_finite() { Ok(v.clamp(0.0, MAX_POSITION)) } else { Err("position must be a finite number".into()) }
+    TabStop::clamp_position(v)
 }
 
 /// Insert `stop` (replacing one at the same position); returns its index.
@@ -210,17 +210,13 @@ fn align_value(v: &Value, c: &str) -> Result<TabAlign> {
 
 /// A leader: up to [`MAX_LEADER`] characters, no control characters.
 pub fn leader_value(v: &str, c: &str) -> Result<String> {
-    if v.chars().count() > MAX_LEADER || v.chars().any(char::is_control) {
-        return Err(bad(c, format!("`leader`: at most {MAX_LEADER} printable characters")));
-    }
+    TabStop::check_leader(v).map_err(|e| bad(c, e))?;
     Ok(v.to_string())
 }
 
 /// An align-on character: one printable character or none (a decimal point).
 pub fn align_on_value(v: &str, c: &str) -> Result<String> {
-    if v.chars().count() > 1 || v.chars().any(char::is_control) {
-        return Err(bad(c, "`alignOn`: one printable character"));
-    }
+    TabStop::check_align_on(v).map_err(|e| bad(c, e))?;
     Ok(v.to_string())
 }
 
@@ -329,8 +325,7 @@ fn edit(
     match style {
         Some(name) => s.edit(|d, _| {
             let st = d.styles_mut().para_mut(&name).ok_or_else(|| bad(c, format!("no paragraph style `{name}`")))?;
-            st.para.tabs = Some(tabs);
-            Ok(())
+            st.para.set_json_over("tabs", &list, &designcraft_doc::ParaProps::default()).map_err(|e| bad(c, e))
         })?,
         None => {
             format_paras(s, &json!({ "tabs": list }))?;
@@ -341,6 +336,7 @@ fn edit(
 
 #[cfg(test)]
 mod tests {
+    use designcraft_doc::{TabAlign, TabStop};
     use serde_json::{Value, json};
 
     use crate::Session;
@@ -429,6 +425,55 @@ mod tests {
         let story = d.story(designcraft_doc::StoryId(sid)).unwrap();
         assert_eq!(story.paras[0].para.tabs, None, "no paragraph override");
         assert!(s.execute("type.tabs.add", &json!({"style": "Nope", "position": 1})).is_err());
+    }
+
+    /// A style's stored list that was never checked (an older file) is checked when a Tabs
+    /// command rewrites it, as a paragraph's is.
+    #[test]
+    fn style_tab_lists_are_checked_when_edited() {
+        let (mut s, _) = session("x");
+        s.execute("style.paragraph.create", &json!({"name": "Old"})).unwrap();
+        let stop = |position, align| TabStop { position, align, leader: String::new(), align_on: String::new() };
+        s.edit(|d, _| {
+            let st = d.styles_mut().para_mut("Old").unwrap();
+            st.para.tabs = Some(vec![stop(50.0, TabAlign::Char), stop(72.0, TabAlign::Left), stop(72.001, TabAlign::Right)]);
+            Ok(())
+        })
+        .unwrap();
+        s.execute("type.tabs.add", &json!({"style": "Old", "position": 120})).unwrap();
+        let d = s.doc().unwrap().doc.clone();
+        let tabs = d.styles.para("Old").unwrap().para.tabs.clone().unwrap();
+        let at: Vec<(f64, TabAlign, &str)> = tabs.iter().map(|t| (t.position, t.align, t.align_on.as_str())).collect();
+        assert_eq!(at, [(50.0, TabAlign::Char, "."), (72.001, TabAlign::Right, ""), (120.0, TabAlign::Left, "")]);
+    }
+
+    /// `type.para` and the paragraph style commands take a whole `tabs` list; it gets the checks
+    /// the Tabs commands apply.
+    #[test]
+    fn tab_lists_set_as_paragraph_attributes_are_checked() {
+        let (mut s, sid) = session("x");
+        let many: Vec<Value> = (0..=super::MAX_TABS).map(|i| json!({"position": i})).collect();
+        for tabs in [
+            json!(many),
+            json!([{"position": f64::NAN}]),
+            json!([{"position": "NaN"}]),
+            json!([{"position": 10, "leader": "123456789"}]),
+            json!([{"position": 10, "leader": "\u{7}"}]),
+            json!([{"position": 10, "align": "char", "alignOn": ".,"}]),
+        ] {
+            assert!(s.execute("type.para", &json!({"attrs": {"tabs": tabs}})).is_err(), "{tabs}");
+            assert!(s.execute("style.paragraph.create", &json!({"name": "Bad", "para": {"tabs": tabs}})).is_err(), "{tabs}");
+        }
+        s.execute("style.paragraph.create", &json!({"name": "Ok"})).unwrap();
+        assert!(s.execute("style.paragraph.edit", &json!({"name": "Ok", "para": {"tabs": [{"position": 1, "leader": "123456789"}]}})).is_err());
+
+        let tabs = json!([{"position": 200, "align": "char"}, {"position": 1e300}, {"position": -5, "leader": ". "}, {"position": 72}]);
+        s.execute("type.para", &json!({"attrs": {"tabs": tabs}})).unwrap();
+        let d = s.doc().unwrap().doc.clone();
+        let stored = d.story(designcraft_doc::StoryId(sid)).unwrap().paras[0].para.tabs.clone().unwrap();
+        let at: Vec<f64> = stored.iter().map(|t| t.position).collect();
+        assert_eq!(at, [0.0, 72.0, 200.0, super::MAX_POSITION], "clamped and sorted");
+        assert_eq!((stored[0].leader.as_str(), stored[2].align_on.as_str()), (". ", "."), "a char stop aligns on a point");
     }
 
     #[test]

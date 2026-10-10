@@ -575,6 +575,60 @@ pub struct TabStop {
 /// The colour of a paragraph rule that follows the paragraph's text colour.
 pub const TEXT_COLOR: &str = "Text Color";
 
+/// Most stops a paragraph holds.
+pub const MAX_TAB_STOPS: usize = 100;
+/// Furthest stop position: 216 in, the largest page.
+pub const MAX_TAB_POSITION: f64 = 15_552.0;
+/// Longest leader, in characters.
+pub const MAX_TAB_LEADER: usize = 8;
+/// Stops closer than this share a position.
+pub const SAME_TAB_POSITION: f64 = 0.01;
+
+impl TabStop {
+    /// A finite position clamped to `0..=MAX_TAB_POSITION`.
+    pub fn clamp_position(v: f64) -> Result<f64, String> {
+        if v.is_finite() { Ok(v.clamp(0.0, MAX_TAB_POSITION)) } else { Err("position must be a finite number".into()) }
+    }
+
+    /// A leader: up to [`MAX_TAB_LEADER`] characters, no control characters.
+    pub fn check_leader(v: &str) -> Result<(), String> {
+        if v.chars().count() > MAX_TAB_LEADER || v.chars().any(char::is_control) {
+            return Err(format!("`leader`: at most {MAX_TAB_LEADER} printable characters"));
+        }
+        Ok(())
+    }
+
+    /// An align-on character: one printable character or none (a decimal point).
+    pub fn check_align_on(v: &str) -> Result<(), String> {
+        if v.chars().count() > 1 || v.chars().any(char::is_control) {
+            return Err("`alignOn`: one printable character".into());
+        }
+        Ok(())
+    }
+
+    /// A tab-stop list as the Tabs commands keep it: at most [`MAX_TAB_STOPS`] stops, positions
+    /// clamped, leaders and align-on characters checked, a char stop aligning on `.` unless it
+    /// names a character, sorted by position, and one stop per position (the later one wins).
+    pub fn checked_list(tabs: Vec<TabStop>) -> Result<Vec<TabStop>, String> {
+        if tabs.len() > MAX_TAB_STOPS {
+            return Err(format!("a paragraph holds at most {MAX_TAB_STOPS} tab stops"));
+        }
+        let mut out: Vec<TabStop> = Vec::with_capacity(tabs.len());
+        for mut t in tabs {
+            t.position = Self::clamp_position(t.position)?;
+            Self::check_leader(&t.leader)?;
+            Self::check_align_on(&t.align_on)?;
+            if t.align == TabAlign::Char && t.align_on.is_empty() {
+                t.align_on = ".".into();
+            }
+            out.retain(|o| (o.position - t.position).abs() >= SAME_TAB_POSITION);
+            out.push(t);
+        }
+        out.sort_by(|a, b| a.position.total_cmp(&b.position));
+        Ok(out)
+    }
+}
+
 /// A paragraph rule (Rule Above / Rule Below).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -964,11 +1018,21 @@ attr_set! {
 impl ParaAttrs {
     /// [`set_json`](Self::set_json), except that a `ruleAbove` / `ruleBelow` object names only the
     /// rule fields to change; the others keep their values in `current` (the resolved attributes
-    /// of the paragraph or style being edited).
+    /// of the paragraph or style being edited). A `tabs` list is checked and sorted as
+    /// [`TabStop::checked_list`] does.
     pub fn set_json_over(&mut self, key: &str, value: &serde_json::Value, current: &ParaProps) -> Result<(), String> {
         let rule = match key.chars().filter(|c| *c != '_').collect::<String>().to_ascii_lowercase().as_str() {
             "ruleabove" => &current.rule_above,
             "rulebelow" => &current.rule_below,
+            "tabs" if !value.is_null() => {
+                // Count before deserializing: the list may be arbitrarily long.
+                if value.as_array().is_some_and(|a| a.len() > MAX_TAB_STOPS) {
+                    return Err(format!("{key}: a paragraph holds at most {MAX_TAB_STOPS} tab stops"));
+                }
+                let tabs: Vec<TabStop> = serde_json::from_value(value.clone()).map_err(|e| format!("{key}: {e}"))?;
+                self.tabs = Some(TabStop::checked_list(tabs).map_err(|e| format!("{key}: {e}"))?);
+                return Ok(());
+            }
             _ => return self.set_json(key, value),
         };
         let serde_json::Value::Object(patch) = value else { return self.set_json(key, value) };
@@ -1136,6 +1200,16 @@ mod tests {
         assert_eq!(p.size, 11.0);
         assert_eq!(p.tracking, 20.0);
         assert_eq!(p.font_family, "Source Serif 4");
+    }
+
+    #[test]
+    fn tab_lists_are_checked() {
+        let stop = |position: f64| TabStop { position, align: TabAlign::Left, leader: String::new(), align_on: String::new() };
+        assert!(TabStop::checked_list(vec![stop(f64::NAN)]).is_err());
+        assert!(TabStop::checked_list(vec![stop(f64::INFINITY)]).is_err());
+        assert!(TabStop::checked_list((0..=MAX_TAB_STOPS).map(|i| stop(i as f64)).collect()).is_err());
+        let list = TabStop::checked_list(vec![stop(50.0), TabStop { leader: ".".into(), ..stop(10.0) }, stop(50.001)]).unwrap();
+        assert_eq!(list.iter().map(|t| t.position).collect::<Vec<_>>(), [10.0, 50.001], "sorted, one stop per position");
     }
 
     #[test]
