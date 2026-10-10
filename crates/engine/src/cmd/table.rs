@@ -732,8 +732,8 @@ impl StrokeEdit {
                 let kind: StrokeType = serde_json::from_value(t.clone()).map_err(|e| bad(cmd, format!("bad stroke type: {e}")))?;
                 let finite = |v: &[f64]| v.len() <= 64 && v.iter().all(|x| x.is_finite() && *x >= 0.0);
                 match &kind {
-                    StrokeType::Dashed { pattern } if !finite(pattern) || pattern.iter().all(|x| *x == 0.0) => {
-                        return Err(bad(cmd, "a dash pattern needs up to 64 non-negative lengths, not all zero"));
+                    StrokeType::Dashed { pattern } if !StrokeType::valid_dash_pattern(pattern) => {
+                        return Err(bad(cmd, "a dash pattern needs 1 to 64 lengths, each 0 or 0.1 to 10000 pt, not all 0"));
                     }
                     StrokeType::Stripes { bands } if bands.len() > 64 || !bands.iter().all(|(a, b)| finite(&[*a, *b])) => {
                         return Err(bad(cmd, "stripes need up to 64 bands of non-negative numbers"));
@@ -760,21 +760,11 @@ impl StrokeEdit {
     }
 }
 
-/// The stroke an edge shows: the table border on an unoverridden perimeter edge, else the cell's.
-fn shown_edge<'a>(cell: &'a designcraft_doc::Cell, side: usize, perimeter: bool, borders: &'a [CellStroke; 4]) -> &'a CellStroke {
-    match borders.get(side) {
-        Some(border) if perimeter && !cell.border_overrides.get(side).copied().unwrap_or(false) => border,
-        _ => &cell.strokes[side.min(3)],
-    }
-}
-
-/// Whether each side (top, left, bottom, right; physical) of the cell is on the table's perimeter.
-fn perimeter(t: &Table, (r, c): (usize, usize), cell: &designcraft_doc::Cell) -> [bool; 4] {
-    let (nr, nc) = (t.nrows(), t.ncols());
-    let rtl = t.options.direction == designcraft_doc::TextDirection::RightToLeft;
-    let at_bottom = r.saturating_add(cell.row_span.max(1) as usize);
-    let at_right = c.saturating_add(cell.col_span.max(1) as usize);
-    [r == 0, if rtl { at_right >= nc } else { c == 0 }, at_bottom >= nr, if rtl { c == 0 } else { at_right >= nc }]
+/// The stroke drawn on side `side` of the owner cell at `(r, c)` (where that side meets its
+/// first neighbour), as rendering resolves it; the cell's own copy if the side has no stretch.
+fn drawn_side(t: &Table, owners: &[(usize, usize)], (r, c): (usize, usize), side: usize) -> Option<CellStroke> {
+    let drawn = compose::table::cell_side_strokes(t, owners, (r, c), side).first().map(|s| s.stroke.clone());
+    drawn.or_else(|| t.cell(r, c).and_then(|cell| cell.strokes.get(side).cloned()))
 }
 
 fn set_cell(s: &mut Session, p: &Value) -> Result<Value> {
@@ -809,19 +799,32 @@ fn set_cell(s: &mut Session, p: &Value) -> Result<Value> {
         let nc = t.ncols();
         let nr = t.nrows();
         let rtl = t.options.direction == designcraft_doc::TextDirection::RightToLeft;
-        let borders: [CellStroke; 4] = std::array::from_fn(|side| t.options.border_for(side).clone());
         // Local edits outrank previously imported edges, including explicit zero/None.
         let priority = if stroke.is_some() { next_cell_stroke_priority(t) } else { 0 };
         let rg = g.range;
+        // Each chosen edge starts from the stroke drawn there, which both copies of a shared
+        // edge then take, so the edit changes only the attributes it names.
+        let mut bases = std::collections::HashMap::new();
+        if let Some((_, edges)) = &stroke {
+            for r in rg.r0..=rg.r1 {
+                for c in rg.c0..=rg.c1 {
+                    if owners.get(r * nc + c) != Some(&(r, c)) {
+                        continue;
+                    }
+                    let Some(cell) = t.cell(r, c) else { continue };
+                    for (i, on) in edges.sides(rg, (r, c), (cell.row_span, cell.col_span), rtl).into_iter().enumerate() {
+                        if let Some(base) = drawn_side(t, &owners, (r, c), i).filter(|_| on) {
+                            bases.insert((r, c, i), base);
+                        }
+                    }
+                }
+            }
+        }
         for r in rg.r0..=rg.r1 {
             for c in rg.c0..=rg.c1 {
                 if owners.get(r * nc + c) != Some(&(r, c)) {
                     continue;
                 }
-                let on_perimeter = match t.cell(r, c) {
-                    Some(cell) => perimeter(t, (r, c), cell),
-                    None => continue,
-                };
                 let Some(cell) = t.cell_mut(r, c) else { continue };
                 if let Some(f) = &fill {
                     cell.fill = f.clone();
@@ -839,11 +842,9 @@ fn set_cell(s: &mut Session, p: &Value) -> Result<Value> {
                     let len = cell.text.len();
                     cell.text.replace(0..len, tx);
                 }
-                if let Some((edit, edges)) = &stroke {
-                    let chosen = edges.sides(rg, (r, c), (cell.row_span, cell.col_span), rtl);
-                    for (i, on) in chosen.into_iter().enumerate() {
-                        if on {
-                            let base = shown_edge(cell, i, on_perimeter[i], &borders).clone();
+                if let Some((edit, _)) = &stroke {
+                    for i in 0..4 {
+                        if let Some(base) = bases.remove(&(r, c, i)) {
                             cell.strokes[i] = edit.apply(base);
                             cell.stroke_defined[i] = true;
                             cell.stroke_priorities[i] = priority;
@@ -896,7 +897,6 @@ fn get_cell_stroke(s: &mut Session, p: &Value) -> Result<Value> {
     let owners = t.owners();
     let nc = t.ncols();
     let rtl = t.options.direction == designcraft_doc::TextDirection::RightToLeft;
-    let borders: [CellStroke; 4] = std::array::from_fn(|side| t.options.border_for(side).clone());
     // One value per key, or null once two edges (cells) disagree.
     fn merge(slot: &mut Option<Value>, v: Value) {
         match slot {
@@ -908,7 +908,8 @@ fn get_cell_stroke(s: &mut Session, p: &Value) -> Result<Value> {
     let keys = ["weight", "color", "tint", "type", "gapColor", "gapTint"];
     let mut stroke: [Option<Value>; 6] = Default::default();
     let (mut fill, mut fill_tint) = (None, None);
-    let mut count = 0usize;
+    // Each drawn edge once: a shared edge is a side of both its cells.
+    let mut seen = std::collections::HashSet::new();
     for r in g.range.r0..=g.range.r1 {
         for c in g.range.c0..=g.range.c1 {
             if owners.get(r * nc + c) != Some(&(r, c)) {
@@ -917,16 +918,20 @@ fn get_cell_stroke(s: &mut Session, p: &Value) -> Result<Value> {
             let Some(cell) = t.cell(r, c) else { continue };
             merge(&mut fill, json!(cell.fill));
             merge(&mut fill_tint, json!(cell.fill_tint));
-            let on_perimeter = perimeter(t, (r, c), cell);
             for (i, on) in edges.sides(g.range, (r, c), (cell.row_span, cell.col_span), rtl).into_iter().enumerate() {
                 if !on {
                     continue;
                 }
-                count += 1;
-                let e = shown_edge(cell, i, on_perimeter[i], &borders);
-                let values = [json!(e.weight), json!(e.color), json!(e.tint), json!(e.kind), json!(e.gap_color), json!(e.gap_tint)];
-                for (slot, v) in stroke.iter_mut().zip(values) {
-                    merge(slot, v);
+                for side in compose::table::cell_side_strokes(t, &owners, (r, c), i) {
+                    let (x, y) = (Some((r, c)), side.neighbor);
+                    if !seen.insert((i % 2, side.boundary, x.min(y), x.max(y))) {
+                        continue;
+                    }
+                    let e = side.stroke;
+                    let values = [json!(e.weight), json!(e.color), json!(e.tint), json!(e.kind), json!(e.gap_color), json!(e.gap_tint)];
+                    for (slot, v) in stroke.iter_mut().zip(values) {
+                        merge(slot, v);
+                    }
                 }
             }
         }
@@ -937,7 +942,7 @@ fn get_cell_stroke(s: &mut Session, p: &Value) -> Result<Value> {
     }
     out.insert("fill".into(), fill.unwrap_or(Value::Null));
     out.insert("fillTint".into(), fill_tint.unwrap_or(Value::Null));
-    out.insert("edges".into(), json!(count));
+    out.insert("edges".into(), json!(seen.len()));
     Ok(Value::Object(out))
 }
 
