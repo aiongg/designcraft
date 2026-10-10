@@ -1,6 +1,7 @@
 //! Design tokens (InDesign's four interface brightness levels), fonts and egui style.
 
-use std::sync::Arc;
+use std::borrow::Cow;
+use std::sync::{Arc, OnceLock};
 
 use egui::{Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Stroke, TextStyle, Visuals};
 use serde::{Deserialize, Serialize};
@@ -255,9 +256,19 @@ impl Tokens {
 
 /// Install the UI fonts for the interface language `lang` (it orders the CJK fallbacks).
 pub fn install_fonts(ctx: &egui::Context, lang: &str) {
+    // Installed faces are read once per process, so a language change only reorders them. Their
+    // bytes are leaked once and borrowed by every `FontData` (`set_fonts` takes the definitions
+    // by value on each call).
+    static SYSTEM: OnceLock<Vec<SystemFont>> = OnceLock::new();
     let craft = designcraft_fonts::CRAFT_FONTS;
+    let system = SYSTEM.get_or_init(|| {
+        system_ui_fonts(craft)
+            .into_iter()
+            .map(|f| SystemFont { bytes: Cow::Borrowed(Box::leak(f.bytes.into_owned().into_boxed_slice())), ..f })
+            .collect()
+    });
     let mut defs = font_definitions(craft, lang);
-    add_system_fallbacks(&mut defs, &system_ui_fonts(craft), lang);
+    add_system_fallbacks(&mut defs, system, lang);
     ctx.set_fonts(defs);
 }
 
@@ -266,7 +277,7 @@ pub(crate) struct SystemFont {
     /// "Jpan", "Hans", "Hant" or "Kore".
     script: &'static str,
     family: String,
-    bytes: Vec<u8>,
+    bytes: Cow<'static, [u8]>,
     index: u32,
 }
 
@@ -311,7 +322,7 @@ fn system_ui_fonts(craft: &[designcraft_fonts::CraftFont]) -> Vec<SystemFont> {
             (face.family.eq_ignore_ascii_case(family) && !face.data().is_empty()).then(|| SystemFont {
                 script,
                 family: (*family).to_string(),
-                bytes: face.data().to_vec(),
+                bytes: Cow::Owned(face.data().to_vec()),
                 index: face.index(),
             })
         })
@@ -354,10 +365,7 @@ fn cjk_script(lang: &str) -> &'static str {
 pub(crate) fn add_system_fallbacks(fonts: &mut FontDefinitions, system: &[SystemFont], lang: &str) {
     let name = |f: &SystemFont| format!("system-{}", f.family);
     for f in system {
-        fonts.font_data.insert(
-            name(f),
-            Arc::new(FontData { index: f.index, tweak: baseline_tweak(&f.bytes, f.index), ..FontData::from_owned(f.bytes.clone()) }),
-        );
+        fonts.font_data.insert(name(f), Arc::new(FontData { font: f.bytes.clone(), index: f.index, tweak: baseline_tweak(&f.bytes, f.index) }));
     }
     let first = cjk_script(lang);
     let preferred: Vec<String> = system.iter().filter(|f| f.script == first).map(name).collect();
@@ -533,7 +541,7 @@ mod japanese_font_tests {
     #[test]
     fn installed_fonts_give_japanese_glyphs_without_craft_fonts() {
         let bytes = designcraft_fonts::testing::font_with("DC UI Japanese", &['日', '本', '語']).unwrap();
-        let system = [super::SystemFont { script: "Jpan", family: "DC UI Japanese".into(), bytes, index: 0 }];
+        let system = [super::SystemFont { script: "Jpan", family: "DC UI Japanese".into(), bytes: bytes.into(), index: 0 }];
         let mut defs = super::font_definitions(&[], "ja");
         super::add_system_fallbacks(&mut defs, &system, "ja");
         for family in families() {
@@ -578,7 +586,7 @@ mod japanese_font_tests {
         let face = |family: &str, chars: &[char], script| super::SystemFont {
             script,
             family: family.into(),
-            bytes: designcraft_fonts::testing::font_with(family, chars).unwrap(),
+            bytes: designcraft_fonts::testing::font_with(family, chars).unwrap().into(),
             index: 0,
         };
         let system = [face("DC UI Korean", &['한', '글'], "Kore"), face("DC UI Japanese", &['日'], "Jpan")];
@@ -604,7 +612,7 @@ mod japanese_font_tests {
         let face = |family: &str, script| super::SystemFont {
             script,
             family: family.into(),
-            bytes: designcraft_fonts::testing::font_with(family, &['日']).unwrap(),
+            bytes: designcraft_fonts::testing::font_with(family, &['日']).unwrap().into(),
             index: 0,
         };
         let system = [face("DC Ja", "Jpan"), face("DC Hans", "Hans"), face("DC Hant", "Hant"), face("DC Ko", "Kore")];

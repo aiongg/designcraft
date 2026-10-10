@@ -2683,7 +2683,7 @@ mod tests {
         for (max_side, patches) in [(None, true), (Some(1024), false)] {
             let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
             let ctx = egui::Context::default();
-            let mut frame = |app: &mut DesignApp| {
+            let frame = |app: &mut DesignApp| {
                 // Wider than the limit (egui's font atlas needs at least 1024).
                 let mut raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1900.0, 900.0))), ..Default::default() };
                 if let Some(m) = max_side {
