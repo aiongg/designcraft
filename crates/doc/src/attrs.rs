@@ -778,6 +778,9 @@ attr_set! {
         keep_last: u32 = 2,
         start_paragraph: StartParagraph = StartParagraph::Anywhere,
         span_columns: SpanColumns = SpanColumns::Single,
+        /// Split Columns: the space between sub-columns and the inset from the column's edges.
+        split_inside_gutter: f64 = 6.0,
+        split_outside_gutter: f64 = 0.0,
         rule_above: Rule = Rule::default(),
         rule_below: Rule = Rule::default(),
         tabs: Vec<TabStop> = Vec::new(),

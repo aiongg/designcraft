@@ -1302,6 +1302,8 @@ impl<'r> Importer<'r> {
                 _ => SpanColumns::Single,
             });
         }
+        a.split_inside_gutter = e.num("SplitColumnInsideGutter").filter(|v| v.is_finite());
+        a.split_outside_gutter = e.num("SplitColumnOutsideGutter").filter(|v| v.is_finite());
         a.rule_above = self.rule(e, "RuleAbove");
         a.rule_below = self.rule(e, "RuleBelow");
         if let Some(tl) = e.prop_el("TabList") {

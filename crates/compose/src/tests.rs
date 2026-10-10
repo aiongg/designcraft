@@ -2071,3 +2071,102 @@ fn spanning_paragraph_in_rtl_and_vertical_frames() {
     assert_no_overlap(&cs.frames[0]);
     assert!(cs.frames[0].lines.iter().any(|l| l.para == h));
 }
+
+// ---------- split columns ----------
+
+/// A story of a body paragraph, `split` paragraphs in split columns and `after` body paragraphs.
+/// Returns the index of the first split paragraph.
+fn split_doc(split: usize, after: usize, rect: Rect, cfg: (u32, f64, f64)) -> (Document, StoryId, ItemId, usize) {
+    let mut paras: Vec<&str> = vec![LOREM; 1 + split + after];
+    paras[0] = "An introduction set at the full measure of the column, before the split block.";
+    let (mut d, sid, fid) = doc_with(&paras.join("\n"), rect, ParaAttrs::default());
+    let st = d.story_mut(sid).unwrap();
+    for p in &mut st.paras[1..=split] {
+        p.para.span_columns = Some(SpanColumns::Split(cfg.0));
+        p.para.split_inside_gutter = Some(cfg.1);
+        p.para.split_outside_gutter = Some(cfg.2);
+    }
+    (d, sid, fid, 1)
+}
+
+/// The sub-columns of `col`: (x0, x1) of each.
+fn sub_columns(col: Rect, (n, inside, outside): (u32, f64, f64)) -> Vec<(f64, f64)> {
+    let w = (col.width() - 2.0 * outside - inside * (n - 1) as f64) / n as f64;
+    (0..n).map(|k| col.x0 + outside + k as f64 * (w + inside)).map(|x| (x, x + w)).collect()
+}
+
+/// The split paragraphs' lines, by sub-column.
+fn split_lines<'a>(ft: &'a FrameText, paras: std::ops::Range<usize>, subs: &[(f64, f64)]) -> Vec<Vec<&'a Line>> {
+    let mut by_sub = vec![Vec::new(); subs.len()];
+    for l in ft.lines.iter().filter(|l| paras.contains(&l.para)) {
+        let k = subs.iter().position(|&(x0, x1)| (l.x0 - x0).abs() < 1e-6 && (l.x1 - x1).abs() < 1e-6);
+        let k = k.unwrap_or_else(|| panic!("line of para {} at {}..{} is in no sub-column of {subs:?}", l.para, l.x0, l.x1));
+        by_sub[k].push(l);
+    }
+    by_sub
+}
+
+#[test]
+fn split_paragraphs_are_set_in_balanced_sub_columns() {
+    for cfg in [(2, 12.0, 10.0), (3, 6.0, 0.0)] {
+        let (d, sid, _, s) = split_doc(2, 1, Rect::new(0.0, 0.0, 400.0, 700.0), cfg);
+        let cs = compose_story(&d, sid, &ComposeOptions::default());
+        assert!(!cs.is_overset());
+        let ft = &cs.frames[0];
+        assert_no_overlap(ft);
+        let by_sub = split_lines(ft, s..s + 2, &sub_columns(ft.columns[0], cfg));
+        let counts: Vec<usize> = by_sub.iter().map(Vec::len).collect();
+        assert!(counts.iter().all(|&n| n > 0), "{cfg:?}: {counts:?}");
+        assert!(counts.iter().max().unwrap() - counts.iter().min().unwrap() <= 1, "{cfg:?}: balanced {counts:?}");
+        // Every sub-column starts on the same baseline, below the paragraph before the block.
+        let firsts: Vec<f64> = by_sub.iter().map(|v| v[0].baseline).collect();
+        assert!(firsts.iter().all(|b| (b - firsts[0]).abs() < 1e-6), "{cfg:?}: {firsts:?}");
+        let intro = ft.lines.iter().filter(|l| l.para == 0).map(|l| line_box(l).1).fold(f64::NEG_INFINITY, f64::max);
+        assert!(firsts[0] > intro && firsts[0] < intro + 20.0, "{cfg:?}: block at {} after {intro}", firsts[0]);
+        // The text after the block continues at the full measure below its deepest sub-column.
+        let bottom = by_sub.iter().flatten().map(|l| line_box(l).1).fold(f64::NEG_INFINITY, f64::max);
+        let next = ft.lines.iter().find(|l| l.para == s + 2).unwrap();
+        assert!(line_box(next).0 >= bottom - 0.5 && line_box(next).0 < bottom + 20.0, "{cfg:?}: {} after {bottom}", line_box(next).0);
+        assert!((next.x0 - ft.columns[0].x0).abs() < 1e-6 && (next.x1 - ft.columns[0].x1).abs() < 1e-6);
+    }
+}
+
+#[test]
+fn split_block_in_the_second_column_and_at_the_story_end() {
+    let cfg = (2, 12.0, 0.0);
+    let (mut d, sid, fid, s) = split_doc(3, 0, Rect::new(0.0, 0.0, 540.0, 400.0), cfg);
+    d.item_mut(fid).unwrap().text_frame_mut().unwrap().options.columns = 2;
+    d.story_mut(sid).unwrap().paras[s].para.start_paragraph = Some(StartParagraph::NextColumn);
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    assert!(!cs.is_overset());
+    let ft = &cs.frames[0];
+    assert_no_overlap(ft);
+    assert!(ft.lines.iter().filter(|l| l.para >= s).all(|l| l.column == 1));
+    let by_sub = split_lines(ft, s..s + 3, &sub_columns(ft.columns[1], cfg));
+    // Nothing follows the block: it fills its first sub-column to the bottom of the frame, then
+    // the next.
+    let (a, b) = (&by_sub[0], &by_sub[1]);
+    assert!(!a.is_empty() && !b.is_empty() && a.len() > b.len() + 1, "{} and {} lines", a.len(), b.len());
+    let low = a.last().unwrap();
+    assert!(low.baseline + low.descent > 400.0 - low.leading, "the first sub-column ends at {}", low.baseline);
+    assert!((a[0].baseline - b[0].baseline).abs() < 1e-6);
+}
+
+#[test]
+fn split_block_flows_into_the_next_column() {
+    let cfg = (2, 12.0, 0.0);
+    let (mut d, sid, fid, s) = split_doc(6, 1, Rect::new(0.0, 0.0, 540.0, 200.0), cfg);
+    d.item_mut(fid).unwrap().text_frame_mut().unwrap().options.columns = 2;
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let ft = &cs.frames[0];
+    assert_no_overlap(ft);
+    for c in 0..2 {
+        let in_col: Vec<&Line> = ft.lines.iter().filter(|l| l.column == c as u32).collect();
+        let lines: Vec<&Line> = in_col.iter().copied().filter(|l| (s..s + 6).contains(&l.para)).collect();
+        let subs = sub_columns(ft.columns[c], cfg);
+        assert!(subs.iter().all(|&(x0, x1)| lines.iter().any(|l| (l.x0 - x0).abs() < 1e-6 && (l.x1 - x1).abs() < 1e-6)), "column {c}");
+    }
+    // The block continues at the top of the second column.
+    let top = ft.lines.iter().find(|l| l.column == 1).unwrap();
+    assert!((s..s + 6).contains(&top.para) && top.baseline < 20.0);
+}
