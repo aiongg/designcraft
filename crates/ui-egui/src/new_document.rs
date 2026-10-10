@@ -139,18 +139,20 @@ pub(crate) fn remember(app: &mut DesignApp, p: &Value) {
     recent.truncate(MAX_RECENT);
 }
 
-/// Save the details as the document preset `name` (replacing one of that name) and show it.
-fn save_preset(app: &mut DesignApp, d: &mut Dialog, name: &str) {
+/// Save the details as the document preset `name` (`file.savePreset`, which replaces one of that
+/// name) and show it on the Saved tab.
+fn save_preset(app: &mut DesignApp, d: &mut Dialog, name: &str) -> Result<(), String> {
     let name = name.trim();
-    let Some(mut nd) = as_preset(&params(d)) else { return };
-    if name.is_empty() {
-        return;
+    let mut p = params(d);
+    if let Some(o) = p.as_object_mut() {
+        o.remove("title");
+        o.retain(|_, v| !v.is_null());
+        o.insert("name".into(), json!(name));
     }
-    nd.title = name.to_string();
-    app.ui.document_presets.retain(|p| p.title != name);
-    app.ui.document_presets.push(nd);
+    app.run("file.savePreset", p)?;
     d.fields.insert("tab".into(), json!("saved"));
     d.fields.insert("preset".into(), json!(format!("saved:{name}")));
+    Ok(())
 }
 
 /// The built-in preset `nd` is the size of, if any.
@@ -184,7 +186,8 @@ fn cards(app: &DesignApp, tab: &str) -> Vec<Card> {
                 .collect()
         }
         "saved" => app
-            .ui
+            .session
+            .prefs
             .document_presets
             .iter()
             .map(|nd| Card { key: format!("saved:{}", nd.title), label: nd.title.clone(), nd: nd.clone(), custom: preset_name(nd).is_none() })
@@ -366,8 +369,10 @@ fn presets(app: &mut DesignApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             }
         }
     });
-    if let Some(name) = delete {
-        app.ui.document_presets.retain(|p| p.title != name);
+    if let Some(name) = delete
+        && let Err(e) = app.run("file.deletePreset", json!({"name": name}))
+    {
+        app.status(e);
     }
     create
 }
@@ -586,17 +591,30 @@ fn details(app: &mut DesignApp, ui: &mut Ui, d: &mut Dialog) {
             d.fields.insert("name".into(), json!(name));
         }
         let save = crate::widgets::icon_toggle_sized(ui, "preset-save", false, tr("Save Document Preset"), vec2(30.0, 26.0));
-        egui::Popup::menu(&save).show(|ui| {
+        save.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr("Save Document Preset")));
+        // It holds a text field: clicks inside it don't close it.
+        egui::Popup::menu(&save).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
             ui.set_min_width(220.0);
             crate::rtl::label(ui, tr("Save Document Preset As:"));
             let mut preset = d.s("presetName");
-            if ui.add(egui::TextEdit::singleline(&mut preset).hint_text(tr("Custom")).desired_width(200.0)).changed() {
+            let field = ui.add(egui::TextEdit::singleline(&mut preset).hint_text(tr("Custom")).desired_width(200.0));
+            field.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, tr("Preset Name")));
+            // Type the name as soon as the popup opens.
+            if save.clicked() {
+                field.request_focus();
+            }
+            if field.changed() {
                 d.fields.insert("presetName".into(), json!(preset));
             }
-            if ui.button(crate::rtl::widget(ui, tr("Save Preset"))).clicked() {
+            // Enter in the name saves the preset (the dialog ignores keys while a popup is open).
+            let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if ui.button(crate::rtl::widget(ui, tr("Save Preset"))).clicked() || enter {
                 let name = if preset.trim().is_empty() { tr("Custom").to_string() } else { preset };
-                save_preset(app, d, &name);
-                ui.close();
+                match save_preset(app, d, &name) {
+                    Ok(()) => ui.close(),
+                    // Refused (a built-in name…): stay open to be corrected.
+                    Err(e) => app.status(e),
+                }
             }
         });
     });
@@ -828,14 +846,63 @@ mod tests {
         assert_eq!((p["gutter"].as_f64(), p["pages"].as_u64()), (Some(12.0), Some(1)));
     }
 
+    /// The app's window (with a document) with the New Document dialog and its Save Document Preset
+    /// popup open.
+    fn window_with_preset_popup() -> egui_kittest::Harness<'static, crate::test_window::Window> {
+        use egui_kittest::kittest::Queryable as _;
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("app.newDocumentDialog", json!({})).unwrap();
+        let mut h = crate::test_window::open(app, vec2(1440.0, 900.0));
+        // The dialog takes a couple of frames to settle where it opens.
+        h.run_steps(4);
+        let button = h.get_by_label("Save Document Preset").rect().center();
+        crate::test_window::click_at(&mut h, button);
+        assert!(egui::Popup::is_any_open(&h.ctx), "the popup opened");
+        h
+    }
+
+    #[test]
+    fn enter_in_the_preset_popup_saves_the_preset_and_keeps_the_dialog() {
+        use egui_kittest::kittest::Queryable as _;
+        let mut h = window_with_preset_popup();
+        let field = h.get_by_label("Preset Name").rect().center();
+        crate::test_window::click_at(&mut h, field);
+        h.get_by_label("Preset Name").type_text("Brochure");
+        h.run_steps(2);
+        h.key_press(egui::Key::Enter);
+        h.run_steps(4);
+        let app = &mut h.state_mut().app;
+        let d = app.ui.dialog.as_ref().expect("Enter saves the preset; it doesn't create the document");
+        assert_eq!(app.session.documents().len(), 1, "no document was made (the window opens with one)");
+        assert_eq!(app.session.prefs.document_presets.iter().map(|p| p.title.as_str()).collect::<Vec<_>>(), ["Brochure"]);
+        assert_eq!((d.s("tab"), d.s("preset")), ("saved".into(), "saved:Brochure".into()));
+        // The saved preset makes documents by name, as file.new {preset} does from anywhere.
+        app.run("file.new", json!({"preset": "Brochure"})).unwrap();
+        assert!(!egui::Popup::is_any_open(&h.ctx), "the popup closed");
+    }
+
+    #[test]
+    fn escape_in_the_preset_popup_closes_only_the_popup() {
+        let mut h = window_with_preset_popup();
+        h.key_press(egui::Key::Escape);
+        h.run_steps(4);
+        assert!(!egui::Popup::is_any_open(&h.ctx), "Escape closed the popup");
+        assert!(h.state().app.ui.dialog.is_some(), "and left the dialog open");
+        // With no popup open, Escape closes the dialog as before.
+        h.key_press(egui::Key::Escape);
+        h.run_steps(4);
+        assert!(h.state().app.ui.dialog.is_none());
+    }
+
     #[test]
     fn presets_are_saved_by_name_and_recent_documents_once() {
         let mut app = app();
         let mut d = app.ui.dialog.clone().unwrap();
-        save_preset(&mut app, &mut d, " Newsletter ");
+        save_preset(&mut app, &mut d, " Newsletter ").unwrap();
         d.fields.insert("pages".into(), json!(8));
-        save_preset(&mut app, &mut d, "Newsletter");
-        assert_eq!(app.ui.document_presets.len(), 1, "the same name replaces the preset");
+        save_preset(&mut app, &mut d, "Newsletter").unwrap();
+        assert_eq!(app.session.prefs.document_presets.len(), 1, "the same name replaces the preset");
+        assert!(save_preset(&mut app, &mut d, "Letter").is_err(), "a built-in name is refused");
         assert_eq!((d.s("tab"), d.s("preset")), ("saved".into(), "saved:Newsletter".into()));
         let saved = cards(&app, "saved");
         assert_eq!((saved.len(), saved[0].label.as_str(), saved[0].nd.pages), (1, "Newsletter", 8));

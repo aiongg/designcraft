@@ -2866,6 +2866,7 @@ const TABLE: &[(&str, [&str; 5])] = &[
             "存储文档预设为：",
         ],
     ),
+    ("Preset Name", ["Vorgabename", "Nom du paramètre prédéfini", "Nombre del ajuste preestablecido", "プリセット名", "预设名称"]),
     ("Save Preset", ["Vorgabe speichern", "Enregistrer le paramètre prédéfini", "Guardar ajuste preestablecido", "プリセットを保存", "存储预设"]),
     ("Start #", ["Startseitennr.", "N° de début", "N.º inicial", "開始ページ番号", "起始页码"]),
     ("Column Gutter", ["Spaltenabstand", "Gouttière", "Medianil", "列間隔", "栏间距"]),
