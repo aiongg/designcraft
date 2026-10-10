@@ -3061,12 +3061,14 @@ fn cjk_aki_below_sets_the_upper_lines_leading_below_it() {
     };
     let lines = lines_with(japanese());
     assert_eq!(lines.len(), 2);
-    let em_bottom = |l: &Line| {
+    // Aki Below measures from the em box tops: the lower line's sits the upper line's leading
+    // below the upper line's.
+    let em_top = |l: &Line| {
         let g = &l.glyphs[0];
         let (a, b) = g.face.vertical_metrics();
-        l.baseline + b / (a + b) * g.face.units_per_em() * g.sy
+        l.baseline - a / (a + b) * g.face.units_per_em() * g.sy
     };
-    let gap = em_bottom(&lines[1]) - em_bottom(&lines[0]);
+    let gap = em_top(&lines[1]) - em_top(&lines[0]);
     assert!((gap - 40.0).abs() < 1e-6, "{gap}");
     // The other composers advance by the lower line's leading, baseline to baseline.
     let lines = lines_with(ParaAttrs::default());
