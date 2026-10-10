@@ -2209,6 +2209,28 @@ fn one_line_drop_cap_keeps_its_size_and_sets_its_tabs() {
     assert!((text_x(l, 3) - 40.0).abs() < 1e-6, "the text starts at the left tab: {}", text_x(l, 3));
 }
 
+/// Right to left, the tabs in a drop cap advance to tab stops measured from the column's right
+/// edge.
+#[test]
+fn right_to_left_drop_cap_sets_its_tabs_from_the_right_edge() {
+    let stop = |position, align| designcraft_doc::TabStop { position, align, leader: String::new(), align_on: String::new() };
+    let para = ParaAttrs {
+        direction: Some(designcraft_doc::TextDirection::RightToLeft),
+        align: Some(Align::Right),
+        tabs: Some(vec![stop(30.0, TabAlign::Right), stop(40.0, TabAlign::Left)]),
+        ..drop_cap(1, 3)
+    };
+    let (d, sid, _) = drop_doc(&format!("\t7\t{LOREM}"), para);
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let l = &cs.frames[0].lines[0];
+    let seven = l.glyphs.iter().find(|g| g.byte == 1).unwrap();
+    // The 300 pt column's right edge is at 300: the number's far (left) end is 30 pt from it.
+    assert!((seven.x - 270.0).abs() < 1e-6, "the number ends at the right tab: {}", seven.x);
+    // The text beside it starts at the left tab, 40 pt from the edge.
+    let right = l.glyphs.iter().filter(|g| g.byte >= 3 && g.visible).map(|g| g.x + g.adv).fold(f64::NEG_INFINITY, f64::max);
+    assert!(right <= 260.0 + 1e-6 && right > 255.0, "text ends at {right}");
+}
+
 /// A rule in Text Color takes the colour of the paragraph's text: the first character's for the
 /// rule above, the last character's for the rule below. A swatch colour is used as is.
 #[test]

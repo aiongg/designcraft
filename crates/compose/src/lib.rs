@@ -695,7 +695,8 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
         let drop_grid = cur_frame.and_then(|f| f.grid).filter(|_| pp.grid_align == GridAlign::AllLines).map(|g| g.1);
         // Align Left Edge (left-to-right paragraphs).
         let drop_align = pp.drop_cap_align_left && pp.direction == designcraft_doc::TextDirection::LeftToRight;
-        let drop_tabs = (pp.direction == designcraft_doc::TextDirection::LeftToRight).then_some((&pp.tabs[..], pp.left_indent));
+        // Tab stops for the drop cap, with the start-side indent (the right one, right to left).
+        let drop_tabs = (&pp.tabs[..], if pp.direction == designcraft_doc::TextDirection::RightToLeft { pp.right_indent } else { pp.left_indent });
         if !pp.nested_line_styles.is_empty() && cur.fi < frames.len() {
             // Nested line styles: find where the first lines end in this column, restyle them, and
             // look again (the style changes the widths) until the lines settle.
@@ -2869,9 +2870,10 @@ struct DropCap {
 /// it so its cap height reaches from the first line's cap height down to line `lines`' baseline,
 /// measured in the leading and cap height of the text after it. A one-line drop cap keeps its own
 /// size when that is smaller. On a baseline grid of increment `grid`, lines are that many grid
-/// steps apart. With `align_left` its ink starts at the indent (see [`DropCap::lsb`]). `tabs`
-/// (stops and left indent, left-to-right paragraphs) sets the tabs inside it. Spaces right after
-/// it join it at its size without widening it.
+/// steps apart. With `align_left` its ink starts at the indent (see [`DropCap::lsb`]). Tabs inside
+/// it advance to the stops of `tabs` (stops and the start-side indent; in right-to-left paragraphs
+/// both measured from the column's right edge). Spaces right after it join it at its size without
+/// widening it.
 #[allow(clippy::too_many_arguments)]
 fn split_drop_cap(
     db: &ScopedFonts<'_>,
@@ -2882,7 +2884,7 @@ fn split_drop_cap(
     base_cap: f64,
     grid: Option<f64>,
     align_left: bool,
-    tabs: Option<(&[designcraft_doc::TabStop], f64)>,
+    tabs: (&[designcraft_doc::TabStop], f64),
 ) -> Option<DropCap> {
     let n = glyphs.iter().take_while(|g| g.byte < end).count();
     if n == 0 {
@@ -2926,19 +2928,19 @@ fn split_drop_cap(
         }
         _ => 0.0,
     };
-    // Tabs advance to the paragraph's stops, measured from the column edge as in its lines.
-    if let Some((stops, left_indent)) = tabs {
-        let mut x = left_indent - lsb;
-        for i in 0..dc.len() {
-            let tab = match dc.get(i) {
-                Some(g) if g.ch == '\t' => Some(tab_advance(stops, left_indent, x, dc.get(i + 1..).unwrap_or_default()).0),
-                _ => None,
-            };
-            if let (Some(w), Some(g)) = (tab, dc.get_mut(i)) {
-                g.adv = w;
-            }
-            x += dc.get(i).map_or(0.0, |g| g.adv);
+    // Tabs advance to the paragraph's stops, measured from the column's start edge. Right to left,
+    // its glyphs run from that (right) edge in this order (see `place_drop_cap`).
+    let (stops, indent) = tabs;
+    let mut x = indent - lsb;
+    for i in 0..dc.len() {
+        let tab = match dc.get(i) {
+            Some(g) if g.ch == '\t' => Some(tab_advance(stops, indent, x, dc.get(i + 1..).unwrap_or_default()).0),
+            _ => None,
+        };
+        if let (Some(w), Some(g)) = (tab, dc.get_mut(i)) {
+            g.adv = w;
         }
+        x += dc.get(i).map_or(0.0, |g| g.adv);
     }
     let width = dc.iter().map(|g| g.adv).sum();
     dc.append(&mut after);
