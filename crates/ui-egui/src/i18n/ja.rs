@@ -1841,6 +1841,7 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Bounding Box (Visible Layers Only)", "バウンディングボックス（表示レイヤーのみ）"),
     ("Bounding Box (All Layers)", "バウンディングボックス（すべてのレイヤー）"),
 
+
 ];
 
 /// Captions whose Japanese depends on where they appear: (English, context, Japanese).
