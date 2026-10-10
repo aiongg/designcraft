@@ -4002,3 +4002,38 @@ fn justified_line_with_a_tab_justifies_the_text_after_its_last_tab() {
     }
     assert!((x_of(lines[0], 0) - 36.0).abs() < 0.5, "note text starts at the default tab stop: {}", x_of(lines[0], 0));
 }
+
+#[test]
+fn mojikumi_justification_after_a_tab_keeps_the_text_before_it() {
+    // Justification (mojikumi included) adjusts only the text after a line's last tab.
+    use designcraft_doc::cjk::{MojikumiAki, MojikumiTable};
+    let stop = designcraft_doc::TabStop { position: 100.0, align: TabAlign::Left, leader: String::new(), align_on: String::new() };
+    let compose = |align| {
+        let para =
+            ParaAttrs { align: Some(align), mojikumi: Some("MojikumiTable/Elastic".into()), tabs: Some(vec![stop.clone()]), ..Default::default() };
+        let (mut d, sid, _) = doc_with("A1A1\tA1A1", Rect::new(0.0, 0.0, 300.0, 100.0), para);
+        Arc::make_mut(&mut d.styles).mojikumi_tables.push(MojikumiTable {
+            name: "Elastic".into(),
+            based_on: "SimpChineseDefault".into(),
+            overrides: vec![MojikumiAki {
+                target_class: 18,
+                side_class: 25,
+                after: true,
+                minimum: 0.0,
+                desired: 0.0,
+                maximum: 5.0,
+                priority: 1,
+                ..Default::default()
+            }],
+        });
+        compose_story(&d, sid, &ComposeOptions::default())
+    };
+    let justified = compose(Align::FullyJustified);
+    let ragged = compose(Align::Left);
+    let (l, r) = (all_lines(&justified)[0], all_lines(&ragged)[0]);
+    assert!(l.end_x > r.end_x + 1.0, "the text after the tab stretches: {} vs {}", l.end_x, r.end_x);
+    let x_of = |l: &Line, byte: usize| l.glyphs.iter().find(|g| g.byte == byte && g.len > 0).map(|g| g.x).unwrap();
+    for byte in 0..5 {
+        assert!((x_of(l, byte) - x_of(r, byte)).abs() < 1e-6, "byte {byte} before the tab moved: {} vs {}", x_of(l, byte), x_of(r, byte));
+    }
+}

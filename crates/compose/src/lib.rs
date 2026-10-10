@@ -2304,7 +2304,7 @@ fn layout_line(
         }
     }
     if (justify_this || squeeze_last) && (extra >= 0.0 || sp.kinsoku_priority != 3) {
-        extra = mojikumi::distribute(&mut line, extra, &mut add);
+        extra = mojikumi::distribute(line.get_mut(seg..).unwrap_or_default(), extra, add.get_mut(seg..).unwrap_or_default());
     }
     if (justify_this || squeeze_last) && !spaces.is_empty() {
         let rebased: Vec<usize> = spaces.iter().map(|&i| i - seg).collect();
