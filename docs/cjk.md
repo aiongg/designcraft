@@ -37,7 +37,7 @@ presets or tables are copied. Our default mojikumi and kinsoku tables are built 
 | Korean line breaking | at spaces (Hangul everywhere, hanja in Korean text); per-paragraph character-based breaking (`koreanCharBreaks`); DesignCraft-only, not in IDML |
 | Mojikumi | tables and paragraph references kept through IDML; not applied (Preflight says so) |
 | Aki, tsume, jidori | done ([cjk-typography.md](cjk-typography.md)) |
-| Character alignment, leading model | em box top / centre / bottom, ICF from ascender and descender, roman baseline; aki above / below, centre (centre down as centre); with the Japanese composers (`Composer::Japanese`, `JapaneseSingleLine`, IDML `HL Composer J` / `HL Single J`), the others set lines baseline to baseline on the Roman baseline |
+| Character alignment, leading model | em box top / centre / bottom, ICF from ascender and descender, roman baseline; aki above / below, centre (centre down as centre); under aki below a line's leading is the space to the line below it; with the Japanese composers (`Composer::Japanese`, `JapaneseSingleLine`, IDML `HL Composer J` / `HL Single J`), the others set lines baseline to baseline on the Roman baseline |
 | Tate-chu-yoko | manual, with offsets; no auto, 3+ digits overflow the em |
 | Ruby | group ruby only, fixed 50 % size, no options, doesn't affect leading |
 | Kenten | the IDML kinds and a custom character, drawn as characters; no position, size, alignment, colour or font |
