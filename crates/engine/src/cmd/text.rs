@@ -465,7 +465,10 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     let tracking = s.doc()?.doc.settings.track_changes;
     let autocorrect = (s.prefs.autocorrect && !tracking && !raw).then(|| s.prefs.autocorrect_list.clone());
     let typing = typing_format(s).cloned();
-    s.typing_format = None;
+    // A preview (IME marked text) leaves the typing format to the text typed in the end.
+    if s.active().is_none_or(|d| d.interaction.is_none()) {
+        s.typing_format = None;
+    }
     s.edit(|d, sel| {
         let t = sel.text.ok_or_else(|| bad("text.insert", "no insertion point"))?;
         let st = d.text_story_mut(t.story, t.cell).ok_or(designcraft_doc::DocError::NoStory(t.story))?;

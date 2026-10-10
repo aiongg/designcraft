@@ -354,11 +354,18 @@ impl Session {
     }
     pub fn set_active(&mut self, i: usize) {
         if i < self.docs.len() && self.active != Some(i) {
+            // The composition belongs to the document it shows in.
+            if let Err(e) = self.end_composition() {
+                log::warn!("ending the IME composition: {e}");
+            }
             self.stop_data_preview();
             self.active = Some(i);
         }
     }
     pub fn add_document(&mut self, d: DocState) -> usize {
+        if let Err(e) = self.end_composition() {
+            log::warn!("ending the IME composition: {e}");
+        }
         self.stop_data_preview();
         self.docs.push(d);
         self.active = Some(self.docs.len() - 1);
@@ -390,6 +397,12 @@ impl Session {
     /// Run command `id`. A panic inside it becomes [`EngineError::Internal`] and leaves the
     /// document as it was (see [`guard`]).
     pub fn execute(&mut self, id: &str, params: &Value) -> Result<Value> {
+        // A command from outside the IME ends its composition first, keeping the marked text as
+        // typed: Undo then takes back that typing, and nothing runs on top of the preview the
+        // composition would drop. Queries and recovery saves leave it alone.
+        if self.tool.composing() && id != "file.recovery.save" && find_command(id).is_some_and(|c| c.journal || c.undoable) {
+            self.end_composition()?;
+        }
         self.guarded(id, |s| s.execute_unguarded(id, params))
     }
 
@@ -553,5 +566,7 @@ pub(crate) use push_undo as record_undo;
 mod tests;
 #[cfg(test)]
 mod tests_idml;
+#[cfg(test)]
+mod tests_ime;
 #[cfg(test)]
 mod tests_table;
