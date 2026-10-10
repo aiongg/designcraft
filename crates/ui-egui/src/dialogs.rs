@@ -2204,7 +2204,7 @@ fn regex_ok(p: &str) -> Result<(), ()> {
     if p.is_empty() {
         return Ok(());
     }
-    regex::Regex::new(p).map(|_| ()).map_err(|_| ())
+    designcraft_compose::grep::Grep::new(p, Default::default()).map(|_| ()).map_err(|_| ())
 }
 
 fn paragraph_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
