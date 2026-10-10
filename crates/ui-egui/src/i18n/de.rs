@@ -925,7 +925,7 @@ pub(super) const TABLE: &[(&str, &str)] = &[
         "Select a placed video or sound (File › Place a .mp4, .mov, .mp3, .wav …).",
         "Ein platziertes Video oder einen Ton auswählen (Datei › Platzieren: .mp4, .mov, .mp3, .wav …).",
     ),
-    ("Select an object to color its fill or stroke.", "Ein Objekt auswählen, um Fläche oder Kontur zu färben."),
+    ("Select an object or text to color its fill or stroke.", "Ein Objekt oder Text auswählen, um Fläche oder Kontur zu färben."),
     ("Select an object to give its fill a gradient.", "Ein Objekt auswählen, um seiner Fläche einen Verlauf zu geben."),
     ("Select an object to make it a button.", "Ein Objekt auswählen, um es in eine Schaltfläche umzuwandeln."),
     (
