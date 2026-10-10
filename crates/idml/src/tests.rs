@@ -7,6 +7,7 @@ use designcraft_geom::{Rect, shapes};
 
 use super::*;
 
+mod assets;
 mod decorations;
 mod rtl_binding;
 mod variables;
