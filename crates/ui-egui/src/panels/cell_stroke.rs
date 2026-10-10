@@ -76,6 +76,36 @@ fn line_at(r: Rect, p: Pos2) -> Option<usize> {
         .map(|(i, _)| i)
 }
 
+/// A click on the proxy.
+struct ProxyClick {
+    /// The choice before the first click of this click sequence.
+    start: Edges,
+    /// The line clicked, and the line of the click before.
+    hit: Option<usize>,
+    last: Option<usize>,
+    double: bool,
+    triple: bool,
+}
+
+/// Apply a proxy click to `edges`. Returns whether the choice changed.
+fn proxy_click(edges: &mut Edges, click: ProxyClick) -> bool {
+    if click.triple {
+        let all = click.start.iter().all(|on| *on);
+        *edges = [!all; 6];
+        return true;
+    }
+    let Some(h) = click.hit else { return false };
+    if click.double && click.last == Some(h) {
+        let outer = h < 4;
+        for (i, on) in edges.iter_mut().enumerate() {
+            *on = (i < 4) == outer;
+        }
+    } else if let Some(on) = edges.get_mut(h) {
+        *on = !*on;
+    }
+    true
+}
+
 /// The edge proxy. Returns whether the choice changed.
 pub fn edge_proxy(ui: &mut Ui, id: &str, edges: &mut Edges, lang: &str) -> bool {
     let t = Tokens::get(ui.ctx());
@@ -89,24 +119,17 @@ pub fn edge_proxy(ui: &mut Ui, id: &str, edges: &mut Edges, lang: &str) -> bool 
     let hit = resp.interact_pointer_pos().or_else(|| resp.hover_pos()).and_then(|p| line_at(r, p));
     let mut changed = false;
     if resp.clicked() {
-        // A double-click counts only on the line of the click before it.
+        let (double, triple) = (resp.double_clicked(), resp.triple_clicked());
+        // A double-click counts only on the line of the click before it; a triple-click
+        // decides from the choice before the sequence's first click.
         let last_key = ui.id().with((id, "proxy_last"));
+        let start_key = ui.id().with((id, "proxy_start"));
         let last: Option<usize> = ui.data(|d| d.get_temp(last_key)).flatten();
-        if resp.triple_clicked() {
-            let all = edges.iter().all(|on| *on);
-            *edges = [!all; 6];
-            changed = true;
-        } else if let Some(h) = hit {
-            if resp.double_clicked() && last == Some(h) {
-                let outer = h < 4;
-                for (i, on) in edges.iter_mut().enumerate() {
-                    *on = (i < 4) == outer;
-                }
-            } else if let Some(on) = edges.get_mut(h) {
-                *on = !*on;
-            }
-            changed = true;
+        if !double && !triple {
+            ui.data_mut(|d| d.insert_temp(start_key, *edges));
         }
+        let start: Edges = ui.data(|d| d.get_temp(start_key)).unwrap_or(*edges);
+        changed = proxy_click(edges, ProxyClick { start, hit, last, double, triple });
         ui.data_mut(|d| d.insert_temp(last_key, hit));
     }
     let p = ui.painter();
@@ -237,6 +260,18 @@ mod tests {
     use egui_kittest::{Harness, kittest::Queryable};
 
     use super::*;
+
+    #[test]
+    fn proxy_triple_click_clears_all_lines_when_all_were_chosen_and_chooses_all_otherwise() {
+        for (before, after) in [([true; 6], [false; 6]), ([true, false, true, false, false, false], [true; 6]), ([false; 6], [true; 6])] {
+            let mut edges = before;
+            let click = |hit, double, triple| ProxyClick { start: before, hit, last: Some(0), double, triple };
+            proxy_click(&mut edges, click(Some(0), false, false));
+            proxy_click(&mut edges, click(Some(0), true, false));
+            proxy_click(&mut edges, click(Some(0), false, true));
+            assert_eq!(edges, after, "triple-click from {before:?}");
+        }
+    }
 
     #[test]
     fn stroke_panel_proxy_limits_a_weight_change_to_the_chosen_cell_edges() {

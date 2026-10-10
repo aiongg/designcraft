@@ -1429,8 +1429,10 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
                 }
                 for l in &mut layers {
                     let mut on = l["visible"].as_bool().unwrap_or(true);
-                    if ui.checkbox(&mut on, l["name"].as_str().unwrap_or("")).changed() {
-                        l["visible"] = json!(on);
+                    if ui.checkbox(&mut on, l["name"].as_str().unwrap_or("")).changed()
+                        && let Some(o) = l.as_object_mut()
+                    {
+                        o.insert("visible".into(), json!(on));
                     }
                 }
                 d.fields.insert("layers".into(), json!(layers));
@@ -1775,18 +1777,7 @@ fn cell_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
     crate::rtl::label(ui, egui::RichText::new(crate::i18n::tr(&lang, "Cell Stroke")).font(semibold(12.0)));
     let mut edges = cell_stroke::edges_from(d.fields.get("edges").unwrap_or(&Value::Null));
     if cell_stroke::edge_proxy(ui, "cell_options", &mut edges, &lang) {
-        d.fields.insert("edges".into(), cell_stroke::edges_param(&edges));
-        // Fields the user hasn't changed follow the chosen edges.
-        let cur = cell_stroke::current(app, &edges);
-        let seed = d.fields.get("seed").cloned().unwrap_or(Value::Null);
-        let mut next = seed.clone();
-        for (k, stroke) in CELL_OPTION_KEYS {
-            if stroke && d.fields.get(k) == seed.get(k) {
-                d.fields.insert(k.into(), cur[k].clone());
-                next[k] = cur[k].clone();
-            }
-        }
-        d.fields.insert("seed".into(), next);
+        cell_options_edges_changed(app, d, &edges);
     }
     ui.add_space(6.0);
     let values = Value::Object(d.fields.clone());
@@ -1811,6 +1802,28 @@ fn cell_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
         }
         ui.end_row();
     });
+}
+
+/// Cell Options with a new edge choice: the stroke fields the user hasn't changed show the
+/// chosen edges' values, and every stroke field's seed becomes those values, so OK applies
+/// exactly the fields that differ from what the chosen edges show.
+fn cell_options_edges_changed(app: &mut DesignApp, d: &mut Dialog, edges: &crate::panels::cell_stroke::Edges) {
+    d.fields.insert("edges".into(), crate::panels::cell_stroke::edges_param(edges));
+    let cur = crate::panels::cell_stroke::current(app, edges);
+    let mut seed = d.fields.get("seed").and_then(Value::as_object).cloned().unwrap_or_default();
+    for (k, stroke) in CELL_OPTION_KEYS {
+        if !stroke {
+            continue;
+        }
+        let v = cur.get(k).cloned().unwrap_or(Value::Null);
+        // Null shows mixed values; the user can't type it.
+        let field = d.fields.get(k).filter(|f| !f.is_null());
+        if field.is_none() || field == seed.get(k) {
+            d.fields.insert(k.into(), v.clone());
+        }
+        seed.insert(k.into(), v);
+    }
+    d.fields.insert("seed".into(), Value::Object(seed));
 }
 
 /// Apply the Cell Options fields that differ from the cells' values, as one `table.setCell`.
@@ -4903,6 +4916,33 @@ mod tests {
         assert_eq!([gap(0, 0, 2), gap(0, 0, 3)], ["[None]"; 2].map(String::from), "inner edges keep theirs");
         assert!(t.cells.iter().all(|c| c.fill == "[Black]" && (c.fill_tint - 0.2).abs() < 1e-6));
         assert!(t.cells.iter().all(|c| c.strokes.iter().all(|e| e.weight == 1.0)), "unchanged values are not applied");
+    }
+
+    #[test]
+    fn cell_options_edge_changes_reseed_every_stroke_field_and_survive_a_bad_seed() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({})).unwrap();
+        app.run("frame.create", json!({"rect": [72, 72, 400, 400], "content": "text", "caret": true})).unwrap();
+        let tid = app.run("table.insert", json!({"rows": 2, "cols": 2})).unwrap()["table"].as_u64().unwrap();
+        app.run("table.select", json!({"what": "table"})).unwrap();
+        app.run("table.setCell", json!({"stroke": {"weight": 3, "edges": "innerHorizontal"}})).unwrap();
+        app.run("app.cellOptionsDialog", json!({})).unwrap();
+        let mut d = app.ui.dialog.take().unwrap();
+        d.fields.insert("seed".into(), json!(5));
+        let outer = [true, true, true, true, false, false];
+        cell_options_edges_changed(&mut app, &mut d, &outer);
+        assert_eq!((&d.fields["weight"], &d.fields["seed"]["weight"]), (&json!(1.0), &json!(1.0)));
+        // A weight typed for the outer edges, then the inner horizontal edges (3 pt) chosen
+        // and 1 pt typed: 1 pt differs from what those edges show, so OK applies it.
+        d.fields.insert("weight".into(), json!(5.0));
+        cell_options_edges_changed(&mut app, &mut d, &[false, false, false, false, true, false]);
+        assert_eq!((&d.fields["weight"], &d.fields["seed"]["weight"]), (&json!(5.0), &json!(3.0)));
+        d.fields.insert("weight".into(), json!(1.0));
+        app.ui.dialog = Some(d);
+        confirm(&mut app).unwrap();
+        let st = app.session.active().unwrap();
+        let t = st.doc.stories.values().find_map(|s| s.tables.get(&tid)).unwrap();
+        assert_eq!([t.cell(0, 0).unwrap().strokes[2].weight, t.cell(1, 1).unwrap().strokes[0].weight], [1.0; 2]);
     }
 
     #[test]
