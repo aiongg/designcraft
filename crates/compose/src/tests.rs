@@ -3845,3 +3845,36 @@ fn spanning_paragraph_in_rtl_and_vertical_frames() {
     assert_no_overlap(&cs.frames[0]);
     assert!(cs.frames[0].lines.iter().any(|l| l.para == h));
 }
+
+/// A heading spanning the columns mid-frame: text above it is balanced over the columns, text
+/// after it flows below it, and each gutter's rule stops above the heading and resumes below it.
+#[test]
+fn column_rules_break_around_a_spanning_paragraph_between_bands() {
+    let (mut d, sid, fid, h) = span_doc(2, 4, Rect::new(0.0, 0.0, 450.0, 700.0));
+    {
+        let o = &mut d.item_mut(fid).unwrap().text_frame_mut().unwrap().options;
+        o.column_rule = true;
+        o.column_rule_weight = 1.0;
+        o.column_rule_color = "[Black]".into();
+    }
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let ft = &cs.frames[0];
+    assert_no_overlap(ft);
+    let span: Vec<&Line> = ft.lines.iter().filter(|l| l.para == h).collect();
+    assert!(!span.is_empty());
+    let top = span.iter().map(|l| l.baseline - l.ascent).fold(f64::INFINITY, f64::min);
+    let bottom = span.iter().map(|l| l.baseline + l.descent).fold(f64::NEG_INFINITY, f64::max);
+    assert!(ft.lines.iter().any(|l| l.para < h), "text above the heading");
+    assert!(ft.lines.iter().any(|l| l.para > h && l.column > 0 && l.baseline > bottom), "text after the heading flows below it");
+    let rules: Vec<Rect> = ft.decos.iter().filter(|dc| dc.color == "[Black]").map(|dc| dc.rect).collect();
+    let mut gutters: Vec<f64> = rules.iter().map(|r| r.center().x).collect();
+    gutters.sort_by(f64::total_cmp);
+    gutters.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+    assert_eq!(gutters.len(), 2, "{rules:?}");
+    for x in gutters {
+        let here: Vec<&Rect> = rules.iter().filter(|r| (r.center().x - x).abs() < 1e-6).collect();
+        assert!(here.iter().all(|r| r.y1 <= top + 1e-9 || r.y0 >= bottom - 1e-9), "a rule cuts the heading {top}..{bottom}: {here:?}");
+        assert!(here.iter().any(|r| r.y1 <= top + 1e-9), "rule above the heading at {x}: {here:?}");
+        assert!(here.iter().any(|r| (r.y0 - bottom).abs() < 1e-9), "rule resumes below the heading at {x}: {here:?}");
+    }
+}
