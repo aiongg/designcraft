@@ -958,6 +958,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
  "wasm-bindgen-test",
  "zip",
@@ -1013,6 +1014,7 @@ name = "designcraft-idml"
 version = "0.5.0"
 dependencies = [
  "designcraft-color",
+ "designcraft-compose",
  "designcraft-doc",
  "designcraft-geom",
  "quick-xml 0.38.4",
