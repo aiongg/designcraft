@@ -193,6 +193,8 @@ pub struct Prefs {
     pub show_note_anchors: bool,
     /// Preferences › File Handling: minutes between document recovery saves.
     pub recovery_minutes: f64,
+    /// File › New › Document › Save Document Preset: saved document presets, by name (`title`).
+    pub document_presets: Vec<designcraft_doc::build::NewDocument>,
 }
 
 /// A starter autocorrect list (common English typing slips).
@@ -219,6 +221,7 @@ pub fn default_autocorrect() -> Vec<(String, String)> {
 impl Default for Prefs {
     fn default() -> Self {
         Prefs {
+            document_presets: Vec::new(),
             show_hidden_characters: false,
             typographers_quotes: true,
             polygon_sides: 6,
