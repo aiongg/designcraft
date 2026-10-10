@@ -229,8 +229,6 @@ pub struct UiState {
     pub workspace: String,
     /// Window › Workspace › New Workspace: saved panel arrangements.
     pub custom_workspaces: Vec<SavedWorkspace>,
-    /// File › New › Document › Saved: document presets saved by name (`title`).
-    pub document_presets: Vec<designcraft_doc::build::NewDocument>,
     /// File › New › Document › Recent: the settings of the last documents made, newest first.
     pub recent_new_documents: Vec<designcraft_doc::build::NewDocument>,
     /// Transform reference point (0..8, row-major; 0 = top-left).
@@ -331,7 +329,6 @@ impl Default for UiState {
             units: Unit::Picas,
             workspace: "Essentials".into(),
             custom_workspaces: Vec::new(),
-            document_presets: Vec::new(),
             recent_new_documents: Vec::new(),
             ref_point: 0,
             align_to: "selection".into(),

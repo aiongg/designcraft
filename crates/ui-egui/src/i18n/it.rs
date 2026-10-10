@@ -1530,6 +1530,7 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Document Name", "Nome documento"),
     ("Save Document Preset", "Salva predefinito documento"),
     ("Save Document Preset As:", "Salva predefinito documento come:"),
+    ("Preset Name", "Nome predefinito"),
     ("Save Preset", "Salva predefinito"),
     ("Start #", "N. iniziale"),
     ("Column Gutter", "Spazio tra colonne"),
