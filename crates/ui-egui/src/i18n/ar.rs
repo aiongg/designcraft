@@ -1567,4 +1567,12 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Mode:", "الوضع:"),
     ("Continue from Previous Number", "المتابعة من الرقم السابق"),
     ("Start At", "البدء عند"),
+    ("Strokes and Fills…", "الحدود والتعبئة…"),
+    ("Cell Stroke", "حد الخلية"),
+    ("Cell Fill", "تعبئة الخلية"),
+    ("Cell edges", "حواف الخلية"),
+    (
+        "Click a line to include or exclude it. Double-click selects all outer or all inner lines; triple-click selects or clears all.",
+        "انقر على خط لتضمينه أو استبعاده. النقر المزدوج يحدد كل الخطوط الخارجية أو كل الخطوط الداخلية؛ والنقر الثلاثي يحدد الكل أو يلغي تحديده.",
+    ),
 ];

@@ -1164,4 +1164,12 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Mode:", "Modo:"),
     ("Continue from Previous Number", "Continuar do número anterior"),
     ("Start At", "Iniciar em"),
+    ("Strokes and Fills…", "Traçados e preenchimentos…"),
+    ("Cell Stroke", "Traçado da célula"),
+    ("Cell Fill", "Preenchimento da célula"),
+    ("Cell edges", "Bordas da célula"),
+    (
+        "Click a line to include or exclude it. Double-click selects all outer or all inner lines; triple-click selects or clears all.",
+        "Clique em uma linha para incluí-la ou excluí-la. Clique duas vezes para selecionar todas as linhas externas ou internas; clique três vezes para selecionar ou limpar todas.",
+    ),
 ];

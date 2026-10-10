@@ -1587,6 +1587,14 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Mode:", "Режим:"),
     ("Continue from Previous Number", "Продовжити з попереднього номера"),
     ("Start At", "Почати з"),
+    ("Strokes and Fills…", "Обведення та заливки…"),
+    ("Cell Stroke", "Обведення клітинки"),
+    ("Cell Fill", "Заливка клітинки"),
+    ("Cell edges", "Краї клітинки"),
+    (
+        "Click a line to include or exclude it. Double-click selects all outer or all inner lines; triple-click selects or clears all.",
+        "Клацніть лінію, щоб увімкнути або вимкнути її. Подвійне клацання вибирає всі зовнішні або всі внутрішні лінії; потрійне — вибирає всі або знімає вибір.",
+    ),
 ];
 
 /// Contexts whose Ukrainian noun differs from the shared action/text-layout label.

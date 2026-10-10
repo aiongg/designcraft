@@ -1894,6 +1894,14 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Preset Name", "プリセット名"),
     ("Bounding Box (Visible Layers Only)", "バウンディングボックス（表示レイヤーのみ）"),
     ("Bounding Box (All Layers)", "バウンディングボックス（すべてのレイヤー）"),
+    ("Strokes and Fills…", "線と塗り…"),
+    ("Cell Stroke", "セルの線"),
+    ("Cell Fill", "セルの塗り"),
+    ("Cell edges", "セルの境界線"),
+    (
+        "Click a line to include or exclude it. Double-click selects all outer or all inner lines; triple-click selects or clears all.",
+        "線をクリックすると、含めるか除外するかを切り替えます。ダブルクリックで外側または内側の線をすべて選択し、トリプルクリックですべてを選択または解除します。",
+    ),
 ];
 
 /// Captions whose Japanese depends on where they appear: (English, context, Japanese).
