@@ -13,7 +13,7 @@ use crate::{DocState, EngineError, Result, Session};
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         cmd!(noundo "file.new", "Document…", ["File", "New"], Some("Cmd+N"),
-            "{preset?: \"Letter\"|\"A4\"|…, width?, height?, pages?, facingPages?, columns?, gutter?, margins?: number|{top,bottom,inside,outside}, bleed?, title?}",
+            "{preset?: \"Letter\"|\"A4\"|…, intent?: print|web|mobile, units?: points|picas|millimeters|…, width?, height?, pages?, startPage?, facingPages?, columns?, gutter?, margins?: number|{top,bottom,inside,outside}, bleed?, slug?: n | [top, bottom, inside, outside], title?}",
             always, file_new),
         cmd!(noundo "file.newSample", "Sample Document", ["Help"], None, "{} — a multi-page magazine sample", always, file_sample),
         cmd!(query "file.presets", "Document Presets", [], None, "{}", always, |_, _| Ok(serde_json::to_value(PRESETS).unwrap_or_default())),
@@ -120,9 +120,16 @@ fn file_new(s: &mut Session, p: &Value) -> Result<Value> {
         Some(name) => NewDocument::from_preset(name).ok_or_else(|| bad("file.new", format!("unknown preset `{name}`")))?,
         None => NewDocument::default(),
     };
+    if let Some(intent) = p.get("intent").and_then(|v| serde_json::from_value(v.clone()).ok()) {
+        nd.intent = intent;
+    }
+    if let Some(units) = p.get("units").and_then(|v| serde_json::from_value(v.clone()).ok()) {
+        nd.units = units;
+    }
     nd.width = f64_or(p, "width", nd.width);
     nd.height = f64_or(p, "height", nd.height);
     nd.pages = p.get("pages").and_then(Value::as_u64).map(|v| v as usize).unwrap_or(nd.pages).clamp(1, 9999);
+    nd.start_page = p.get("startPage").and_then(Value::as_u64).map(|v| v.clamp(1, 99_999) as u32).unwrap_or(nd.start_page);
     nd.facing_pages = p.get("facingPages").and_then(Value::as_bool).unwrap_or(nd.facing_pages);
     nd.columns = p.get("columns").and_then(Value::as_u64).map(|v| v.clamp(1, 216) as u32).unwrap_or(nd.columns);
     nd.gutter = f64_or(p, "gutter", nd.gutter);
@@ -136,8 +143,11 @@ fn file_new(s: &mut Session, p: &Value) -> Result<Value> {
         }
         _ => {}
     }
-    if let Some(b) = p.get("bleed").and_then(Value::as_f64) {
-        nd.bleed = [b; 4];
+    if let Some(b) = edges(p, "bleed") {
+        nd.bleed = b;
+    }
+    if let Some(b) = edges(p, "slug") {
+        nd.slug = b;
     }
     s.untitled += 1;
     nd.title = str_param(p, "title").map(str::to_string).unwrap_or_else(|| format!("Untitled-{}", s.untitled));
@@ -147,6 +157,18 @@ fn file_new(s: &mut Session, p: &Value) -> Result<Value> {
     let d = Document::new(&nd);
     let i = s.add_document(DocState::new(d, None));
     Ok(json!({"index": i}))
+}
+
+/// A bleed or slug parameter: one width for every edge, or [top, bottom, inside, outside].
+fn edges(p: &Value, key: &str) -> Option<[f64; 4]> {
+    let clean = |v: f64| if v.is_finite() { v.clamp(0.0, 1296.0) } else { 0.0 };
+    match p.get(key)? {
+        Value::Array(a) => match a.iter().map(Value::as_f64).collect::<Option<Vec<f64>>>()?.as_slice() {
+            [t, b, i, o] => Some([clean(*t), clean(*b), clean(*i), clean(*o)]),
+            _ => None,
+        },
+        v => v.as_f64().map(|b| [clean(b); 4]),
+    }
 }
 
 fn file_sample(s: &mut Session, _p: &Value) -> Result<Value> {
@@ -661,6 +683,31 @@ fn file_revert(s: &mut Session, _: &Value) -> Result<Value> {
     {
         let _ = (s, path);
         Err(EngineError::Other("revert isn't available on the web".into()))
+    }
+}
+
+#[cfg(test)]
+mod new_document_tests {
+    use serde_json::json;
+
+    use crate::Session;
+
+    #[test]
+    fn new_document_takes_intent_units_start_page_bleed_and_slug() {
+        let mut s = Session::new();
+        let p = json!({"preset": "A4", "intent": "web", "units": "pixels", "startPage": 4, "bleed": [9, 0, 3, 6], "slug": 18});
+        s.execute("file.new", &p).unwrap();
+        let d = &s.doc().unwrap().doc;
+        assert_eq!(d.settings.intent, designcraft_doc::Intent::Web);
+        assert_eq!(d.settings.horizontal_units, designcraft_geom::Unit::Pixels);
+        assert_eq!(d.settings.bleed, [9.0, 0.0, 3.0, 6.0]);
+        assert_eq!(d.settings.slug, [18.0; 4]);
+        assert_eq!(d.page_name(0), "4");
+        // Malformed edges are ignored, hostile ones bounded.
+        s.execute("file.new", &json!({"bleed": [1, 2], "slug": [-5, 1e12, 0, 0]})).unwrap();
+        let d = &s.doc().unwrap().doc;
+        assert_eq!(d.settings.bleed, [0.0; 4]);
+        assert_eq!(d.settings.slug, [0.0, 1296.0, 0.0, 0.0]);
     }
 }
 

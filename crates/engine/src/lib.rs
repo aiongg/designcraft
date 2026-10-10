@@ -289,6 +289,11 @@ impl Default for Session {
 }
 
 impl Session {
+    /// The name `file.new` gives the next document without a title (New Document shows it).
+    pub fn next_untitled_title(&self) -> String {
+        format!("Untitled-{}", self.untitled.saturating_add(1))
+    }
+
     pub fn new() -> Self {
         guard::install_panic_hook();
         Session {

@@ -1514,4 +1514,23 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Delete Tab", "Elimina tabulazione"),
     ("Repeat Tab", "Ripeti tabulazione"),
     ("Reset Indents", "Ripristina rientri"),
+    // File › New › Document
+    ("Recent", "Recenti"),
+    ("Saved", "Salvati"),
+    ("[Default]", "[Predefinito]"),
+    ("Your Recent Items", "Elementi recenti"),
+    ("Saved Presets", "Predefiniti salvati"),
+    ("Blank Document Presets", "Predefiniti documento vuoto"),
+    (
+        "No saved presets yet. Set the details, then click Save Document Preset.",
+        "Nessun predefinito salvato. Imposta i dettagli, poi fai clic su Salva predefinito documento.",
+    ),
+    ("Delete Preset", "Elimina predefinito"),
+    ("Preset Details", "Dettagli predefinito"),
+    ("Document Name", "Nome documento"),
+    ("Save Document Preset", "Salva predefinito documento"),
+    ("Save Document Preset As:", "Salva predefinito documento come:"),
+    ("Save Preset", "Salva predefinito"),
+    ("Start #", "N. iniziale"),
+    ("Column Gutter", "Spazio tra colonne"),
 ];
