@@ -250,7 +250,10 @@ impl<'a> Ex<'a> {
             .attr("Self", "d")
             .attr("StoryList", story_list.join(" "))
             .attr("Name", format!("{}.indd", d.title))
-            .attr("ZeroPoint", "0 0")
+            .attr("ZeroPoint", {
+                let [x, y] = d.zero_point();
+                format!("{} {}", num(x), num(y))
+            })
             .attr("ActiveLayer", d.layers.first().map(|l| uid(l.id.0)).unwrap_or_else(|| "n".into()));
         root.push(
             El::new("Language")

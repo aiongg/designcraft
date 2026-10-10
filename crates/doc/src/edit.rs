@@ -61,6 +61,37 @@ impl Document {
         }
     }
 
+    /// Where spread `r`'s rulers and X/Y fields measure from, in spread coordinates: the
+    /// top-left corner of its pages moved by the document's zero point.
+    pub fn ruler_origin(&self, r: SpreadRef) -> Option<Point> {
+        let b = self.spread(r)?.bounds();
+        let [x, y] = self.zero_point();
+        Some(Point::new(b.x0 + x, b.y0 + y))
+    }
+
+    /// The document's zero point, kept on the pasteboard (a file may hold any numbers).
+    pub fn zero_point(&self) -> [f64; 2] {
+        self.clamp_zero_point(self.settings.zero_point).unwrap_or([0.0, 0.0])
+    }
+
+    /// `p` (a zero point) kept on the pasteboard around the largest spread, the area the canvas
+    /// shows; `None` when it isn't a finite point.
+    pub fn clamp_zero_point(&self, [x, y]: [f64; 2]) -> Option<[f64; 2]> {
+        if !x.is_finite() || !y.is_finite() {
+            return None;
+        }
+        let (w, h) = self
+            .spreads
+            .iter()
+            .chain(&self.parents)
+            .map(|sp| sp.bounds())
+            .fold((0.0_f64, 0.0_f64), |(w, h), b| (w.max(b.width()), h.max(b.height())));
+        let finite = |v: f64| if v.is_finite() { v.max(0.0) } else { 0.0 };
+        let (px, py) = (finite(self.settings.pasteboard.0), finite(self.settings.pasteboard.1));
+        let side = px.max(w);
+        Some([x.clamp(-side, w + side), y.clamp(-py, h + py)])
+    }
+
     /// All spread refs: document spreads then parents.
     pub fn spread_refs(&self) -> impl Iterator<Item = SpreadRef> {
         (0..self.spreads.len()).map(SpreadRef::Doc).chain((0..self.parents.len()).map(SpreadRef::Parent))

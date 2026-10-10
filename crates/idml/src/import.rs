@@ -2307,7 +2307,7 @@ impl<'r> Importer<'r> {
         }
         self.settings.lists = std::mem::take(&mut self.lists);
         // Make sure built-in paragraph styles exist and are first.
-        let d = Document {
+        let mut d = Document {
             title,
             settings: self.settings.clone(),
             spreads: std::mem::take(&mut self.spreads).into_iter().map(Arc::new).collect(),
@@ -2341,6 +2341,11 @@ impl<'r> Importer<'r> {
             next_id: self.next_id,
             font_scope: 0,
         };
+        if let [x, y] = root.get("ZeroPoint").map(nums).unwrap_or_default()[..]
+            && let Some(zp) = d.clamp_zero_point([x, y])
+        {
+            d.settings.zero_point = zp;
+        }
         Ok(d)
     }
 }
