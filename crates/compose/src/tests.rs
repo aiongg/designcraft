@@ -2164,6 +2164,24 @@ fn drop_cap_reaches_down_by_the_text_leading_past_a_line_with_larger_leading() {
     assert!((b.baseline - (lines[0].baseline + 2.0 * 14.4)).abs() < 1e-6, "{}", b.baseline);
 }
 
+/// A space after the drop cap is set at its size on its baseline and doesn't widen the indent: the
+/// lines beside it start where its characters end.
+#[test]
+fn space_after_a_drop_cap_does_not_widen_the_indent() {
+    let (d, sid, _) = drop_doc(&format!("In 2003 {LOREM}"), drop_cap(2, 2));
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let lines = all_lines(&cs);
+    let (i, n) = (&lines[0].glyphs[0], &lines[0].glyphs[1]);
+    assert_eq!((i.byte, n.byte), (0, 1));
+    let end = n.x + n.adv;
+    for l in &lines[..2] {
+        assert!((text_x(l, 3) - end).abs() < 1e-6, "{} vs {end}", text_x(l, 3));
+    }
+    let space = lines[0].glyphs.iter().find(|g| g.byte == 2).unwrap();
+    assert!((space.sy - n.sy).abs() < 1e-9 && (space.y - n.y).abs() < 1e-9, "the space is set like the drop cap");
+    assert_eq!(lines[0].drop_cap.unwrap().end, 3);
+}
+
 /// A rule in Text Color takes the colour of the paragraph's text: the first character's for the
 /// rule above, the last character's for the rule below. A swatch colour is used as is.
 #[test]

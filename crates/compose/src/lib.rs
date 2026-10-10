@@ -2868,7 +2868,8 @@ struct DropCap {
 /// it so its cap height reaches from the first line's cap height down to line `lines`' baseline,
 /// measured in the leading and cap height of the text after it.
 /// On a baseline grid of increment `grid`, lines are that many grid steps apart. With
-/// `align_left` its ink starts at the indent (see [`DropCap::lsb`]).
+/// `align_left` its ink starts at the indent (see [`DropCap::lsb`]). Spaces right after it join it
+/// at its size without widening it.
 #[allow(clippy::too_many_arguments)]
 fn split_drop_cap(
     db: &ScopedFonts<'_>,
@@ -2886,6 +2887,9 @@ fn split_drop_cap(
     }
     let lines = lines.clamp(1, MAX_DROP_CAP_LINES) as usize;
     let mut dc: Vec<Glyph> = glyphs.drain(..n).collect();
+    let spaces = glyphs.iter().take_while(|g| g.is_space()).count();
+    let mut after: Vec<Glyph> = glyphs.drain(..spaces).collect();
+    let end = after.last().map_or(end, |g| g.byte.saturating_add(g.len).max(end));
     let body = glyphs.iter().find(|g| g.len > 0 && g.cap > 0.0);
     let (lead, cap) = body.map_or((base_leading, base_cap), |g| (g.leading, g.cap));
     let lead = match grid.map(|inc| (lead / inc - 1e-6).ceil().max(1.0) * inc) {
@@ -2896,7 +2900,7 @@ fn split_drop_cap(
     let own = dc.iter().map(|g| g.cap).fold(0.0, f64::max);
     let k = if own > 0.0 { (drop + cap) / own } else { 1.0 };
     let k = if k.is_finite() && k > 0.0 { k.min(1000.0) } else { 1.0 };
-    for g in &mut dc {
+    for g in dc.iter_mut().chain(after.iter_mut()) {
         g.adv *= k;
         g.dx *= k;
         g.dy *= k;
@@ -2910,7 +2914,6 @@ fn split_drop_cap(
         g.size *= k;
         g.space *= k;
     }
-    let width = dc.iter().map(|g| g.adv).sum();
     let lsb = match dc.first() {
         Some(g) if align_left => {
             let ink = designcraft_geom::Shape::bounding_box(&*db.outline(g.face.get(), g.gid));
@@ -2919,6 +2922,8 @@ fn split_drop_cap(
         }
         _ => 0.0,
     };
+    let width = dc.iter().map(|g| g.adv).sum();
+    dc.append(&mut after);
     Some(DropCap { glyphs: dc, end, lines, width, drop, lsb })
 }
 
