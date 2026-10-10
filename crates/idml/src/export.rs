@@ -2685,6 +2685,7 @@ fn text_wrap_pref(w: &designcraft_doc::TextWrap) -> El {
                 .attr("Right", num(w.offsets[3])),
         ],
     )
+    .child(El::new("ContourOption").attr("ContourType", names::contour_type_out(w.contour)).attr("IncludeInsideEdges", "false"))
 }
 
 fn text_frame_pref(o: &TextFrameOptions, rule_color: &str) -> El {

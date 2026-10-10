@@ -112,3 +112,33 @@ fn wrap_on_a_placed_graphic_follows_its_crop_and_round_trips() {
     let full = cs.frames[0].lines.iter().find(|l| l.baseline - l.ascent > shown.y1 + 6.0).unwrap();
     assert!(full.x1 - full.x0 > 300.0 && full.baseline < image.y1, "{:?} vs {image:?}", (full.x0, full.x1, full.baseline));
 }
+
+#[test]
+fn contour_wrap_on_a_placed_graphic_follows_its_shown_part_on_one_side() {
+    use designcraft_doc::{ContourType, WrapSide};
+    let pref = r#"<TextWrapPreference Inverse="false" ApplyToMasterPageOnly="false" TextWrapSide="RightSide" TextWrapMode="Contour"><Properties><TextWrapOffset Top="4" Left="4" Bottom="4" Right="4"/></Properties><ContourOption ContourType="BoundingBox" IncludeInsideEdges="false"/></TextWrapPreference>"#;
+    let mut d = wrap_doc(&wrap_pref("None", 0.0), pref);
+    let w = d.spreads[0].items[1].graphic().unwrap().wrap;
+    assert_eq!((w.side, w.contour), (WrapSide::RightSide, ContourType::BoundingBox));
+    let back = import_idml(&export_idml(&d)).unwrap();
+    assert_eq!(back.spreads[0].items.iter().find_map(|i| i.graphic()).unwrap().wrap, w);
+    // Half of the image below its frame: the contour is the shown half, 4 pt around it.
+    let sp = std::sync::Arc::make_mut(&mut d.spreads[0]);
+    if let designcraft_doc::Content::Graphic(g) = &mut std::sync::Arc::make_mut(&mut sp.items[1]).content {
+        g.xf = designcraft_geom::Affine::translate((0.0, 50.0)) * g.xf;
+    }
+    let sid = *d.stories.keys().next().unwrap();
+    let specs = designcraft_compose::frame_specs(&d, sid);
+    let [ex] = specs[0].exclusions.as_slice() else { panic!("{:?}", specs[0].exclusions) };
+    assert!(ex.contour.is_some());
+    assert_eq!(ex.side, WrapSide::RightSide);
+    let r = ex.rect;
+    assert!([r.x0 - 156.0, r.y0 - 196.0, r.x1 - 264.0, r.y1 - 254.0].iter().all(|v| v.abs() < 0.05), "{r:?}");
+    // Text runs only to its right.
+    let cs = designcraft_compose::compose_story(&d, sid, &Default::default());
+    let beside: Vec<_> = cs.frames[0].lines.iter().filter(|l| l.baseline + l.descent > 196.0 && l.baseline - l.ascent < 254.0).collect();
+    assert!(!beside.is_empty());
+    for l in beside {
+        assert!(l.x0 >= r.x1 - 0.01, "{:?} vs {r:?}", (l.x0, l.x1));
+    }
+}

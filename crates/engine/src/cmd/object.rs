@@ -512,39 +512,9 @@ pub fn specs() -> Vec<CommandSpec> {
             "Text Wrap",
             ["Window"],
             Some("Cmd+Alt+W"),
-            "{mode: none|boundingBox|contour|jumpObject|jumpToNextColumn, offset?: number|[t,l,b,r], invert?: bool, content?: bool (the placed graphic instead of its frame; default: whether the selection is the frame's content), ids?}",
+            "{mode?: none|boundingBox|contour|jumpObject|jumpToNextColumn (boundingBox when absent, unless side or contour is given: then unchanged), offset?: number|[t,l,b,r], invert?: bool, side?: bothSides|leftSide|rightSide|towardsSpine|awayFromSpine|largestArea, contour?: boundingBox|graphicFrame|sameAsClipping, content?: bool (the placed graphic instead of its frame; default: whether the selection is the frame's content), ids?}",
             has_selection,
-            |s, p| {
-                let mode = p.get("mode").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or(designcraft_doc::WrapMode::BoundingBox);
-                let off = match p.get("offset") {
-                    Some(Value::Number(n)) => Some([n.as_f64().unwrap_or(0.0); 4]),
-                    Some(v) => serde_json::from_value(v.clone()).ok(),
-                    None => None,
-                };
-                let invert = p.get("invert").and_then(Value::as_bool);
-                let content = match p.get("content").and_then(Value::as_bool) {
-                    Some(c) => c,
-                    None => p.get("ids").is_none() && p.get("id").is_none() && s.doc()?.selection.content,
-                };
-                set_flag(
-                    s,
-                    p,
-                    move |i| {
-                        let w = match &mut i.content {
-                            Content::Graphic(g) if content => &mut g.wrap,
-                            _ => &mut i.wrap,
-                        };
-                        w.mode = mode;
-                        if let Some(o) = off {
-                            w.offsets = o;
-                        }
-                        if let Some(v) = invert {
-                            w.invert = v;
-                        }
-                    },
-                    false,
-                )
-            }
+            text_wrap
         ),
         cmd!(
             "object.fit",
@@ -1529,6 +1499,62 @@ fn ungroup(s: &mut Session, p: &Value) -> Result<Value> {
         *sel = Selection::items(out);
         ok()
     })
+}
+
+fn text_wrap(s: &mut Session, p: &Value) -> Result<Value> {
+    use designcraft_doc::{ContourType, WrapMode, WrapSide};
+    let side: Option<WrapSide> = match p.get("side") {
+        Some(v) => Some(serde_json::from_value(v.clone()).map_err(|_| bad("object.textWrap", "unknown side"))?),
+        None => None,
+    };
+    // Detected edges, alpha channels and image paths need the image's pixels or paths, which
+    // composition doesn't read; those types aren't offered.
+    let contour = match p.get("contour").map(|v| serde_json::from_value::<ContourType>(v.clone())) {
+        Some(Ok(c @ (ContourType::BoundingBox | ContourType::GraphicFrame | ContourType::SameAsClipping))) => Some(c),
+        Some(_) => return Err(bad("object.textWrap", "unsupported contour type")),
+        None => None,
+    };
+    let mode: Option<WrapMode> = match p.get("mode") {
+        Some(v) => Some(serde_json::from_value(v.clone()).map_err(|_| bad("object.textWrap", "unknown mode"))?),
+        None if side.is_some() || contour.is_some() => None,
+        None => Some(WrapMode::BoundingBox),
+    };
+    let off = match p.get("offset") {
+        Some(Value::Number(n)) => Some([n.as_f64().unwrap_or(0.0); 4]),
+        Some(v) => serde_json::from_value(v.clone()).ok(),
+        None => None,
+    };
+    let invert = p.get("invert").and_then(Value::as_bool);
+    let content = match p.get("content").and_then(Value::as_bool) {
+        Some(c) => c,
+        None => p.get("ids").is_none() && p.get("id").is_none() && s.doc()?.selection.content,
+    };
+    set_flag(
+        s,
+        p,
+        move |i| {
+            let w = match &mut i.content {
+                Content::Graphic(g) if content => &mut g.wrap,
+                _ => &mut i.wrap,
+            };
+            if let Some(m) = mode {
+                w.mode = m;
+            }
+            if let Some(o) = off {
+                w.offsets = o;
+            }
+            if let Some(v) = invert {
+                w.invert = v;
+            }
+            if let Some(v) = side {
+                w.side = v;
+            }
+            if let Some(c) = contour {
+                w.contour = c;
+            }
+        },
+        false,
+    )
 }
 
 fn set_flag(s: &mut Session, p: &Value, f: impl Fn(&mut Item), deselect: bool) -> Result<Value> {

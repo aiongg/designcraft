@@ -45,6 +45,9 @@ pub struct SelInfo {
     /// Uniform corner (shape, size) — the first corner.
     pub corner: (designcraft_geom::corners::CornerShape, f64),
     pub wrap_invert: bool,
+    /// Text wrap side and contour type ids (`bothSides`, `sameAsClipping`, …).
+    pub wrap_side: String,
+    pub wrap_contour: String,
     pub locked: bool,
 }
 
@@ -141,6 +144,8 @@ pub fn sel_info(app: &DesignApp) -> Option<SelInfo> {
             .unwrap_or_else(|| "solid".into()),
         corner: (first.corners.corners[0].shape, first.corners.corners[0].size),
         wrap_invert: tw.invert,
+        wrap_side: serde_json::to_value(tw.side).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default(),
+        wrap_contour: serde_json::to_value(tw.contour).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default(),
         locked: first.locked,
     })
 }
