@@ -2847,9 +2847,10 @@ fn kenten_character_change_keeps_kerning() {
     assert_eq!(xs(&d), kerned, "a kenten character change must not change spacing");
     let cs = compose_story(&d, sid, &ComposeOptions::default());
     let mark = |b: usize| {
-        cs.frames[0].lines[0].glyphs.iter().find(|g| g.len > 0 && g.byte == b).map(|g| cs.styles[g.style as usize].kenten_character.clone())
+        cs.frames[0].lines[0].glyphs.iter().find(|g| g.len > 0 && g.byte == b).map(|g| cs.styles[g.style as usize].kenten_mark.as_ref().map(|m| m.text.clone()))
     };
-    assert_eq!((mark(0).as_deref(), mark(1).as_deref()), (Some("●"), Some("")));
+    // The default kind (sesame dot) draws a stored character, else its own mark.
+    assert_eq!((mark(0).flatten().as_deref(), mark(1).flatten().as_deref()), (Some("●"), Some("\u{FE45}")));
 }
 
 #[test]
