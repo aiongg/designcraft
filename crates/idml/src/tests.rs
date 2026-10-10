@@ -1465,3 +1465,101 @@ fn kenten_shatai_and_grid_settings_import_and_round_trip() {
         (p2.grid_align, p2.grid_reference, p2.grid_gyoudori, p2.paragraph_gyoudori)
     );
 }
+
+#[test]
+fn ruby_settings_import_from_idml_and_round_trip() {
+    use designcraft_doc::cjk_settings::AdornmentOverprint;
+    use designcraft_doc::ruby::{RubyAlignment, RubyOverhang, RubyParentSpacing, RubyPosition, RubyType};
+    // InDesign's names: RubyFlag is a number, colours and fonts are properties.
+    let story = r#"<idPkg:Story xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging"><Story Self="s1">
+      <ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/$ID/[No paragraph style]">
+        <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]" RubyFlag="1" RubyString="かん　じ" RubyType="PerCharacterRuby" RubyAlignment="RubyCenter" RubyPosition="BelowLeft" RubyYOffset="-1.4173228" RubyFontSize="-1" RubyXScale="90" RubyParentOverhangAmount="RubyOverhangNoLimit" RubyParentSpacing="RubyParentBothSides" RubyAutoAlign="false" RubyAutoScaling="true" RubyParentScalingPercent="40" RubyAutoTcyDigits="2" RubyTint="-1" RubyOverprintFill="Auto"><Properties><RubyFont type="string">$ID/</RubyFont><RubyFontStyle type="enumeration">Nothing</RubyFontStyle><RubyFill type="string">Text Color</RubyFill></Properties><Content>漢字</Content></CharacterStyleRange>
+      </ParagraphStyleRange></Story></idPkg:Story>"#;
+    let doc = import_idml(&fixture_with_story(story)).unwrap();
+    let a = doc.stories.values().find(|s| s.text.contains("漢字")).unwrap().runs().next().unwrap().1.over.clone();
+    assert_eq!(a.ruby.as_deref(), Some("かん　じ"));
+    assert_eq!(a.ruby_type, Some(RubyType::PerCharacter));
+    assert_eq!(a.ruby_alignment, Some(RubyAlignment::Center));
+    assert_eq!(a.ruby_position, Some(RubyPosition::BelowLeft));
+    assert_eq!(a.ruby_y_offset, Some(-1.4173228));
+    assert_eq!(a.ruby_font_size, Some(None));
+    assert_eq!(a.ruby_x_scale, Some(0.9));
+    assert_eq!(a.ruby_overhang_amount, Some(RubyOverhang::NoLimit));
+    assert_eq!(a.ruby_parent_spacing, Some(RubyParentSpacing::BothSides));
+    assert_eq!((a.ruby_auto_align, a.ruby_auto_scaling, a.ruby_scaling_min), (Some(false), Some(true), Some(0.4)));
+    assert_eq!(a.ruby_auto_tcy_digits, Some(2));
+    assert_eq!((a.ruby_font.as_deref(), a.ruby_font_style.as_deref(), a.ruby_fill.as_deref()), (Some(""), Some(""), Some("")));
+    assert_eq!((a.ruby_fill_tint, a.ruby_overprint_fill), (Some(None), Some(AdornmentOverprint::Auto)));
+
+    // Every setting survives export and import.
+    let mut d = Document::new(&NewDocument::default());
+    let lid = d.default_layer();
+    let (_, sid) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(72.0, 72.0, 300.0, 200.0), lid, "漢字", ParaFormat::default()).unwrap();
+    d.story_mut(sid).unwrap().format_chars(0.."漢字".len(), |f| {
+        let o = &mut f.over;
+        o.ruby = Some("かん　じ".into());
+        o.ruby_type = Some(RubyType::PerCharacter);
+        o.ruby_alignment = Some(RubyAlignment::OneAki);
+        o.ruby_position = Some(RubyPosition::BelowLeft);
+        o.ruby_x_offset = Some(1.5);
+        o.ruby_y_offset = Some(-1.25);
+        o.ruby_font = Some("Source Sans 3".into());
+        o.ruby_font_style = Some("Bold".into());
+        o.ruby_font_size = Some(Some(7.0));
+        o.ruby_x_scale = Some(0.9);
+        o.ruby_y_scale = Some(1.1);
+        o.ruby_open_type_pro = Some(false);
+        o.ruby_auto_tcy_digits = Some(3);
+        o.ruby_auto_tcy_include_roman = Some(true);
+        o.ruby_auto_tcy_auto_scale = Some(false);
+        o.ruby_overhang = Some(true);
+        o.ruby_overhang_amount = Some(RubyOverhang::HalfChar);
+        o.ruby_parent_spacing = Some(RubyParentSpacing::EqualAki);
+        o.ruby_auto_align = Some(false);
+        o.ruby_auto_scaling = Some(true);
+        o.ruby_scaling_min = Some(0.5);
+        o.ruby_fill = Some("[Black]".into());
+        o.ruby_fill_tint = Some(Some(0.5));
+        o.ruby_stroke = Some(String::new());
+        o.ruby_stroke_tint = Some(None);
+        o.ruby_stroke_weight = Some(Some(0.25));
+        o.ruby_overprint_fill = Some(AdornmentOverprint::On);
+        o.ruby_overprint_stroke = Some(AdornmentOverprint::Off);
+    });
+    let a = d.stories[&sid].runs().next().unwrap().1.over.clone();
+    let back = import_idml(&export_idml(&d)).unwrap();
+    let b = back.stories.values().find(|s| s.text.contains("漢字")).unwrap().runs().next().unwrap().1.over.clone();
+    macro_rules! same {
+        ($($f:ident),*) => { $( assert_eq!(a.$f, b.$f, stringify!($f)); )* };
+    }
+    same!(
+        ruby,
+        ruby_type,
+        ruby_alignment,
+        ruby_position,
+        ruby_x_offset,
+        ruby_y_offset,
+        ruby_font,
+        ruby_font_style,
+        ruby_font_size,
+        ruby_x_scale,
+        ruby_y_scale,
+        ruby_open_type_pro,
+        ruby_auto_tcy_digits,
+        ruby_auto_tcy_include_roman,
+        ruby_auto_tcy_auto_scale,
+        ruby_overhang,
+        ruby_overhang_amount,
+        ruby_parent_spacing,
+        ruby_auto_align,
+        ruby_auto_scaling,
+        ruby_scaling_min,
+        ruby_fill,
+        ruby_fill_tint,
+        ruby_stroke,
+        ruby_stroke_tint,
+        ruby_stroke_weight,
+        ruby_overprint_fill,
+        ruby_overprint_stroke
+    );
+}

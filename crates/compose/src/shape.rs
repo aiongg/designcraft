@@ -189,7 +189,11 @@ impl StyleTable<'_> {
             condition: p.conditions.first().cloned(),
             inserted: p.change == designcraft_doc::ChangeMark::Inserted,
             xml_tag: (!p.xml_tag.is_empty()).then(|| p.xml_tag.clone()),
-            ruby: (!p.ruby.is_empty()).then(|| p.ruby.clone()),
+            ruby: (!p.ruby.is_empty()).then(|| crate::ruby::capped(&p.ruby).to_string()),
+            ruby_spec: (!p.ruby.is_empty()).then(|| designcraft_doc::ruby::RubySpec::of(p)),
+            ruby_unit: None,
+            overprint_fill: false,
+            overprint_stroke: false,
             warichu: p.warichu,
             warichu_lines: p.warichu_lines,
             warichu_size: p.warichu_size,
@@ -351,6 +355,7 @@ pub(crate) fn shape_para(
     }
     fit_auto_tcy(&mut glyphs, &auto_tcy);
     collapse_tcy(&mut glyphs, sub.vertical);
+    crate::ruby::reserve(db, table.styles, &mut glyphs, auto_leading.glyph_fallback, sub.vertical);
     ShapedPara { glyphs, range }
 }
 

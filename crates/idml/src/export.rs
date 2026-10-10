@@ -1187,8 +1187,11 @@ impl<'a> Ex<'a> {
             el.set("PositionalForm", v);
         }
         if let Some(r) = a.ruby.as_ref() {
-            el.set("RubyFlag", bool_s(!r.is_empty()));
+            el.set("RubyFlag", if r.is_empty() { "0" } else { "1" });
             el.set("RubyString", r.as_str());
+        }
+        if let Some((family, style)) = crate::ruby::write(el, props, a, |n| self.sw(n)) {
+            self.note_font(&family, &style);
         }
         if let Some(k) = a.kenten {
             el.set("KentenKind", if k { "KentenSesameDot" } else { "None" });

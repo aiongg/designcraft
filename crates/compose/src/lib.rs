@@ -72,6 +72,13 @@ pub struct RunStyle {
     pub xml_tag: Option<String>,
     /// Ruby over the run.
     pub ruby: Option<String>,
+    /// The ruby's settings (set with `ruby`), and for per-character ruby the parent character's
+    /// place in its run (see `ruby::reserve`).
+    pub ruby_spec: Option<designcraft_doc::ruby::RubySpec>,
+    pub ruby_unit: Option<u32>,
+    /// Overprint the fill and stroke (ruby glyphs set to overprint).
+    pub overprint_fill: bool,
+    pub overprint_stroke: bool,
     /// Warichu: stack this run in smaller lines inside the parent em.
     pub warichu: bool,
     pub warichu_lines: u32,
@@ -138,6 +145,9 @@ pub struct PlacedGlyph {
     pub tcy: Option<[f64; 3]>,
     /// Set right to left (an odd bidi level): the caret before it is at its right edge.
     pub rtl: bool,
+    /// How far after its pen position the glyph is drawn (CJK aki, ruby parent spacing): its
+    /// advance starts at `x - dx`.
+    pub dx: f64,
 }
 
 impl PlacedGlyph {
@@ -1084,7 +1094,7 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                     layout_line(&glyphs, s, e, b.hyphen, lx0, lx1, col.x0, &pp, &spacing, ends_para, forced_mid, f.left_page, &bidi_info);
                 // Warichu runs before ruby so a reading is placed over the stacked note.
                 let end_x = end_x + warichu::place(&styles_tab, &mut placed);
-                ruby::annotate(&styles_tab, &mut placed);
+                ruby::annotate(db, &mut styles_tab, &story.text, &mut placed, doc.settings.glyph_fallback, f.vertical);
                 kenten::annotate(db, &styles_tab, &mut placed, doc.settings.glyph_fallback);
                 let range_end = if last { prange.end } else { glyphs.get(g0 + b.next).map(|g| g.byte).unwrap_or(prange.end) };
                 let range_start = glyphs.get(s).map(|g| g.byte).unwrap_or(prange.start).min(range_end);
@@ -2438,6 +2448,7 @@ fn layout_line(
         if scale[i] != 1.0 {
             p.sx *= scale[i];
             p.x = x + g.dx * scale[i];
+            p.dx = g.dx * scale[i];
             p.adv *= scale[i];
         }
         p.adv += add[i];
@@ -2471,7 +2482,7 @@ fn layout_line(
         }
         // One tatweel stretched over the gap (overlapping its neighbours a little).
         let k = (l + 0.4) / w;
-        out.push(PlacedGlyph { gid, x: at - 0.2, y: -g.shift, adv: 0.0, sx: g.sx * k, len: 0, upright: false, tcy: None, ..place(g, at) });
+        out.push(PlacedGlyph { gid, x: at - 0.2, y: -g.shift, adv: 0.0, sx: g.sx * k, len: 0, upright: false, tcy: None, dx: 0.0, ..place(g, at) });
     }
     (out, x, ratio)
 }
@@ -2592,6 +2603,7 @@ fn tab_leader(tab: &Glyph, leader: &str, x: f64, w: f64, origin: f64, out: &mut 
                 upright: false,
                 tcy: None,
                 rtl: false,
+                dx: 0.0,
             });
             at += adv;
         }
@@ -2697,6 +2709,7 @@ fn place(g: &Glyph, x: f64) -> PlacedGlyph {
         upright: g.upright,
         tcy: g.tcy,
         rtl: false,
+        dx: g.dx,
     }
 }
 

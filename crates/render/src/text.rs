@@ -363,7 +363,7 @@ impl Renderer {
                 for (si, bp) in &lg.runs {
                     if let Some(c) = fill_of(*si) {
                         let st = &cs.styles[*si as usize];
-                        let op = crate::overprints(f, &st.fill, st.fill_tint, false);
+                        let op = crate::overprints(f, &st.fill, st.fill_tint, st.overprint_fill);
                         if op {
                             ctx.push_layer(
                                 None,

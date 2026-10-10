@@ -39,7 +39,7 @@ presets or tables are copied. Our default mojikumi and kinsoku tables are built 
 | Aki, tsume, jidori | done ([cjk-typography.md](cjk-typography.md)) |
 | Character alignment, leading model | em box top / centre / bottom, ICF from ascender and descender, roman baseline; aki above / below, centre (centre down as centre) |
 | Tate-chu-yoko | manual, with offsets; no auto, 3+ digits overflow the em |
-| Ruby | group ruby only, fixed 50 % size, no options, doesn't affect leading |
+| Ruby | group and per-character (jukugo) ruby; alignment (shoulder, centre, end, justify, JIS 1-2-1, equal aki, 1 ruby-character aki); above/right or below/left with offsets; font, size (½ by default), scales, OpenType `ruby` glyphs, auto tate-chu-yoko of digits; overhang onto kana and punctuation; parent spacing and automatic narrowing when the ruby is longer; flush with the line edge; fill, stroke, tint, weight and overprint fill on screen; every setting through `type.ruby` and IDML. Doesn't affect leading; overprint stroke isn't drawn and PDF has no overprint |
 | Kenten | the IDML kinds and a custom character, drawn as characters; no position, size, alignment, colour or font |
 | Composite fonts | done: model, `style.compositeFont.*`, shaping, IDML, font list, replace and Preflight; no dialog |
 | Languages | Japanese, Korean, Simplified and Traditional Chinese reach the shaper (`locl`), font fallback, line breaking and typographer's quotes; IDML language names are kept as written; locale codes (`ja_JP`, `ko-KR`, `de_DE_2006`) are their language and region, and Chinese is also recognised in its common spellings ("Simplified Chinese", "Chinese (Traditional)", `zh_CN`, `zh-Hant`) |

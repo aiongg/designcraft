@@ -137,6 +137,7 @@ fn shape_mark(face: FaceRef, text: &str, m: &KentenMark, b: &PlacedGlyph) -> Vec
             upright: upright_in_vertical(ch),
             tcy: None,
             rtl: false,
+            dx: 0.0,
         });
         x += adv;
     }

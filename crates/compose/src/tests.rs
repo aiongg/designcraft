@@ -1065,6 +1065,96 @@ fn ruby_and_kenten_sit_over_their_text() {
     assert!((dot.x + dot.adv / 2.0 - (de.x + de.adv / 2.0)).abs() < 1.0 && dot.y < 0.0);
 }
 
+/// `text` on one line, composed plain and then with the ruby attributes `set` on `range`: the
+/// plain glyphs, and the ruby line (its ruby glyphs follow the text's) with its story.
+fn ruby_compose(text: &str, range: std::ops::Range<usize>, set: impl Fn(&mut designcraft_doc::CharAttrs)) -> (Vec<PlacedGlyph>, Line, ComposedStory) {
+    let mut d = Document::new(&designcraft_doc::build::NewDocument::default());
+    let lid = d.default_layer();
+    let (_, sid) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(100.0, 100.0, 400.0, 200.0), lid, text, ParaFormat::default()).unwrap();
+    let plain = compose_story(&d, sid, &ComposeOptions::default()).frames[0].lines[0].glyphs.clone();
+    d.story_mut(sid).unwrap().format_chars(range, |f| set(&mut f.over));
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let line = cs.frames[0].lines[0].clone();
+    (plain, line, cs)
+}
+
+#[test]
+fn group_ruby_spreads_1_2_1_over_the_word_and_mono_ruby_sits_over_each_character() {
+    let kanji = 0.."漢字".len();
+    // Group: three kana over two kanji, half a gap at each end (JIS 1-2-1).
+    let (plain, l, _) = ruby_compose("漢字です", kanji.clone(), |a| a.ruby = Some("かんじ".into()));
+    let ruby = &l.glyphs[plain.len()..];
+    assert_eq!(ruby.len(), 3);
+    let (x0, x1) = (l.glyphs[0].x, l.glyphs[1].x + l.glyphs[1].adv);
+    let w: f64 = ruby.iter().map(|g| g.adv).sum();
+    assert!(w < x1 - x0);
+    let gap = (x1 - x0 - w) / 3.0;
+    let mut x = x0 + gap / 2.0;
+    for g in ruby {
+        assert!((g.x - x).abs() < 1e-6, "{} != {x}", g.x);
+        x += g.adv + gap;
+    }
+    // Mono: かん over 漢 and じ centred on 字; the U+3000 separator isn't drawn.
+    let (plain, l, _) = ruby_compose("漢字です", kanji, |a| {
+        a.ruby = Some("かん\u{3000}じ".into());
+        a.ruby_type = Some(designcraft_doc::ruby::RubyType::PerCharacter);
+    });
+    let ruby = &l.glyphs[plain.len()..];
+    assert_eq!(ruby.len(), 3);
+    let (kan, ji) = (&l.glyphs[0], &l.glyphs[1]);
+    assert!((ruby[0].x - kan.x).abs() < 1e-6 && ruby[1].x + ruby[1].adv <= ji.x + 1e-6);
+    assert!((ruby[2].x + ruby[2].adv / 2.0 - (ji.x + ji.adv / 2.0)).abs() < 1e-6);
+}
+
+#[test]
+fn longer_ruby_overhangs_kana_and_spaces_out_kanji() {
+    let ji = "漢".len().."漢字".len();
+    // Over 字 before a kana: the ruby starts flush with 字 (never over the kanji before it) and
+    // hangs over で by one ruby character, so nothing moves.
+    let (plain, l, _) = ruby_compose("漢字で", ji.clone(), |a| a.ruby = Some("かんじ".into()));
+    let ruby = &l.glyphs[plain.len()..];
+    let w: f64 = ruby.iter().map(|g| g.adv).sum();
+    let parent = &l.glyphs[1];
+    assert!(w > parent.adv);
+    assert!((ruby[0].x - parent.x).abs() < 1e-6, "{} != {}", ruby[0].x, parent.x);
+    assert!((l.glyphs[2].x - plain[2].x).abs() < 1e-6, "で stays");
+    assert!(ruby[2].x + ruby[2].adv > l.glyphs[2].x, "over で");
+    // Between kanji there is nothing to overhang: 字 gets the difference as space on both sides
+    // and the ruby spans it.
+    let (plain, l, _) = ruby_compose("漢字漢", ji, |a| a.ruby = Some("かんじ".into()));
+    let ruby = &l.glyphs[plain.len()..];
+    let w: f64 = ruby.iter().map(|g| g.adv).sum();
+    let grow = l.glyphs[2].x - plain[2].x;
+    assert!((grow - (w - plain[1].adv)).abs() < 1e-6, "{grow} vs {w}");
+    assert!((l.glyphs[1].dx - grow / 2.0).abs() < 1e-6);
+    assert!((ruby[0].x - (l.glyphs[1].x - l.glyphs[1].dx)).abs() < 1e-6);
+}
+
+#[test]
+fn ruby_is_half_size_by_default_and_can_sit_below_in_its_own_colour() {
+    let kanji = 0.."漢字".len();
+    let (plain, l, cs) = ruby_compose("漢字です", kanji.clone(), |a| {
+        a.ruby = Some("かんじ".into());
+        a.ruby_position = Some(designcraft_doc::ruby::RubyPosition::BelowLeft);
+    });
+    let ruby = &l.glyphs[plain.len()..];
+    let size = cs.styles[l.glyphs[0].style as usize].size;
+    assert!(ruby.iter().all(|g| g.y > size * 0.12), "below the parent's em box");
+    assert!(ruby.iter().all(|g| (g.sy - l.glyphs[0].sy * 0.5).abs() < 1e-9), "half size");
+    assert!((cs.styles[ruby[0].style as usize].size - size * 0.5).abs() < 1e-9);
+    // Its own size and fill; the parent keeps its colour.
+    let (plain, l, cs) = ruby_compose("漢字です", kanji, |a| {
+        a.ruby = Some("かんじ".into());
+        a.ruby_font_size = Some(Some(4.0));
+        a.ruby_fill = Some("[Paper]".into());
+    });
+    let r = &l.glyphs[plain.len()];
+    assert!(r.y < -size * 0.8);
+    assert!((r.sy - l.glyphs[0].sy * 4.0 / size).abs() < 1e-9);
+    assert_eq!(cs.styles[r.style as usize].fill, "[Paper]");
+    assert_eq!(cs.styles[l.glyphs[0].style as usize].fill, "[Black]");
+}
+
 #[test]
 fn warichu_stacks_the_run_inside_the_line_and_closes_up() {
     let text = "ABCDEFGHZ";

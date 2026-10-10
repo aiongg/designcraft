@@ -758,8 +758,9 @@ attr_set! {
         tate_chu_yoko: bool = false,
         tate_chu_yoko_x_offset: f64 = 0.0,
         tate_chu_yoko_y_offset: f64 = 0.0,
-        /// Ruby: the reading set small above the text (to its right in vertical text), one group
-        /// over each run that has it.
+        /// Ruby: the reading set small above the text (to its right in vertical text). Group ruby
+        /// sets it over the whole run; per-character ruby holds one reading per character,
+        /// separated by U+3000. Its other settings are the `ruby_*` fields below.
         ruby: String = String::new(),
         /// Kenten: an emphasis dot above each character.
         kenten: bool = false,
@@ -810,6 +811,45 @@ attr_set! {
         shatai_adjust_rotation: bool = false,
         /// Fit the advance to the compressed em box.
         shatai_adjust_tsume: bool = true,
+        // Ruby settings (see [`crate::ruby`]). Defaults are the IDML text defaults.
+        ruby_type: crate::ruby::RubyType = crate::ruby::RubyType::Group,
+        /// How a ruby shorter than its parent is spread over it.
+        ruby_alignment: crate::ruby::RubyAlignment = crate::ruby::RubyAlignment::Jis,
+        ruby_position: crate::ruby::RubyPosition = crate::ruby::RubyPosition::AboveRight,
+        /// Points along the line, and away from the parent text across it.
+        ruby_x_offset: f64 = 0.0,
+        ruby_y_offset: f64 = 0.0,
+        /// Empty: the parent's font and style.
+        ruby_font: String = String::new(),
+        ruby_font_style: String = String::new(),
+        /// Points; `None` is half the parent size.
+        ruby_font_size: Option<f64> = None,
+        /// 1.0 = 100%.
+        ruby_x_scale: f64 = 1.0,
+        ruby_y_scale: f64 = 1.0,
+        /// Use the font's ruby glyphs (OpenType `ruby`).
+        ruby_open_type_pro: bool = true,
+        /// Tate-chu-yoko in vertical ruby for runs of up to this many digits (0 = off).
+        ruby_auto_tcy_digits: u32 = 0,
+        ruby_auto_tcy_include_roman: bool = false,
+        ruby_auto_tcy_auto_scale: bool = true,
+        /// IDML `RubyOverhang`, kept for round trips; `ruby_overhang_amount` sets the overhang.
+        ruby_overhang: bool = false,
+        ruby_overhang_amount: crate::ruby::RubyOverhang = crate::ruby::RubyOverhang::OneRuby,
+        ruby_parent_spacing: crate::ruby::RubyParentSpacing = crate::ruby::RubyParentSpacing::Aki121,
+        /// A longer ruby at a line's start or end is set flush with the line edge.
+        ruby_auto_align: bool = true,
+        /// A longer ruby is narrowed first, down to `ruby_scaling_min` (1.0 = 100%).
+        ruby_auto_scaling: bool = false,
+        ruby_scaling_min: f64 = 0.66,
+        /// Ruby colour: empty is the text's colour; `None` tint and weight follow the text.
+        ruby_fill: String = String::new(),
+        ruby_fill_tint: Option<f32> = None,
+        ruby_stroke: String = String::new(),
+        ruby_stroke_tint: Option<f32> = None,
+        ruby_stroke_weight: Option<f64> = None,
+        ruby_overprint_fill: crate::cjk_settings::AdornmentOverprint = crate::cjk_settings::AdornmentOverprint::Auto,
+        ruby_overprint_stroke: crate::cjk_settings::AdornmentOverprint = crate::cjk_settings::AdornmentOverprint::Auto,
         /// Digits (World-Ready): how 0–9 are drawn.
         digits: Digits = Digits::Default,
         character_direction: crate::arabic::CharacterDirection = crate::arabic::CharacterDirection::Default,

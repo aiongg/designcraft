@@ -183,9 +183,9 @@ pub fn specs() -> Vec<CommandSpec> {
             "Ruby",
             [],
             None,
-            "{text} — the reading set over the selected text (one group); empty removes it",
+            "{text?, type?: group|perCharacter, alignment?: left|center|right|fullJustify|jis|equalAki|oneAki, position?: aboveRight|belowLeft, xOffset?, yOffset? (pt), font?, fontStyle? (\"\" = the text's), size? (pt; null = half the text size), xScale?, yScale? (%), openTypePro?: bool, autoTcyDigits?: 0-9, autoTcyIncludeRoman?: bool, autoTcyAutoScale?: bool, overhang?: none|oneRuby|halfRuby|oneChar|halfChar|noLimit, parentSpacing?: noAdjustment|bothSides|aki121|equalAki|fullJustify, autoAlign?: bool, autoScaling?: bool, scalingPercent? (%), fill?, stroke? (swatch; \"\" = the text's), fillTint?, strokeTint? (%; null = the text's), strokeWeight? (pt; null = the text's), overprintFill?, overprintStroke?: auto|on|off} — the reading set over the selected text and how it is placed; empty text removes it. Per-character ruby separates the readings with U+3000",
             has_text_or_frames,
-            |s, p| { format_chars(s, &json!({"ruby": str_param(p, "text").unwrap_or("")})) }
+            ruby_cmd
         ),
         cmd!(
             "type.kenten",
@@ -895,6 +895,26 @@ fn enum_param<T: serde::de::DeserializeOwned + serde::Serialize>(p: &Value, key:
     }
 }
 
+/// A ruby enum parameter, checked against its type.
+fn ruby_enum<T: serde::de::DeserializeOwned>(p: &Value, key: &str) -> Result<Option<Value>> {
+    let Some(v) = p.get(key) else { return Ok(None) };
+    serde_json::from_value::<T>(v.clone()).map_err(|e| bad("type.ruby", format!("{key}: {e}")))?;
+    Ok(Some(v.clone()))
+}
+
+/// A ruby number parameter clamped to `lo..=hi`, then divided by `div` (100 for percentages);
+/// `null` gives `Value::Null` (automatic).
+fn ruby_num(p: &Value, key: &str, lo: f64, hi: f64, div: f64) -> Result<Option<Value>> {
+    match p.get(key) {
+        None => Ok(None),
+        Some(Value::Null) => Ok(Some(Value::Null)),
+        Some(v) => {
+            let x = v.as_f64().filter(|x| x.is_finite()).ok_or_else(|| bad("type.ruby", format!("{key}: expected a finite number")))?;
+            Ok(Some(json!(x.clamp(lo, hi) / div)))
+        }
+    }
+}
+
 /// Is `flag` on in the character format at the start of the first formatting target?
 fn char_flag_on(s: &Session, flag: impl Fn(&CharAttrs) -> Option<bool>) -> bool {
     format_targets(s).first().is_some_and(|t| {
@@ -1075,6 +1095,71 @@ fn para_toggle(s: &mut Session, p: &Value, cmd: &str, attr: &str, get: impl Fn(&
     let mut body = serde_json::Map::new();
     body.insert(attr.to_string(), json!(on));
     format_paras(s, &Value::Object(body))
+}
+
+fn ruby_text<'a>(p: &'a Value, key: &str) -> Result<Option<&'a str>> {
+    let Some(v) = p.get(key) else { return Ok(None) };
+    let t = v.as_str().ok_or_else(|| bad("type.ruby", format!("{key}: expected a string")))?;
+    if t.chars().count() > designcraft_doc::ruby::MAX_RUBY_CHARS {
+        return Err(bad("type.ruby", format!("{key}: longer than {} characters", designcraft_doc::ruby::MAX_RUBY_CHARS)));
+    }
+    Ok(Some(t))
+}
+
+fn ruby_cmd(s: &mut Session, p: &Value) -> Result<Value> {
+    use designcraft_doc::cjk_settings::AdornmentOverprint;
+    use designcraft_doc::ruby::{RubyAlignment, RubyOverhang, RubyParentSpacing, RubyPosition, RubyType};
+    let mut body = serde_json::Map::new();
+    let mut put = |attr: &str, v: Option<Value>| {
+        if let Some(v) = v {
+            body.insert(attr.into(), v);
+        }
+    };
+    put("ruby", ruby_text(p, "text")?.map(|t| json!(t)));
+    put("rubyType", ruby_enum::<RubyType>(p, "type")?);
+    put("rubyAlignment", ruby_enum::<RubyAlignment>(p, "alignment")?);
+    put("rubyPosition", ruby_enum::<RubyPosition>(p, "position")?);
+    put("rubyOverhangAmount", ruby_enum::<RubyOverhang>(p, "overhang")?);
+    put("rubyParentSpacing", ruby_enum::<RubyParentSpacing>(p, "parentSpacing")?);
+    put("rubyOverprintFill", ruby_enum::<AdornmentOverprint>(p, "overprintFill")?);
+    put("rubyOverprintStroke", ruby_enum::<AdornmentOverprint>(p, "overprintStroke")?);
+    put("rubyXOffset", ruby_num(p, "xOffset", -1000.0, 1000.0, 1.0)?.filter(|v| !v.is_null()));
+    put("rubyYOffset", ruby_num(p, "yOffset", -1000.0, 1000.0, 1.0)?.filter(|v| !v.is_null()));
+    put("rubyFontSize", ruby_num(p, "size", 0.1, 1296.0, 1.0)?);
+    put("rubyXScale", ruby_num(p, "xScale", 1.0, 1000.0, 100.0)?.filter(|v| !v.is_null()));
+    put("rubyYScale", ruby_num(p, "yScale", 1.0, 1000.0, 100.0)?.filter(|v| !v.is_null()));
+    put("rubyScalingMin", ruby_num(p, "scalingPercent", 10.0, 100.0, 100.0)?.filter(|v| !v.is_null()));
+    put("rubyFillTint", ruby_num(p, "fillTint", 0.0, 100.0, 100.0)?);
+    put("rubyStrokeTint", ruby_num(p, "strokeTint", 0.0, 100.0, 100.0)?);
+    put("rubyStrokeWeight", ruby_num(p, "strokeWeight", 0.0, 800.0, 1.0)?);
+    put(
+        "rubyAutoTcyDigits",
+        ruby_num(p, "autoTcyDigits", 0.0, 9.0, 1.0)?.filter(|v| !v.is_null()).and_then(|v| v.as_f64()).map(|v| json!(v.round() as u32)),
+    );
+    for (key, attr) in [
+        ("openTypePro", "rubyOpenTypePro"),
+        ("autoTcyIncludeRoman", "rubyAutoTcyIncludeRoman"),
+        ("autoTcyAutoScale", "rubyAutoTcyAutoScale"),
+        ("autoAlign", "rubyAutoAlign"),
+        ("autoScaling", "rubyAutoScaling"),
+    ] {
+        if let Some(v) = p.get(key) {
+            let b = v.as_bool().ok_or_else(|| bad("type.ruby", format!("{key}: expected true or false")))?;
+            put(attr, Some(json!(b)));
+        }
+    }
+    put("rubyFont", ruby_text(p, "font")?.map(|t| json!(t)));
+    put("rubyFontStyle", ruby_text(p, "fontStyle")?.map(|t| json!(t)));
+    for (key, attr) in [("fill", "rubyFill"), ("stroke", "rubyStroke")] {
+        if let Some(name) = ruby_text(p, key)? {
+            let known = name.is_empty() || name == designcraft_doc::color::swatch::NONE || s.doc()?.doc.swatch(name).is_some();
+            if !known {
+                return Err(bad("type.ruby", format!("{key}: no swatch `{name}`")));
+            }
+            put(attr, Some(json!(name)));
+        }
+    }
+    format_chars(s, &Value::Object(body))
 }
 
 pub(crate) fn format_chars(s: &mut Session, attrs: &Value) -> Result<Value> {
@@ -1876,6 +1961,50 @@ mod tcy_tests {
         s.execute("type.ruby", &json!({"text": ""})).unwrap();
         assert_eq!(f(&s).kenten, Some(false));
         assert_eq!(f(&s).ruby.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn ruby_options_are_checked_and_clamped() {
+        use designcraft_doc::ruby::{RubyAlignment, RubyPosition, RubyType};
+        let mut s = Session::new();
+        s.execute("file.new", &json!({})).unwrap();
+        let r = s.execute("frame.create", &json!({"rect": [72, 72, 400, 200], "content": "text", "text": "漢字です"})).unwrap();
+        let sid = r["story"].as_u64().unwrap();
+        s.execute("text.select", &json!({"story": sid, "anchor": 0, "focus": "漢字".len()})).unwrap();
+        let f = |s: &Session| s.doc().unwrap().doc.stories[&designcraft_doc::StoryId(sid)].char_format_at(1).over.clone();
+        s.execute(
+            "type.ruby",
+            &json!({"text": "かん\u{3000}じ", "type": "perCharacter", "alignment": "oneAki", "position": "belowLeft", "size": 1e9, "xScale": -50, "scalingPercent": 5, "autoTcyDigits": 99, "fillTint": 250, "yOffset": -1e12, "fill": "[Black]"}),
+        )
+        .unwrap();
+        let a = f(&s);
+        assert_eq!(
+            (a.ruby.as_deref(), a.ruby_type, a.ruby_position),
+            (Some("かん\u{3000}じ"), Some(RubyType::PerCharacter), Some(RubyPosition::BelowLeft))
+        );
+        assert_eq!(a.ruby_font_size, Some(Some(1296.0)));
+        assert_eq!(a.ruby_x_scale, Some(0.01));
+        assert_eq!(a.ruby_scaling_min, Some(0.1));
+        assert_eq!(a.ruby_auto_tcy_digits, Some(9));
+        assert_eq!(a.ruby_fill_tint, Some(Some(1.0)));
+        assert_eq!(a.ruby_y_offset, Some(-1000.0));
+        // Options alone keep the reading.
+        s.execute("type.ruby", &json!({"alignment": "center"})).unwrap();
+        assert_eq!((f(&s).ruby, f(&s).ruby_alignment), (a.ruby.clone(), Some(RubyAlignment::Center)));
+        // Refused, and nothing changes: unknown names, non-numbers, overlong text, unknown swatches.
+        let long = "あ".repeat(designcraft_doc::ruby::MAX_RUBY_CHARS + 1);
+        for p in [
+            json!({"alignment": "sideways"}),
+            json!({"size": "big"}),
+            json!({"text": long}),
+            json!({"fill": "Nope"}),
+            json!({"autoAlign": 1}),
+            json!({"text": 5}),
+        ] {
+            assert!(s.execute("type.ruby", &p).is_err(), "{p}");
+        }
+        assert_eq!(f(&s).ruby_alignment, Some(RubyAlignment::Center));
+        assert_eq!(f(&s).ruby, a.ruby);
     }
 
     #[test]
