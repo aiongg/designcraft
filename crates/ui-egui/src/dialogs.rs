@@ -8,7 +8,9 @@ use serde_json::{Map, Value, json};
 use crate::DesignApp;
 use crate::theme::semibold;
 
+mod options;
 mod style_cjk;
+pub use options::{open_color_group_options, open_layer_options, open_swatch_options};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Dialog {
@@ -1183,6 +1185,9 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
         "layerOptions" => crate::i18n::tr(&app.ui.language, "Object Layer Options"),
         "keyboardShortcuts" => crate::i18n::tr(&app.ui.language, "Keyboard Shortcuts"),
         "colorPicker" => crate::i18n::tr(&app.ui.language, "Color Picker"),
+        "swatchOptions" => crate::i18n::tr(&app.ui.language, "Swatch Options"),
+        "colorGroupOptions" => crate::i18n::tr(&app.ui.language, "Color Group Options"),
+        "layerSettings" => crate::i18n::tr(&app.ui.language, "Layer Options"),
         id => match id.strip_prefix("cmd:").and_then(designcraft_engine::find_command) {
             Some(c) => crate::i18n::tr(&app.ui.language, c.label.trim_end_matches('…')),
             None => crate::i18n::tr(&app.ui.language, "Dialog"),
@@ -1393,6 +1398,9 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
             "insertXref" => insert_xref(app, ui, &mut d),
             "findFont" => find_font(app, ui, &mut d),
             "colorPicker" => color_picker(ui, &mut d),
+            "swatchOptions" => options::swatch_options(app, ui, &mut d),
+            "colorGroupOptions" => options::color_group_options(app, ui, &mut d),
+            "layerSettings" => options::layer_options(app, ui, &mut d),
             "preferences" => preferences(app, ui, &mut d, body_height),
             "print" => print_dialog(app, ui, &mut d),
             "pdfImport" => {
@@ -2052,6 +2060,20 @@ pub fn confirm(app: &mut DesignApp) -> Result<Value, String> {
                 "style.character.delete",
                 json!({"name": name, "replaceWith": if replace.is_empty() { json!(designcraft_doc::NO_CHAR_STYLE) } else { json!(replace) }}),
             )
+        }
+        "swatchOptions" | "colorGroupOptions" | "layerSettings" => {
+            let r = match d.id.as_str() {
+                "swatchOptions" => options::confirm_swatch_options(app, &d),
+                "colorGroupOptions" => options::confirm_color_group_options(app, &d),
+                _ => options::confirm_layer_options(app, &d),
+            };
+            if let Err(e) = &r {
+                // Keep the dialog open with the reason (a taken or empty name).
+                let mut d = d.clone();
+                d.fields.insert("status".into(), json!(e));
+                app.ui.dialog = Some(d);
+            }
+            r
         }
         "colorPicker" => {
             let hex = d.s("hex");
