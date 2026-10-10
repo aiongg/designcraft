@@ -3079,7 +3079,7 @@ fn cjk_aki_below_sets_the_upper_lines_leading_below_it() {
 fn cjk_aki_below_measures_em_tops_and_aki_above_em_bottoms() {
     use designcraft_doc::cjk::LeadingModel;
     for (model, top) in [(LeadingModel::AkiBelow, true), (LeadingModel::AkiAbove, false)] {
-        let (mut d, sid, _) = doc_with("A\nB", Rect::new(0.0, 0.0, 300.0, 200.0), ParaAttrs::default());
+        let (mut d, sid, _) = doc_with("A\nB", Rect::new(0.0, 0.0, 300.0, 200.0), japanese());
         d.story_mut(sid).unwrap().format_chars(0..3, |f| {
             f.over.leading = Some(designcraft_doc::Leading::Points(30.0));
             f.over.leading_model = Some(model);
