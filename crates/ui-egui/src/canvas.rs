@@ -537,13 +537,19 @@ fn render_texture(app: &mut DesignApp, ctx: &egui::Context, rect: Rect, xf: &Xf,
 /// Returns false when a full render is needed (view moved, too much changed, or damage unknown).
 fn patch_texture(app: &mut DesignApp, layout: &CanvasLayout, ppp: f64, doc_key: (u64, u64, u64, bool), preview: bool) -> bool {
     let (Some(sh), Some(old), Some(st)) = (app.canvas.shown, app.canvas.shown_doc.clone(), app.session.active()) else { return false };
-    if sh.doc.0 != doc_key.0 || sh.doc.3 != doc_key.3 || app.canvas.texture.is_none() {
+    if sh.doc.0 != doc_key.0 || sh.doc.3 != doc_key.3 {
+        return false;
+    }
+    let (tw, th) = ((sh.size.0 as f64 * ppp).round() as i64, (sh.size.1 as f64 * ppp).round() as i64);
+    // Patches are in full-resolution pixels: a texture `upload` shrank to the GPU's limit
+    // (a viewport wider than `max_texture_side`) takes full renders instead.
+    let full = [usize::try_from(tw).unwrap_or(0), usize::try_from(th).unwrap_or(0)];
+    if app.canvas.texture.as_ref().is_none_or(|t| t.size() != full) {
         return false;
     }
     let new = st.doc.clone();
     let Some(regions) = designcraft_render::damage::damage_with(&old, &new, Some(&app.session.cache)) else { return false };
     let t0 = crate::now_ms();
-    let (tw, th) = ((sh.size.0 as f64 * ppp).round() as i64, (sh.size.1 as f64 * ppp).round() as i64);
     let k = sh.zoom * ppp;
     let mut px: Option<(i64, i64, i64, i64)> = None;
     for (r, rect) in &regions {
@@ -1351,12 +1357,12 @@ fn ghost_texture(ctx: &egui::Context, doc: &Document, g: &designcraft_doc::Graph
     // A 72 ppi proxy is enough for a faint preview.
     let pm = designcraft_render::images::mip(&asset.data, asset.page, g.size.0, 1.0)?;
     let (pw, ph) = (pm.width() as usize, pm.height() as usize);
-    let max = ctx.input(|i| i.max_texture_side).min(4096);
-    if pw == 0 || ph == 0 || pw > max || ph > max {
+    if pw == 0 || ph == 0 {
         return None;
     }
     let ci = egui::ColorImage::from_rgba_premultiplied([pw, ph], pm.data_as_u8_slice());
-    let t = ctx.load_texture("content_ghost", ci, egui::TextureOptions::LINEAR);
+    let max = ctx.input(|i| i.max_texture_side).min(4096);
+    let t = ctx.load_texture("content_ghost", crate::widgets::fit_texture(ci, max), egui::TextureOptions::LINEAR);
     ctx.data_mut(|d| d.insert_temp(key, t.clone()));
     Some(t)
 }
@@ -2667,6 +2673,38 @@ mod tests {
         });
         out.textures_delta.clear();
         out.platform_output.ime
+    }
+
+    /// An edit patches the canvas texture in place only while that texture is at full resolution:
+    /// past the GPU's texture limit `upload` shrinks it, and a full-resolution patch written into
+    /// it is a renderer validation error.
+    #[test]
+    fn edits_patch_the_canvas_only_at_full_resolution() {
+        for (max_side, patches) in [(None, true), (Some(1024), false)] {
+            let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+            let ctx = egui::Context::default();
+            let mut frame = |app: &mut DesignApp| {
+                // Wider than the limit (egui's font atlas needs at least 1024).
+                let mut raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1900.0, 900.0))), ..Default::default() };
+                if let Some(m) = max_side {
+                    raw.max_texture_side = Some(m);
+                }
+                let mut out = ctx.run_ui(raw, |ui| {
+                    app.logic(ui.ctx());
+                    app.ui(ui);
+                });
+                out.textures_delta.clear();
+            };
+            app.run("file.new", json!({})).unwrap();
+            for _ in 0..3 {
+                frame(&mut app);
+            }
+            app.run("frame.create", json!({"rect": [36, 36, 60, 60]})).unwrap();
+            frame(&mut app);
+            let size = app.canvas.texture.as_ref().unwrap().size();
+            assert!(max_side.is_none_or(|m| size[0] <= m && size[1] <= m), "{size:?}");
+            assert_eq!(app.canvas.patches > 0, patches, "limit {max_side:?}");
+        }
     }
 
     /// The Type tool's caret at the end of a new text frame holding `text`, the app's first frames
