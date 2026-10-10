@@ -190,3 +190,37 @@ fn text_wrap_side_and_contour_come_from_the_style_for_frames_and_placed_graphics
     assert_eq!(g.wrap.side, designcraft_doc::WrapSide::RightSide, "the graphic's own side wins");
     assert_eq!(g.wrap.contour, designcraft_doc::ContourType::BoundingBox);
 }
+
+#[test]
+fn feathers_come_from_the_object_style_unless_its_category_turns_them_off() {
+    let styles = r#"<ObjectStyle Self="ObjectStyle/Fade" Name="Fade">
+          <Properties><BasedOn type="string">$ID/[None]</BasedOn></Properties>
+          <TransparencySetting>
+            <GradientFeatherSetting Applied="true" Type="Radial">
+              <OpacityGradientStop Self="s0" Opacity="100" Location="0"/>
+              <OpacityGradientStop Self="s1" Opacity="0" Location="100"/>
+            </GradientFeatherSetting>
+            <DirectionalFeatherSetting Applied="true" LeftWidth="3" RightWidth="4" TopWidth="5" BottomWidth="6"/>
+          </TransparencySetting>
+        </ObjectStyle>
+        <ObjectStyle Self="ObjectStyle/NoGradient" Name="NoGradient">
+          <Properties><BasedOn type="object">ObjectStyle/Fade</BasedOn></Properties>
+          <ObjectStyleObjectEffectsCategorySettings EnableGradientFeather="false"/>
+        </ObjectStyle>"#;
+    let d = fixture(
+        styles,
+        &[
+            (r#"AppliedObjectStyle="ObjectStyle/Fade""#, ""),
+            (r#"AppliedObjectStyle="ObjectStyle/NoGradient""#, ""),
+            (r#"AppliedObjectStyle="ObjectStyle/Fade""#, r#"<TransparencySetting><DirectionalFeatherSetting Applied="false"/></TransparencySetting>"#),
+        ],
+    );
+    let fx: Vec<&designcraft_doc::Effects> = d.spreads[0].items.iter().map(|i| &i.effects).collect();
+    assert!(fx[0].gradient_feather.on && fx[0].gradient_feather.radial, "{:?}", fx[0]);
+    assert!(fx[0].directional_feather.on);
+    assert_eq!(fx[0].directional_feather.widths, [5.0, 3.0, 6.0, 4.0]);
+    assert!(!fx[1].gradient_feather.on, "the category flag turns the style's gradient feather off");
+    assert!(fx[1].directional_feather.on);
+    assert!(fx[2].gradient_feather.on);
+    assert!(!fx[2].directional_feather.on, "the item's own setting wins");
+}

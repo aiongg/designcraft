@@ -2845,6 +2845,8 @@ fn overlay(base: &mut El, top: &El, depth: usize) {
             _ => {}
         }
     }
+}
+
 fn finite(v: Option<f64>) -> Option<f64> {
     v.filter(|v| v.is_finite())
 }

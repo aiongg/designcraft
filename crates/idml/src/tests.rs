@@ -2761,6 +2761,8 @@ fn imports_and_round_trips_text_wrap_side_and_contour_type() {
     let back = import_idml(&export_idml(&d)).unwrap();
     let w = back.spreads[0].items.iter().find(|i| i.graphic().is_some()).unwrap().wrap;
     assert_eq!((w.side, w.contour), (designcraft_doc::WrapSide::AwayFromSpine, designcraft_doc::ContourType::DetectEdges));
+}
+
 fn feather_fixture(transparency: &str) -> Document {
     let designmap = r#"<Document xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" Self="d">
           <idPkg:Spread src="Spreads/Spread_s.xml"/>
