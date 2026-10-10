@@ -1484,6 +1484,36 @@ mod tests {
     }
 
     #[test]
+    fn table_edges_paint_gap_colour_between_dashes_and_stripes() {
+        let mut d = Document::new(&NewDocument::default());
+        let lid = d.default_layer();
+        let (_, sid) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(36.0, 36.0, 336.0, 400.0), lid, "", ParaFormat::default()).unwrap();
+        let mut t = designcraft_doc::Table::new(1, 1, 1, 0, 0, 200.0);
+        t.rows[0].height = 60.0;
+        t.rows[0].mode = designcraft_doc::RowHeightMode::Exactly;
+        let gap = |kind| designcraft_doc::CellStroke { weight: 8.0, kind, gap_color: "C=100 M=0 Y=0 K=0".into(), ..Default::default() };
+        let cell = t.cell_mut(0, 0).unwrap();
+        cell.strokes[0] = gap(designcraft_doc::StrokeType::Dashed { pattern: vec![12.0, 6.0] });
+        cell.strokes[2] = gap(designcraft_doc::StrokeType::ThickThin);
+        cell.border_overrides = [true; 4];
+        cell.stroke_defined = [true; 4];
+        d.story_mut(sid).unwrap().insert_table(0, t);
+        let cache = Cache::new();
+        let rect = cache.get(&d, sid, None).frames[0].tables[0].cell(0, 0).unwrap().rect;
+        let mut r = Renderer::new();
+        r.threads = 0;
+        let img = r.render_page(&d, &cache, 0, 1.0, false, &RenderOptions::default()).unwrap();
+        let ink = |p: [u8; 4]| p[0] < 80 && p[2] < 80;
+        let cyan = |p: [u8; 4]| p[0] < 80 && p[2] > 150;
+        let y = rect.y0.round() as u32;
+        let (dash, space) = (img.pixel((rect.x0 + 6.0) as u32, y), img.pixel((rect.x0 + 15.0) as u32, y));
+        assert!(ink(dash), "dash {dash:?}");
+        assert!(cyan(space), "gap {space:?}");
+        let column: Vec<_> = (rect.y1 as u32 - 5..=rect.y1 as u32 + 5).map(|y| img.pixel(rect.center().x as u32, y)).collect();
+        assert!(column.iter().any(|p| ink(*p)) && column.iter().any(|p| cyan(*p)), "stripes and gap: {column:?}");
+    }
+
+    #[test]
     fn renders_tables() {
         let mut d = Document::new(&NewDocument::default());
         let lid = d.default_layer();

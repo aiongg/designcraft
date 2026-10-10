@@ -196,9 +196,18 @@ fn table_specs() -> Vec<CommandSpec> {
             "Cell Options",
             [],
             None,
-            "{fill?: swatch, tint?, insets?: n | [t,l,b,r], vj?: top|center|bottom|justify, text?, stroke?: {weight?, color?, tint?, type?: solid|dashed|dotted, edges?: all|outer|inner|top|left|bottom|right}}",
+            "{fill?: swatch, tint?: 0..1, insets?: n | [t,l,b,r], vj?: top|center|bottom|justify, text?, stroke?: {weight?, color?: swatch, tint?: 0..1, type?: solid|dashed|dotted|thickThin|thinThick|thinThin|thickThick|thinThickThin|thickThinThick|wavy|hashed | {kind:…}, gapColor?: swatch, gapTint?: 0..1, edges?: name | [names] (all|outer|inner|top|left|bottom|right|innerHorizontal|innerVertical; default all)}} — top/left/bottom/right are the target range's outer sides, innerHorizontal/innerVertical the lines between its rows/columns",
             in_table,
             set_cell
+        ),
+        cmd!(
+            query "table.getCellStroke",
+            "Get Cell Stroke",
+            [],
+            None,
+            "{story?, table?, rows?, cols?, edges?} → {weight, color, tint, type, gapColor, gapTint, fill, fillTint, edges: count} of the chosen edges of the target cells; a value that differs between them is null",
+            in_table_or_ids,
+            get_cell_stroke
         ),
         cmd!("table.setRowHeight", "Row Height", [], None, "{height, mode?: atLeast|exactly}", in_table, set_row_height),
         cmd!("table.setColumnWidth", "Column Width", [], None, "{width}", in_table, set_col_width),
@@ -217,7 +226,7 @@ fn table_specs() -> Vec<CommandSpec> {
             "Table Options",
             [],
             None,
-            "{direction?: leftToRight|rightToLeft, border?: {weight?, color?, tint?, type?}, spaceBefore?, spaceAfter?, headerRows?, footerRows?, repeatHeader?, repeatFooter?, altRows?: {first, firstColor, firstTint, next, nextColor, nextTint, skipFirst, skipLast} | null, altCols?: … | null}",
+            "{direction?: leftToRight|rightToLeft, border?: {weight?, color?, tint?, type?, gapColor?, gapTint?}, spaceBefore?, spaceAfter?, headerRows?, footerRows?, repeatHeader?, repeatFooter?, altRows?: {first, firstColor, firstTint, next, nextColor, nextTint, skipFirst, skipLast} | null, altCols?: … | null}",
             in_table,
             options
         ),
@@ -606,29 +615,174 @@ fn unmerge(s: &mut Session, p: &Value) -> Result<Value> {
     })
 }
 
-fn parse_stroke(v: &Value, mut base: CellStroke) -> CellStroke {
-    if let Some(w) = v.get("weight").and_then(Value::as_f64) {
-        base.weight = w.max(0.0);
+/// Cell edges chosen for a stroke edit: the target range's four outer sides (physical left and
+/// right) and the lines between its rows and columns.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct EdgeSel {
+    top: bool,
+    left: bool,
+    bottom: bool,
+    right: bool,
+    inner_h: bool,
+    inner_v: bool,
+}
+
+impl EdgeSel {
+    const ALL: EdgeSel = EdgeSel { top: true, left: true, bottom: true, right: true, inner_h: true, inner_v: true };
+
+    fn parse(v: Option<&Value>, cmd: &str) -> Result<EdgeSel> {
+        let names: Vec<&Value> = match v {
+            None | Some(Value::Null) => return Ok(EdgeSel::ALL),
+            Some(Value::Array(a)) => a.iter().collect(),
+            Some(v) => vec![v],
+        };
+        let mut e = EdgeSel::default();
+        for n in names {
+            match n.as_str() {
+                Some("all") => e = EdgeSel::ALL,
+                Some("outer") => (e.top, e.left, e.bottom, e.right) = (true, true, true, true),
+                Some("inner") => (e.inner_h, e.inner_v) = (true, true),
+                Some("top") => e.top = true,
+                Some("left") => e.left = true,
+                Some("bottom") => e.bottom = true,
+                Some("right") => e.right = true,
+                Some("innerHorizontal") => e.inner_h = true,
+                Some("innerVertical") => e.inner_v = true,
+                _ => return Err(bad(cmd, format!("unknown edge {n}; use all|outer|inner|top|left|bottom|right|innerHorizontal|innerVertical"))),
+            }
+        }
+        if e == EdgeSel::default() {
+            return Err(bad(cmd, "no edges chosen"));
+        }
+        Ok(e)
     }
-    if let Some(c) = color_param(v, "color") {
-        base.color = c;
+
+    /// Which sides (top, left, bottom, right) of the cell at `(r, c)` with `spans` are chosen
+    /// within `rg`. Left and right are physical sides, also in RTL tables.
+    fn sides(&self, rg: CellRange, (r, c): (usize, usize), spans: (u32, u32), rtl: bool) -> [bool; 4] {
+        let last_row = r.saturating_add((spans.0.max(1) - 1) as usize);
+        let last_col = c.saturating_add((spans.1.max(1) - 1) as usize);
+        let (start, end) = (c <= rg.c0, last_col >= rg.c1);
+        let (left_outer, right_outer) = if rtl { (end, start) } else { (start, end) };
+        [
+            if r <= rg.r0 { self.top } else { self.inner_h },
+            if left_outer { self.left } else { self.inner_v },
+            if last_row >= rg.r1 { self.bottom } else { self.inner_h },
+            if right_outer { self.right } else { self.inner_v },
+        ]
     }
-    if let Some(t) = v.get("tint").and_then(Value::as_f64) {
-        base.tint = t.clamp(0.0, 1.0) as f32;
+}
+
+/// A finite number in `lo..=hi`, or an error naming `key`.
+fn num_in(v: &Value, key: &str, lo: f64, hi: f64, cmd: &str) -> Result<Option<f64>> {
+    match v.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(x) => match x.as_f64() {
+            Some(n) if n.is_finite() && (lo..=hi).contains(&n) => Ok(Some(n)),
+            _ => Err(bad(cmd, format!("{key} must be a number from {lo} to {hi}"))),
+        },
     }
-    match str_param(v, "type") {
-        Some("dashed") => base.kind = StrokeType::Dashed { pattern: vec![base.weight.max(1.0) * 3.0, base.weight.max(1.0) * 2.0] },
-        Some("dotted") => base.kind = StrokeType::Dotted,
-        Some("solid") => base.kind = StrokeType::Solid,
-        _ => {}
+}
+
+/// A swatch of the document (or [None]), or an error naming `key`.
+fn swatch_in(doc: &Document, v: &Value, keys: &[&str], cmd: &str) -> Result<Option<String>> {
+    let Some((key, x)) = keys.iter().find_map(|k| v.get(*k).filter(|x| !x.is_null()).map(|x| (*k, x))) else { return Ok(None) };
+    let name = x.as_str().ok_or_else(|| bad(cmd, format!("{key} must be a swatch name")))?;
+    if name != designcraft_color::swatch::NONE && doc.swatch(name).is_none() {
+        return Err(bad(cmd, format!("no swatch `{name}`")));
     }
-    base
+    Ok(Some(name.to_string()))
+}
+
+/// The cell stroke type names of `type`.
+const CELL_STROKE_TYPES: &[&str] =
+    &["solid", "dashed", "dotted", "thickThin", "thinThick", "thinThin", "thickThick", "thinThickThin", "thickThinThick", "wavy", "hashed"];
+
+/// The attributes a stroke edit sets. A plain `"dashed"` gets a pattern scaled to the
+/// resulting weight of each edge.
+struct StrokeEdit {
+    attrs: designcraft_doc::CellStrokeAttrs,
+    scaled_dashes: bool,
+}
+
+impl StrokeEdit {
+    fn parse(doc: &Document, v: &Value, cmd: &str) -> Result<StrokeEdit> {
+        if !v.is_object() {
+            return Err(bad(cmd, "stroke must be an object"));
+        }
+        let mut attrs = designcraft_doc::CellStrokeAttrs {
+            weight: num_in(v, "weight", 0.0, 1000.0, cmd)?,
+            color: swatch_in(doc, v, &["color"], cmd)?,
+            tint: num_in(v, "tint", 0.0, 1.0, cmd)?.map(|t| t as f32),
+            gap_color: swatch_in(doc, v, &["gapColor", "gapSwatch"], cmd)?,
+            gap_tint: num_in(v, "gapTint", 0.0, 1.0, cmd)?.map(|t| t as f32),
+            kind: None,
+        };
+        let mut scaled_dashes = false;
+        match v.get("type") {
+            None | Some(Value::Null) => {}
+            Some(Value::String(name)) if name == "dashed" => {
+                scaled_dashes = true;
+                attrs.kind = Some(StrokeType::Dashed { pattern: Vec::new() });
+            }
+            Some(Value::String(name)) if CELL_STROKE_TYPES.contains(&name.as_str()) => {
+                attrs.kind = Some(serde_json::from_value(json!({"kind": name})).map_err(|e| bad(cmd, e.to_string()))?);
+            }
+            Some(t @ Value::Object(_)) => {
+                let kind: StrokeType = serde_json::from_value(t.clone()).map_err(|e| bad(cmd, format!("bad stroke type: {e}")))?;
+                let finite = |v: &[f64]| v.len() <= 64 && v.iter().all(|x| x.is_finite() && *x >= 0.0);
+                match &kind {
+                    StrokeType::Dashed { pattern } if !finite(pattern) || pattern.iter().all(|x| *x == 0.0) => {
+                        return Err(bad(cmd, "a dash pattern needs up to 64 non-negative lengths, not all zero"));
+                    }
+                    StrokeType::Stripes { bands } if bands.len() > 64 || !bands.iter().all(|(a, b)| finite(&[*a, *b])) => {
+                        return Err(bad(cmd, "stripes need up to 64 bands of non-negative numbers"));
+                    }
+                    StrokeType::Style { name } if !doc.stroke_styles.iter().any(|s| s.name == *name) => {
+                        return Err(bad(cmd, format!("no stroke style `{name}`")));
+                    }
+                    _ => {}
+                }
+                attrs.kind = Some(kind);
+            }
+            Some(other) => return Err(bad(cmd, format!("unknown stroke type {other}"))),
+        }
+        Ok(StrokeEdit { attrs, scaled_dashes })
+    }
+
+    fn apply(&self, mut base: CellStroke) -> CellStroke {
+        self.attrs.apply_to(&mut base);
+        if self.scaled_dashes {
+            let w = base.weight.max(1.0);
+            base.kind = StrokeType::Dashed { pattern: vec![w * 3.0, w * 2.0] };
+        }
+        base
+    }
+}
+
+/// The stroke an edge shows: the table border on an unoverridden perimeter edge, else the cell's.
+fn shown_edge<'a>(cell: &'a designcraft_doc::Cell, side: usize, perimeter: bool, borders: &'a [CellStroke; 4]) -> &'a CellStroke {
+    match borders.get(side) {
+        Some(border) if perimeter && !cell.border_overrides.get(side).copied().unwrap_or(false) => border,
+        _ => &cell.strokes[side.min(3)],
+    }
+}
+
+/// Whether each side (top, left, bottom, right; physical) of the cell is on the table's perimeter.
+fn perimeter(t: &Table, (r, c): (usize, usize), cell: &designcraft_doc::Cell) -> [bool; 4] {
+    let (nr, nc) = (t.nrows(), t.ncols());
+    let rtl = t.options.direction == designcraft_doc::TextDirection::RightToLeft;
+    let at_bottom = r.saturating_add(cell.row_span.max(1) as usize);
+    let at_right = c.saturating_add(cell.col_span.max(1) as usize);
+    [r == 0, if rtl { at_right >= nc } else { c == 0 }, at_bottom >= nr, if rtl { c == 0 } else { at_right >= nc }]
 }
 
 fn set_cell(s: &mut Session, p: &Value) -> Result<Value> {
-    let g = target(s, p, "table.setCell")?;
-    let fill = color_param(p, "fill");
-    let tint = p.get("tint").and_then(Value::as_f64).map(|t| t.clamp(0.0, 1.0) as f32);
+    const ID: &str = "table.setCell";
+    let g = target(s, p, ID)?;
+    let doc = &s.doc()?.doc;
+    let fill = swatch_in(doc, p, &["fill"], ID)?;
+    let tint = num_in(p, "tint", 0.0, 1.0, ID)?.map(|t| t as f32);
     let insets: Option<[f64; 4]> = match p.get("insets") {
         Some(Value::Number(n)) => n.as_f64().map(|v| [v.max(0.0); 4]),
         Some(Value::Array(a)) if a.len() == 4 => {
@@ -642,12 +796,15 @@ fn set_cell(s: &mut Session, p: &Value) -> Result<Value> {
         Some("center") => Some(VerticalJustification::Center),
         Some("bottom") => Some(VerticalJustification::Bottom),
         Some("justify") => Some(VerticalJustification::Justify),
-        Some(o) => return Err(bad("table.setCell", format!("unknown vj `{o}`"))),
+        Some(o) => return Err(bad(ID, format!("unknown vj `{o}`"))),
         None => None,
     };
     let text = str_param(p, "text").map(str::to_string);
-    let stroke = p.get("stroke").cloned();
-    edit_table(s, &g, "table.setCell", |t| {
+    let stroke = match p.get("stroke").filter(|v| !v.is_null()) {
+        Some(sv) => Some((StrokeEdit::parse(doc, sv, ID)?, EdgeSel::parse(sv.get("edges"), ID)?)),
+        None => None,
+    };
+    edit_table(s, &g, ID, |t| {
         let owners = t.owners();
         let nc = t.ncols();
         let nr = t.nrows();
@@ -658,9 +815,13 @@ fn set_cell(s: &mut Session, p: &Value) -> Result<Value> {
         let rg = g.range;
         for r in rg.r0..=rg.r1 {
             for c in rg.c0..=rg.c1 {
-                if owners[r * nc + c] != (r, c) {
+                if owners.get(r * nc + c) != Some(&(r, c)) {
                     continue;
                 }
+                let on_perimeter = match t.cell(r, c) {
+                    Some(cell) => perimeter(t, (r, c), cell),
+                    None => continue,
+                };
                 let Some(cell) = t.cell_mut(r, c) else { continue };
                 if let Some(f) = &fill {
                     cell.fill = f.clone();
@@ -678,24 +839,12 @@ fn set_cell(s: &mut Session, p: &Value) -> Result<Value> {
                     let len = cell.text.len();
                     cell.text.replace(0..len, tx);
                 }
-                if let Some(sv) = &stroke {
-                    let edges = str_param(sv, "edges").unwrap_or("all");
-                    let at_bottom = r.saturating_add(cell.row_span.max(1) as usize);
-                    let at_right = c.saturating_add(cell.col_span.max(1) as usize);
-                    let perimeter = [r == 0, if rtl { at_right == nc } else { c == 0 }, at_bottom == nr, if rtl { c == 0 } else { at_right == nc }];
-                    for (i, on) in [
-                        ("top", r == rg.r0),
-                        ("left", if rtl { at_right.saturating_sub(1) == rg.c1 } else { c == rg.c0 }),
-                        ("bottom", at_bottom.saturating_sub(1) == rg.r1),
-                        ("right", if rtl { c == rg.c0 } else { at_right.saturating_sub(1) == rg.c1 }),
-                    ]
-                    .iter()
-                    .enumerate()
-                    .map(|(i, (name, outer))| (i, edges == "all" || edges == *name || (edges == "outer" && *outer) || (edges == "inner" && !*outer)))
-                    {
+                if let Some((edit, edges)) = &stroke {
+                    let chosen = edges.sides(rg, (r, c), (cell.row_span, cell.col_span), rtl);
+                    for (i, on) in chosen.into_iter().enumerate() {
                         if on {
-                            let base = if perimeter[i] && !cell.border_overrides[i] { &borders[i] } else { &cell.strokes[i] };
-                            cell.strokes[i] = parse_stroke(sv, base.clone());
+                            let base = shown_edge(cell, i, on_perimeter[i], &borders).clone();
+                            cell.strokes[i] = edit.apply(base);
                             cell.stroke_defined[i] = true;
                             cell.stroke_priorities[i] = priority;
                             cell.border_overrides[i] = true;
@@ -706,29 +855,27 @@ fn set_cell(s: &mut Session, p: &Value) -> Result<Value> {
         }
         // Keep both copies of unmerged shared boundaries consistent. Left/right name
         // physical sides, also in RTL tables.
-        if let Some(sv) = &stroke {
-            let edges = str_param(sv, "edges").unwrap_or("all");
-            let selected = |side: &str| edges == "all" || edges == "outer" || edges == side;
-            if selected("top")
+        if let Some((_, edges)) = &stroke {
+            if edges.top
                 && let Some(row) = rg.r0.checked_sub(1)
             {
                 for c in rg.c0..=rg.c1 {
                     mirror_cell_edge(t, &owners, (rg.r0, c), 0, (row, c), 2);
                 }
             }
-            if selected("bottom") && rg.r1.saturating_add(1) < nr {
+            if edges.bottom && rg.r1.saturating_add(1) < nr {
                 for c in rg.c0..=rg.c1 {
                     mirror_cell_edge(t, &owners, (rg.r1, c), 2, (rg.r1 + 1, c), 0);
                 }
             }
-            if selected(if rtl { "right" } else { "left" })
+            if (if rtl { edges.right } else { edges.left })
                 && let Some(col) = rg.c0.checked_sub(1)
             {
                 for r in rg.r0..=rg.r1 {
                     mirror_cell_edge(t, &owners, (r, rg.c0), if rtl { 3 } else { 1 }, (r, col), if rtl { 1 } else { 3 });
                 }
             }
-            if selected(if rtl { "left" } else { "right" }) && rg.c1.saturating_add(1) < nc {
+            if (if rtl { edges.left } else { edges.right }) && rg.c1.saturating_add(1) < nc {
                 for r in rg.r0..=rg.r1 {
                     mirror_cell_edge(t, &owners, (r, rg.c1), if rtl { 1 } else { 3 }, (r, rg.c1 + 1), if rtl { 3 } else { 1 });
                 }
@@ -736,6 +883,62 @@ fn set_cell(s: &mut Session, p: &Value) -> Result<Value> {
         }
         ok()
     })
+}
+
+/// The shown stroke attributes of the chosen edges of the target cells, and their fill; values
+/// that differ are null.
+fn get_cell_stroke(s: &mut Session, p: &Value) -> Result<Value> {
+    const ID: &str = "table.getCellStroke";
+    let g = target(s, p, ID)?;
+    let edges = EdgeSel::parse(p.get("edges"), ID)?;
+    let st = s.doc()?;
+    let t = st.doc.story(g.story).and_then(|x| x.tables.get(&g.table)).ok_or_else(|| bad(ID, "no table"))?;
+    let owners = t.owners();
+    let nc = t.ncols();
+    let rtl = t.options.direction == designcraft_doc::TextDirection::RightToLeft;
+    let borders: [CellStroke; 4] = std::array::from_fn(|side| t.options.border_for(side).clone());
+    // One value per key, or null once two edges (cells) disagree.
+    fn merge(slot: &mut Option<Value>, v: Value) {
+        match slot {
+            None => *slot = Some(v),
+            Some(cur) if *cur != v => *cur = Value::Null,
+            _ => {}
+        }
+    }
+    let keys = ["weight", "color", "tint", "type", "gapColor", "gapTint"];
+    let mut stroke: [Option<Value>; 6] = Default::default();
+    let (mut fill, mut fill_tint) = (None, None);
+    let mut count = 0usize;
+    for r in g.range.r0..=g.range.r1 {
+        for c in g.range.c0..=g.range.c1 {
+            if owners.get(r * nc + c) != Some(&(r, c)) {
+                continue;
+            }
+            let Some(cell) = t.cell(r, c) else { continue };
+            merge(&mut fill, json!(cell.fill));
+            merge(&mut fill_tint, json!(cell.fill_tint));
+            let on_perimeter = perimeter(t, (r, c), cell);
+            for (i, on) in edges.sides(g.range, (r, c), (cell.row_span, cell.col_span), rtl).into_iter().enumerate() {
+                if !on {
+                    continue;
+                }
+                count += 1;
+                let e = shown_edge(cell, i, on_perimeter[i], &borders);
+                let values = [json!(e.weight), json!(e.color), json!(e.tint), json!(e.kind), json!(e.gap_color), json!(e.gap_tint)];
+                for (slot, v) in stroke.iter_mut().zip(values) {
+                    merge(slot, v);
+                }
+            }
+        }
+    }
+    let mut out = serde_json::Map::new();
+    for (k, v) in keys.iter().zip(stroke) {
+        out.insert((*k).into(), v.unwrap_or(Value::Null));
+    }
+    out.insert("fill".into(), fill.unwrap_or(Value::Null));
+    out.insert("fillTint".into(), fill_tint.unwrap_or(Value::Null));
+    out.insert("edges".into(), json!(count));
+    Ok(Value::Object(out))
 }
 
 /// Only saturation needs rebasing. Preserve every distinct priority's order and keep
@@ -907,14 +1110,18 @@ fn parse_alt(v: &Value) -> Option<AltFills> {
 
 fn options(s: &mut Session, p: &Value) -> Result<Value> {
     let g = target(s, p, "table.options")?;
+    let border = match p.get("border").filter(|v| !v.is_null()) {
+        Some(b) => Some(StrokeEdit::parse(&s.doc()?.doc, b, "table.options")?),
+        None => None,
+    };
     let p = p.clone();
     edit_table(s, &g, "table.options", |t| {
         let o = &mut t.options;
         if let Some(v) = p.get("direction") {
             o.direction = serde_json::from_value(v.clone()).map_err(|e| bad("table.options", e.to_string()))?;
         }
-        if let Some(b) = p.get("border") {
-            o.border = parse_stroke(b, o.border.clone());
+        if let Some(b) = &border {
+            o.border = b.apply(o.border.clone());
             o.borders = Default::default();
         }
         o.space_before = f64_or(&p, "spaceBefore", o.space_before);

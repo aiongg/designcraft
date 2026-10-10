@@ -447,22 +447,37 @@ impl Renderer {
             ctx.set_transform(f.view * xf);
             for s in &t.strokes {
                 let Some(col) = doc.resolve_color(&s.stroke.color, s.stroke.tint) else { continue };
+                let kind = doc.stroke_kind(&s.stroke.kind);
+                let line = kurbo::Line::new(s.a, s.b).to_path(0.1);
+                // Gap colour under dashes, dots and stripes: the whole edge, solid.
+                if !matches!(kind, designcraft_doc::StrokeType::Solid)
+                    && let Some(gap) = doc.resolve_color(&s.stroke.gap_color, s.stroke.gap_tint)
+                {
+                    ctx.set_paint(color_of(&gap, 1.0));
+                    ctx.set_stroke(kurbo::Stroke::new(s.stroke.weight).with_caps(kurbo::Cap::Butt));
+                    ctx.stroke_path(&line);
+                }
                 ctx.set_paint(color_of(&col, 1.0));
-                ctx.set_stroke(cell_stroke(&s.stroke));
-                ctx.stroke_path(&kurbo::Line::new(s.a, s.b).to_path(0.1));
+                // Stripes, wavy and hash types are fills along the edge.
+                if let Some(o) = kind.outline(&line, s.stroke.weight, 0.05 * f.px) {
+                    ctx.fill_path(&o);
+                    continue;
+                }
+                ctx.set_stroke(cell_stroke(&kind, s.stroke.weight));
+                ctx.stroke_path(&line);
             }
         }
     }
 }
 
-/// Kurbo stroke for a table edge.
-fn cell_stroke(s: &designcraft_doc::CellStroke) -> kurbo::Stroke {
-    let st = kurbo::Stroke::new(s.weight).with_caps(kurbo::Cap::Square);
-    match &s.kind {
+/// Kurbo stroke for a table edge of a resolved stroke type.
+fn cell_stroke(kind: &designcraft_doc::StrokeType, weight: f64) -> kurbo::Stroke {
+    let st = kurbo::Stroke::new(weight).with_caps(kurbo::Cap::Square);
+    match kind {
         designcraft_doc::StrokeType::Dashed { pattern } if !pattern.is_empty() => {
             st.with_caps(kurbo::Cap::Butt).with_dashes(0.0, pattern.iter().copied())
         }
-        designcraft_doc::StrokeType::Dotted => st.with_dashes(0.0, [0.0, s.weight * 2.0]).with_caps(kurbo::Cap::Round),
+        designcraft_doc::StrokeType::Dotted => st.with_dashes(0.0, [0.0, weight * 2.0]).with_caps(kurbo::Cap::Round),
         _ => st,
     }
 }

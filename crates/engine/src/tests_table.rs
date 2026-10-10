@@ -399,3 +399,41 @@ fn editing_beside_a_merged_cell_only_changes_the_selected_edge_segment() {
         }
     }
 }
+
+#[test]
+fn cell_stroke_gap_colour_on_inner_horizontal_edges_of_a_selection_undoes_and_saves() {
+    let (mut s, sid, _) = session_with_frame();
+    let tid = s.execute("table.insert", &json!({"rows": 2, "cols": 2})).unwrap()["table"].as_u64().unwrap();
+    s.execute("table.select", &json!({"what": "table"})).unwrap();
+    let before = table_for(&s, sid, tid).clone();
+    let cyan = "C=100 M=0 Y=0 K=0";
+    let stroke = json!({"weight": 3, "type": "dashed", "gapColor": cyan, "gapTint": 0.5, "edges": ["innerHorizontal"]});
+    s.execute("table.setCell", &json!({ "stroke": stroke })).unwrap();
+    let t = table_for(&s, sid, tid).clone();
+    let edge = |r: usize, c: usize, side: usize| t.cell(r, c).unwrap().strokes[side].clone();
+    for (r, c, side) in [(0, 0, 2), (0, 1, 2), (1, 0, 0), (1, 1, 0)] {
+        let e = edge(r, c, side);
+        assert_eq!((e.weight, e.gap_color.as_str(), e.gap_tint), (3.0, cyan, 0.5), "inner horizontal {r},{c} side {side}");
+        assert!(matches!(e.kind, doc::StrokeType::Dashed { .. }));
+    }
+    for (r, c, side) in [(0, 0, 0), (0, 0, 1), (0, 0, 3), (1, 1, 2), (1, 1, 1), (0, 1, 3)] {
+        assert_eq!(&edge(r, c, side), &before.cell(r, c).unwrap().strokes[side], "{r},{c} side {side} keeps its stroke");
+    }
+    // The query reports the chosen edges, and mixed values as null.
+    let inner = s.execute("table.getCellStroke", &json!({"edges": "innerHorizontal"})).unwrap();
+    assert_eq!((inner["weight"].as_f64(), inner["gapColor"].as_str(), inner["edges"].as_u64()), (Some(3.0), Some(cyan), Some(4)));
+    let all = s.execute("table.getCellStroke", &json!({})).unwrap();
+    assert!(all["weight"].is_null() && all["gapColor"].is_null());
+    // Bad values are errors and change nothing.
+    for bad in
+        [json!({"gapTint": 2}), json!({"gapColor": "No Such Swatch"}), json!({"weight": -1}), json!({"type": "zigzag"}), json!({"edges": "middle"})]
+    {
+        assert!(s.execute("table.setCell", &json!({ "stroke": bad })).is_err(), "{bad}");
+        assert_eq!(table_for(&s, sid, tid), &t);
+    }
+    let bytes = crate::cmd::file_bytes(&s.doc().unwrap().doc);
+    let back = crate::cmd::file_from(&bytes).unwrap();
+    assert_eq!(back.story(doc::StoryId(sid)).unwrap().tables.get(&tid).unwrap().as_ref(), &t);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(table_for(&s, sid, tid), &before);
+}
