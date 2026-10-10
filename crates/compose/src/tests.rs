@@ -2164,6 +2164,41 @@ fn tab_beside_a_drop_cap_is_measured_from_the_drop_cap() {
 }
 
 #[test]
+fn warichu_on_a_drop_cap_line_leaves_the_drop_cap_alone() {
+    let text = format!("WABCDEFGH {LOREM}");
+    let (mut d, sid, _) = drop_doc(&text, drop_cap(3, 1));
+    let plain = compose_story(&d, sid, &ComposeOptions::default());
+    let plain_dc = plain.frames[0].lines[0].glyphs[0].clone();
+    // A plain drop cap line has no stacked rows: one selection band, caret on the line.
+    let pl = &plain.frames[0].lines[0];
+    assert_eq!(highlight_quads(pl, 0, 12, false).len(), 1);
+    assert_eq!(caret(&plain, 1).map(|c| (c.2, c.3)), Some((pl.baseline, pl.ascent)));
+    d.story_mut(sid).unwrap().format_chars(1..9, |f| {
+        f.over.warichu = Some(true);
+        f.over.warichu_alignment = Some(designcraft_doc::cjk::WarichuAlignment::Left);
+    });
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let l = &cs.frames[0].lines[0];
+    let dc = &l.glyphs[0];
+    assert_eq!((dc.byte, dc.x, dc.y, dc.sy), (0, plain_dc.x, plain_dc.y, plain_dc.sy), "the drop cap is not part of the note");
+    let at = |byte: usize| l.glyphs.iter().find(|g| g.byte == byte && g.len > 0).unwrap();
+    let (top, bot, after) = (at(1), at(5), at(10));
+    assert!(bot.y - top.y > 1.0, "the note is stacked in two rows");
+    assert!(top.x >= dc.x + dc.adv - 1e-6, "the note starts after the drop cap");
+    assert!((after.x - (at(8).x + at(8).adv + at(9).adv)).abs() < 1e-3, "the line closes up after the note");
+    // The caret: in the drop cap as tall as it, on a note row that row's baseline, after the
+    // note the parent line's.
+    let dc_box = l.drop_cap.unwrap();
+    assert_eq!(caret(&cs, 0).map(|c| c.2), Some(dc_box.baseline));
+    assert!((caret(&cs, 1).unwrap().2 - (l.baseline + top.y)).abs() < 1e-6);
+    assert_eq!(caret(&cs, 10).map(|c| (c.2, c.3)), Some((l.baseline, l.ascent)));
+    let click = |g: &PlacedGlyph| hit(&cs, 0, designcraft_geom::Point::new(g.x + g.adv * 0.25, l.baseline + g.y)).unwrap();
+    assert_eq!((click(top), click(bot), click(after)), (1, 5, 10));
+    // Selecting the drop cap and the note: the drop cap's band and one per row.
+    assert_eq!(highlight_quads(l, 0, 9, false).len(), 3);
+}
+
+#[test]
 fn drop_cap_of_two_characters_as_a_local_override() {
     let (d, sid, _) = drop_doc(LOREM, drop_cap(2, 2));
     let cs = compose_story(&d, sid, &ComposeOptions::default());
