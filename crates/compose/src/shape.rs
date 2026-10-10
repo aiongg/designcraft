@@ -215,12 +215,18 @@ pub(crate) fn shape_para(
     // Nested line styles lie under nested and GREP styles, and the drop cap's style over them all
     // (later overlays win).
     let mut overlays: Vec<(std::ops::Range<usize>, String)> = lines.to_vec();
-    // The drop cap's style counts as a leading "through 1 Dropcap" nested style (the form IDML
-    // stores it in), so the nested styles after it start after the drop cap.
-    let cap_style = Some(drop.1).filter(|s| !s.is_empty() && *s != designcraft_doc::NO_CHAR_STYLE);
+    // The drop cap's style is the nested styles' leading "through 1 Dropcap" entry (the form IDML
+    // stores it in). Set (`[None]` included), it restyles that entry; a real one stands in for a
+    // missing entry. Either way the nested styles after it start after the drop cap.
+    let set = Some(drop.1).filter(|s| !s.is_empty());
+    let cap_style = set.filter(|s| *s != designcraft_doc::NO_CHAR_STYLE);
     let with_cap: Vec<designcraft_doc::NestedStyle>;
-    let nested = match cap_style {
-        Some(s) if !nested.is_empty() && !nested.first().is_some_and(designcraft_doc::NestedStyle::is_drop_cap) => {
+    let nested = match set {
+        Some(s) if nested.first().is_some_and(designcraft_doc::NestedStyle::is_drop_cap) => {
+            with_cap = std::iter::once(designcraft_doc::NestedStyle::drop_cap(s)).chain(nested.iter().skip(1).cloned()).collect();
+            &with_cap[..]
+        }
+        Some(s) if cap_style.is_some() && !nested.is_empty() => {
             with_cap = std::iter::once(designcraft_doc::NestedStyle::drop_cap(s)).chain(nested.iter().cloned()).collect();
             &with_cap[..]
         }

@@ -1907,6 +1907,38 @@ fn own_nested_styles_clear_an_inherited_drop_cap_style() {
     assert_eq!(d.styles.resolve_para(&story.paras[1]).0.drop_cap_style, "Strong");
 }
 
+/// A paragraph that clears its style's drop cap style without nested styles of its own round-trips:
+/// it is written with the style's list, the Dropcap entry set to [None].
+#[test]
+fn a_cleared_drop_cap_style_round_trips() {
+    let paras = r#"<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/Opener">
+      <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]"><Content>Once upon a time</Content></CharacterStyleRange>
+    </ParagraphStyleRange>"#;
+    let mut d = import_idml_with(&drop_cap_fixture("", paras), &|_| None).unwrap();
+    let sid = *d.stories.keys().next().unwrap();
+    let clear = |d: &mut Document| d.story_mut(sid).unwrap().paras[0].para.drop_cap_style = Some(st::NO_CHAR_STYLE.into());
+    let resolved = |d: &Document| {
+        let st = d.stories.values().find(|s| s.text.starts_with("Once")).unwrap();
+        d.styles.resolve_para(&st.paras[0]).0
+    };
+    clear(&mut d);
+    let back = import_idml(&export_idml(&d)).unwrap();
+    let pp = resolved(&back);
+    assert_eq!(pp.drop_cap_style, st::NO_CHAR_STYLE);
+    assert_eq!(pp.nested_styles, vec![designcraft_doc::NestedStyle::drop_cap(st::NO_CHAR_STYLE)]);
+    // The style's drop cap style without nested styles: the paragraph is written with an empty
+    // list, which clears it on import.
+    if let Some(s) = d.styles_mut().para_mut("Opener") {
+        s.para.nested_styles = None;
+    }
+    assert_eq!(resolved(&d).drop_cap_style, st::NO_CHAR_STYLE);
+    let back = import_idml(&export_idml(&d)).unwrap();
+    assert_eq!(back.styles.para("Opener").unwrap().para.drop_cap_style.as_deref(), Some("Strong"));
+    let pp = resolved(&back);
+    assert_eq!(pp.drop_cap_style, st::NO_CHAR_STYLE);
+    assert!(pp.nested_styles.iter().all(|ns| ns.style != "Strong"), "{:?}", pp.nested_styles);
+}
+
 /// Frames take the corners and Text Frame Options they don't write from their object style chain,
 /// then `[None]`. Per-corner attributes win over the legacy all-corners pair, at each level; a
 /// corner shape without a radius takes the chain's radius.
