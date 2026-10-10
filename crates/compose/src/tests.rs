@@ -4078,8 +4078,10 @@ fn list_first_line_wraps_at_the_column_edge_after_its_label() {
         (ListType::Bullets, " ", None, None),
         (ListType::Numbers, "\u{2003}", None, None),
     ];
-    for (list, sep, tabs, first_at) in cases {
+    // Justified too: only the text after the tab stretches (#284).
+    for (align, (list, sep, tabs, first_at)) in [Align::Left, Align::LeftJustified].into_iter().flat_map(|a| cases.clone().map(|c| (a, c))) {
         let para = ParaAttrs {
+            align: Some(align),
             list_type: Some(list),
             list_separator: Some(sep.into()),
             left_indent: Some(18.0),
@@ -4091,7 +4093,7 @@ fn list_first_line_wraps_at_the_column_edge_after_its_label() {
         let cs = compose_story(&d, sid, &ComposeOptions::default());
         let col = cs.frames[0].columns[0];
         let lines = &cs.frames[0].lines;
-        let what = format!("{list:?} {sep:?} {tabs:?}");
+        let what = format!("{align:?} {list:?} {sep:?} {tabs:?}");
         assert!(lines.len() >= 6, "{what}: {} lines", lines.len());
         for (i, l) in lines.iter().enumerate() {
             let right = right_edge(l, &text);
