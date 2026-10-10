@@ -556,14 +556,28 @@ mod tests {
 
     use crate::test_window::{self, wheel};
 
-    /// The Control panel's last control with nothing selected.
-    const LAST_CONTROL: &str = "Jump to Next Column";
+    /// The Control panel's last control with no text frame selected.
+    const LAST_CONTROL: &str = "Align bottom edges";
     const FIRST_CONTROL: &str = "Rotate 90° Counterclockwise";
 
     fn app() -> crate::DesignApp {
         let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
         app.ui.control_bar = true;
         app
+    }
+
+    /// A document with a rectangle selected, so the object controls are enabled.
+    fn app_with_selection() -> crate::DesignApp {
+        let mut app = app();
+        app.run("file.new", serde_json::json!({})).unwrap();
+        app.run("frame.create", serde_json::json!({"rect": [72, 72, 300, 200]})).unwrap();
+        app.run("edit.selectAll", serde_json::json!({})).unwrap();
+        app
+    }
+
+    /// The rect of an object Control panel group.
+    fn group(h: &egui_kittest::Harness<'static, test_window::Window>, id: &str) -> egui::Rect {
+        h.ctx.read_response(egui::Id::new(("object_control", id))).unwrap().rect
     }
 
     fn rect(h: &egui_kittest::Harness<'static, test_window::Window>, label: &str) -> egui::Rect {
@@ -573,7 +587,7 @@ mod tests {
     #[test]
     fn a_narrow_window_scrolls_the_control_bar() {
         let w = 700.0;
-        let mut h = test_window::open(app(), vec2(w, 600.0));
+        let mut h = test_window::open(app_with_selection(), vec2(w, 600.0));
         let bar = test_window::panel_rect(&h, "control_bar");
         assert!(rect(&h, LAST_CONTROL).max.x > w, "the controls are wider than the window");
         // A plain mouse wheel scrolls the bar sideways.
@@ -584,8 +598,9 @@ mod tests {
         assert!(window.contains_rect(last) && bar.contains_rect(last), "{last:?} outside the bar {bar:?}");
         assert_eq!(test_window::panel_rect(&h, "control_bar").height(), bar.height(), "the bar keeps its height");
         // A popup opened from a scrolled control opens at that control.
-        let fill = h.get_by_label("Fill").rect();
-        let chip = pos2(fill.max.x + 15.0, fill.center().y);
+        let appearance = group(&h, "appearance");
+        let fill = egui::Rect::from_min_size(appearance.min, vec2(30.0, crate::widgets::FIELD_H));
+        let chip = pos2(fill.min.x + 9.0, fill.center().y);
         h.hover_at(chip);
         h.drag_at(chip);
         h.drop_at(chip);
@@ -626,8 +641,8 @@ mod tests {
         let mut h = test_window::open(app, vec2(700.0, 600.0));
         let bar = test_window::panel_rect(&h, "control_bar").center();
         wheel(&mut h, bar, vec2(0.0, -3000.0));
-        // The text frame's last group: its caption gets only what is left of the row.
-        let columns = h.get_by_label("Columns").rect();
-        assert!(columns.height() < 20.0 && columns.width() > columns.height(), "Columns wraps: {columns:?}");
+        // The text frame's last group keeps its full size, not only what is left of the row.
+        let columns = group(&h, "columns");
+        assert!(columns.width() >= 48.0 && columns.max.x <= 700.0, "Columns group squeezed or off screen: {columns:?}");
     }
 }

@@ -1120,7 +1120,6 @@ mod tests {
     /// row hung below the panel and was cut off.
     #[test]
     fn control_bar_shows_its_second_row() {
-        use egui_kittest::kittest::Queryable as _;
         let mut app = DesignApp::new(designcraft_engine::Session::new(), Services::default());
         app.run("file.newSample", json!({})).unwrap();
         app.ui.control_bar = true;
@@ -1135,9 +1134,10 @@ mod tests {
         h.run_steps(4);
         let bar = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("control_bar")).unwrap().outer_rect;
         assert!(bar.height() > 40.0, "{bar:?}");
-        let rows: Vec<egui::Rect> = h.query_all_by_label("Y:").map(|n| n.rect()).filter(|r| bar.contains(r.left_top())).collect();
-        assert_eq!(rows.len(), 1, "the Y: caption of the Control panel");
-        assert!(rows[0].bottom() <= bar.bottom(), "Y: caption {:?} hangs below the Control panel {bar:?}", rows[0]);
+        // The X/Y/W/H group: its second row holds Y: and H:.
+        let group = h.ctx.read_response(egui::Id::new(("object_control", "dimensions"))).unwrap().rect;
+        assert!(bar.contains(group.left_top()), "the X/Y/W/H group {group:?} is in the Control panel {bar:?}");
+        assert!(group.bottom() <= bar.bottom(), "X/Y/W/H group {group:?} hangs below the Control panel {bar:?}");
     }
 
     #[test]
