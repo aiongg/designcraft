@@ -500,6 +500,11 @@ fn edit_para(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// Rename a paragraph or character style everywhere it's used.
 fn rename_style(d: &mut designcraft_doc::Document, para: bool, from: &str, to: &str) {
+    let rename = |r: &mut String| {
+        if r == from {
+            *r = to.to_string();
+        }
+    };
     let st = d.styles_mut();
     if para {
         for s in &mut st.paragraph {
@@ -512,11 +517,16 @@ fn rename_style(d: &mut designcraft_doc::Document, para: bool, from: &str, to: &
                 }
             }
         }
-        for o in &mut st.object {
-            if o.paragraph_style.as_deref() == Some(from) {
-                o.paragraph_style = Some(to.to_string());
+        let objects = st.object.iter_mut().map(|o| &mut o.paragraph_style);
+        for r in objects.chain(st.cell.iter_mut().map(|c| &mut c.paragraph_style)) {
+            if r.as_deref() == Some(from) {
+                *r = Some(to.to_string());
             }
         }
+        rename(&mut st.default_paragraph);
+        let (fo, eo) = (&mut d.footnote_options, &mut d.endnote_options);
+        [&mut fo.para_style, &mut eo.para_style, &mut eo.heading_style].into_iter().for_each(rename);
+        d.toc.iter_mut().flat_map(|t| t.entries.iter_mut().map(|e| &mut e.style)).for_each(rename);
     } else {
         for s in &mut st.character {
             if s.name == from {
@@ -529,9 +539,8 @@ fn rename_style(d: &mut designcraft_doc::Document, para: bool, from: &str, to: &
         for s in &mut st.paragraph {
             rename_char_refs(&mut s.para, from, to);
         }
-        if d.footnote_options.ref_char_style == from {
-            d.footnote_options.ref_char_style = to.to_string();
-        }
+        rename(&mut st.default_character);
+        rename(&mut d.footnote_options.ref_char_style);
     }
     for sid in d.stories.keys().copied().collect::<Vec<_>>() {
         let Some(story) = d.story_mut(sid) else { continue };
@@ -553,10 +562,12 @@ fn rename_style(d: &mut designcraft_doc::Document, para: bool, from: &str, to: &
     }
 }
 
-/// Point the nested, nested line and GREP styles of paragraph attributes at a renamed character style.
+/// Point the nested, nested line, GREP and drop cap styles of paragraph attributes at a renamed
+/// character style.
 fn rename_char_refs(p: &mut ParaAttrs, from: &str, to: &str) {
     let names = p.nested_styles.iter_mut().flatten().map(|n| &mut n.style);
     let names = names.chain(p.nested_line_styles.iter_mut().flatten().map(|n| &mut n.style));
+    let names = names.chain(p.drop_cap_style.iter_mut());
     for n in names.chain(p.grep_styles.iter_mut().flatten().map(|g| &mut g.style)) {
         if n == from {
             *n = to.to_string();
@@ -599,22 +610,62 @@ fn group_styles(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn delete_para(s: &mut Session, p: &Value) -> Result<Value> {
-    let name = str_param(p, "name").unwrap_or("").to_string();
-    let repl = str_param(p, "replaceWith").unwrap_or(designcraft_doc::BASIC_PARAGRAPH).to_string();
+    delete_style(s, p, true)
+}
+
+fn delete_char(s: &mut Session, p: &Value) -> Result<Value> {
+    delete_style(s, p, false)
+}
+
+/// Delete a paragraph (`para`) or character style; everything that used it uses `replaceWith`
+/// (default [Basic Paragraph] or [None]) instead, in one undo step.
+fn delete_style(s: &mut Session, p: &Value, para: bool) -> Result<Value> {
+    let (id, default) =
+        if para { ("style.paragraph.delete", designcraft_doc::BASIC_PARAGRAPH) } else { ("style.character.delete", designcraft_doc::NO_CHAR_STYLE) };
+    let name = str_param(p, "name").filter(|n| !n.is_empty()).ok_or_else(|| bad(id, "missing name"))?.to_string();
+    let repl = str_param(p, "replaceWith").unwrap_or(default).to_string();
     if name.starts_with('[') {
-        return Err(bad("style.paragraph.delete", "built-in styles can't be deleted"));
+        return Err(bad(id, "built-in styles can't be deleted"));
+    }
+    if repl == name {
+        return Err(bad(id, "a style can't be replaced with itself"));
     }
     s.edit(|d, _| {
-        d.styles_mut().paragraph.retain(|x| x.name != name);
-        for sid in d.stories.keys().copied().collect::<Vec<_>>() {
-            if let Some(story) = d.story_mut(sid) {
-                for f in &mut story.paras {
-                    if f.style == name {
-                        f.style = repl.clone();
-                    }
-                }
-            }
+        let st = &d.styles;
+        let exists = |n: &str| if para { st.para(n).is_some() } else { n == designcraft_doc::NO_CHAR_STYLE || st.char_style(n).is_some() };
+        if !exists(&name) {
+            return Err(bad(id, format!("no style `{name}`")));
         }
+        if !exists(&repl) {
+            return Err(bad(id, format!("no style `{repl}` to replace it with")));
+        }
+        // The deleted style's children are based on the replacement, or on the deleted style's
+        // own parent when the replacement descends from it (so no based-on chain loops).
+        let (own_parent, descends) = if para {
+            (st.para(&name).and_then(|x| x.based_on.clone()), st.para_based_on_cycles(&name, &repl))
+        } else {
+            (st.char_style(&name).and_then(|x| x.based_on.clone()), st.char_based_on_cycles(&name, &repl))
+        };
+        let parent = if descends {
+            own_parent.filter(|b| *b != name)
+        } else if repl == designcraft_doc::NO_CHAR_STYLE || repl == designcraft_doc::NO_PARA_STYLE {
+            None
+        } else {
+            Some(repl.clone())
+        };
+        let st = d.styles_mut();
+        let based = if para {
+            st.paragraph.retain(|x| x.name != name);
+            st.paragraph.iter_mut().map(|x| &mut x.based_on).collect::<Vec<_>>()
+        } else {
+            st.character.retain(|x| x.name != name);
+            st.character.iter_mut().map(|x| &mut x.based_on).collect()
+        };
+        for b in based.into_iter().filter(|b| b.as_deref() == Some(name.as_str())) {
+            *b = parent.clone();
+        }
+        // Every other use: styles, stories, table cells, nested and GREP styles, notes, defaults.
+        rename_style(d, para, &name, &repl);
         ok()
     })
 }
@@ -681,27 +732,6 @@ fn edit_char(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(n) = &rename {
             // Every use: other styles, stories, table cells, nested and GREP styles, footnotes.
             rename_style(d, false, &name, n);
-        }
-        ok()
-    })
-}
-
-fn delete_char(s: &mut Session, p: &Value) -> Result<Value> {
-    let name = str_param(p, "name").unwrap_or("").to_string();
-    let repl = str_param(p, "replaceWith").unwrap_or(designcraft_doc::NO_CHAR_STYLE).to_string();
-    if name.starts_with('[') {
-        return Err(bad("style.character.delete", "built-in styles can't be deleted"));
-    }
-    s.edit(|d, _| {
-        d.styles_mut().character.retain(|x| x.name != name);
-        for sid in d.stories.keys().copied().collect::<Vec<_>>() {
-            if let Some(story) = d.story_mut(sid) {
-                story.for_each_text_mut(&mut |st| {
-                    for r in st.chars.iter_mut().filter(|r| r.format.style == name) {
-                        r.format.style = repl.clone();
-                    }
-                });
-            }
         }
         ok()
     })
@@ -1354,5 +1384,151 @@ mod cjk_tests {
         let restored = s.cache.get(&s.doc().unwrap().doc, sid, None);
         assert_eq!(old.frames[0].lines[0].end_x, restored.frames[0].lines[0].end_x);
         assert!(s.execute("style.compositeFont.set", &definition(-1.0)).is_err());
+    }
+}
+
+#[cfg(test)]
+mod delete_tests {
+    use designcraft_doc::{CellStyle, ObjectStyle, StoryId, Toc, TocEntry};
+    use serde_json::json;
+
+    use crate::Session;
+
+    /// Is `name` still named anywhere in the document?
+    fn named(s: &Session, name: &str) -> bool {
+        serde_json::to_string(&*s.doc().unwrap().doc).unwrap().contains(&format!("\"{name}\""))
+    }
+
+    fn char_doc() -> (Session, u64) {
+        let mut s = Session::new();
+        s.execute("file.new", &json!({})).unwrap();
+        s.execute("style.character.create", &json!({"name": "Base", "chars": {"fontStyle": "Bold"}})).unwrap();
+        s.execute("style.character.create", &json!({"name": "Emphasis", "basedOn": "Base", "chars": {"tracking": 20}})).unwrap();
+        s.execute("style.character.create", &json!({"name": "Child", "basedOn": "Emphasis"})).unwrap();
+        s.execute("style.character.create", &json!({"name": "Strong", "chars": {"size": 14}})).unwrap();
+        let refs = json!({
+            "nestedStyles": [{"style": "Emphasis", "through": true, "count": 1, "until": {"kind": "words"}}],
+            "grepStyles": [{"style": "Emphasis", "pattern": "\\d+"}],
+            "nestedLineStyles": [{"style": "Emphasis", "lines": 1}],
+            "dropCapLines": 2, "dropCapChars": 1, "dropCapStyle": "Emphasis"});
+        s.execute("style.paragraph.create", &json!({"name": "Lead", "para": refs})).unwrap();
+        s.execute("footnote.options", &json!({"refCharStyle": "Emphasis"})).unwrap();
+        let sid = s.execute("frame.create", &json!({"rect": [72, 72, 300, 200], "content": "text", "text": "Hi there"})).unwrap()["story"]
+            .as_u64()
+            .unwrap();
+        s.execute("text.select", &json!({"story": sid, "anchor": 0, "focus": 2})).unwrap();
+        s.execute("style.character.apply", &json!({"name": "Emphasis"})).unwrap();
+        // Local paragraph overrides name it too.
+        s.execute("type.para", &json!({"attrs": refs})).unwrap();
+        s.edit(|d, _| {
+            d.styles_mut().default_character = "Emphasis".into();
+            Ok(())
+        })
+        .unwrap();
+        assert!(named(&s, "Emphasis"));
+        (s, sid)
+    }
+
+    #[test]
+    fn deleting_a_character_style_points_every_use_at_the_replacement() {
+        let (mut s, sid) = char_doc();
+        let undo = s.doc().unwrap().history.undo.len();
+        s.execute("style.character.delete", &json!({"name": "Emphasis", "replaceWith": "Strong"})).unwrap();
+        assert!(!named(&s, "Emphasis"), "no dangling reference");
+        let d = s.doc().unwrap().doc.clone();
+        assert_eq!(d.styles.char_style("Child").unwrap().based_on.as_deref(), Some("Strong"));
+        assert_eq!(d.story(StoryId(sid)).unwrap().chars[0].format.style, "Strong");
+        let lead = &d.styles.para("Lead").unwrap().para;
+        assert_eq!(lead.nested_styles.as_ref().unwrap()[0].style, "Strong");
+        assert_eq!(lead.grep_styles.as_ref().unwrap()[0].style, "Strong");
+        assert_eq!(lead.nested_line_styles.as_ref().unwrap()[0].style, "Strong");
+        assert_eq!(lead.drop_cap_style.as_deref(), Some("Strong"));
+        assert_eq!(d.footnote_options.ref_char_style, "Strong");
+        assert_eq!(d.styles.default_character, "Strong");
+        // One undo step brings the style and every use back.
+        assert_eq!(s.doc().unwrap().history.undo.len(), undo + 1);
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(s.doc().unwrap().doc.styles.char_style("Emphasis").is_some());
+        assert_eq!(s.doc().unwrap().doc.story(StoryId(sid)).unwrap().chars[0].format.style, "Emphasis");
+    }
+
+    #[test]
+    fn deleting_a_character_style_for_none_unsets_based_on() {
+        let (mut s, _) = char_doc();
+        s.execute("style.character.delete", &json!({"name": "Emphasis"})).unwrap();
+        assert!(!named(&s, "Emphasis"), "no dangling reference");
+        let d = s.doc().unwrap().doc.clone();
+        assert_eq!(d.styles.char_style("Child").unwrap().based_on, None);
+        assert_eq!(d.footnote_options.ref_char_style, designcraft_doc::NO_CHAR_STYLE);
+    }
+
+    /// Replacing a style with its own descendant rebases the deleted style's children on its
+    /// parent, so no based-on chain becomes a cycle.
+    #[test]
+    fn replacing_a_style_with_its_child_makes_no_cycle() {
+        let (mut s, _) = char_doc();
+        s.execute("style.character.create", &json!({"name": "Grandchild", "basedOn": "Child"})).unwrap();
+        s.execute("style.character.delete", &json!({"name": "Emphasis", "replaceWith": "Grandchild"})).unwrap();
+        let d = s.doc().unwrap().doc.clone();
+        assert_eq!(d.styles.char_style("Child").unwrap().based_on.as_deref(), Some("Base"));
+        assert_eq!(d.styles.char_style("Grandchild").unwrap().based_on.as_deref(), Some("Child"));
+        assert!(!named(&s, "Emphasis"));
+    }
+
+    #[test]
+    fn bad_style_deletes_are_errors_and_change_nothing() {
+        let (mut s, _) = char_doc();
+        s.execute("style.paragraph.create", &json!({"name": "Head"})).unwrap();
+        let before = s.doc().unwrap().doc.clone();
+        let undo = s.doc().unwrap().history.undo.len();
+        for (id, p) in [
+            ("style.character.delete", json!({})),
+            ("style.character.delete", json!({"name": ""})),
+            ("style.character.delete", json!({"name": "Nope"})),
+            ("style.character.delete", json!({"name": "[None]"})),
+            ("style.character.delete", json!({"name": "Emphasis", "replaceWith": "Nope"})),
+            ("style.character.delete", json!({"name": "Emphasis", "replaceWith": "Emphasis"})),
+            ("style.paragraph.delete", json!({})),
+            ("style.paragraph.delete", json!({"name": ""})),
+            ("style.paragraph.delete", json!({"name": "Nope"})),
+            ("style.paragraph.delete", json!({"name": "[Basic Paragraph]"})),
+            ("style.paragraph.delete", json!({"name": "Head", "replaceWith": "Nope"})),
+            ("style.paragraph.delete", json!({"name": "Head", "replaceWith": "Head"})),
+        ] {
+            assert!(s.execute(id, &p).is_err(), "{id} {p}");
+        }
+        assert_eq!(*s.doc().unwrap().doc, *before);
+        assert_eq!(s.doc().unwrap().history.undo.len(), undo);
+    }
+
+    #[test]
+    fn deleting_a_paragraph_style_points_every_use_at_the_replacement() {
+        let mut s = Session::new();
+        s.execute("file.newSample", &json!({})).unwrap();
+        s.execute("style.paragraph.create", &json!({"name": "Sub", "basedOn": "Table Body", "nextStyle": "Table Body"})).unwrap();
+        s.edit(|d, _| {
+            let story = *d.stories.keys().next().ok_or(crate::EngineError::NoDocument)?;
+            let st = d.styles_mut();
+            st.default_paragraph = "Table Body".into();
+            st.object.push(ObjectStyle { name: "Boxed".into(), paragraph_style: Some("Table Body".into()), ..Default::default() });
+            st.cell.push(CellStyle { name: "Body Cell".into(), paragraph_style: Some("Table Body".into()), ..Default::default() });
+            d.footnote_options.para_style = "Table Body".into();
+            d.endnote_options.para_style = "Table Body".into();
+            d.endnote_options.heading_style = "Table Body".into();
+            d.toc =
+                Some(Toc { story, title: "Contents".into(), entries: vec![TocEntry { style: "Table Body".into(), level: 1 }], page_numbers: false });
+            Ok(())
+        })
+        .unwrap();
+        assert!(named(&s, "Table Body"));
+        s.execute("style.paragraph.delete", &json!({"name": "Table Body", "replaceWith": "Body"})).unwrap();
+        assert!(!named(&s, "Table Body"), "no dangling reference");
+        let d = s.doc().unwrap().doc.clone();
+        let sub = d.styles.para("Sub").unwrap();
+        assert_eq!((sub.based_on.as_deref(), sub.next_style.as_deref()), (Some("Body"), Some("Body")));
+        assert_eq!(d.styles.default_paragraph, "Body");
+        assert_eq!(d.endnote_options.heading_style, "Body");
+        let after = s.execute("preflight.run", &json!({})).unwrap();
+        assert!(!after.to_string().contains("Table Body"), "{after}");
     }
 }
