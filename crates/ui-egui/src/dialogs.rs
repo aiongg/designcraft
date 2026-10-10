@@ -70,6 +70,9 @@ impl Dialog {
         if id == "paragraphStyleOptions" || id == "characterStyleOptions" {
             fields.entry("section".to_string()).or_insert(json!("general"));
         }
+        if id == "ruby" {
+            fields.entry("section".to_string()).or_insert(json!("cjk.rubyPlacement"));
+        }
         if id == "frameSize" {
             for k in ["width", "height"] {
                 if let Some(v) = fields.get(k).and_then(Value::as_f64) {
@@ -1666,13 +1669,7 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
                     text_field(ui, &mut d, "page", 80.0);
                 });
             }
-            "ruby" => {
-                ui.horizontal(|ui| {
-                    crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Ruby:"));
-                    text_field(ui, &mut d, "text", 200.0);
-                });
-                crate::rtl::label(ui, egui::RichText::new(crate::i18n::tr(&app.ui.language, "Set over the selected text; empty removes it.")).size(11.0));
-            }
+            "ruby" => style_cjk::ruby_dialog(app, ui, &mut d),
             "insertTable" => {
                 crate::rtl::label(ui, egui::RichText::new(crate::i18n::tr(&app.ui.language, "Table Dimensions")).font(semibold(12.0)));
                 egui::Grid::new("ins_table").num_columns(4).spacing([8.0, 6.0]).show(ui, |ui| {
@@ -1770,7 +1767,7 @@ pub fn confirm(app: &mut DesignApp) -> Result<Value, String> {
                 json!({"spread": d.fields.get("spread").cloned().unwrap_or(json!(0)), "shape": d.s("shape"), "content": d.s("content"), "rect": [x, y, x + w, y + h]}),
             )
         }
-        "ruby" => app.run("type.ruby", json!({"text": d.s("text")})),
+        "ruby" => app.run("type.ruby", style_cjk::ruby_params(&d)),
         "goToPage" => {
             // A page name ("iv", "A-3"), a number, or "+n" for an absolute position.
             let typed = match d.fields.get("page") {
@@ -2609,9 +2606,7 @@ fn paragraph_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
                 });
             }
             "color" => character_color(&app.ui.language, ui, d, &CharFields { base: &cv, sparse: false }, &doc),
-            s if style_cjk::is_section(s) => {
-                style_cjk::section(&app.ui.language, ui, d, s, &CharFields { base: &cv, sparse: false }, Some(&pv), &doc)
-            }
+            s if style_cjk::is_section(s) => style_cjk::section_ui(app, ui, d, s, &CharFields { base: &cv, sparse: false }, Some(&pv), &doc),
             _ => {
                 egui::Grid::new("psg").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
                     crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Style Name:"));
@@ -2843,7 +2838,7 @@ fn character_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
             "openType" => open_type_features(&lang, ui, d, &cf),
             "underline" => line_options(&lang, ui, d, &cf, &doc, "underline"),
             "strikethrough" => line_options(&lang, ui, d, &cf, &doc, "strikethrough"),
-            s if style_cjk::is_section(s) => style_cjk::section(&lang, ui, d, s, &cf, None, &doc),
+            s if style_cjk::is_section(s) => style_cjk::section_ui(app, ui, d, s, &cf, None, &doc),
             _ => {
                 egui::Grid::new("csg").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
                     crate::rtl::label(ui, crate::i18n::tr(&lang, "Style Name:"));
