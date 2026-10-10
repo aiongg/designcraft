@@ -1877,3 +1877,43 @@ fn vertical_lines_fit_the_em_box() {
         assert!((l.baseline - col.y0 - ascent).abs() < 1e-9, "{family}: {} {}", l.baseline, col.y0);
     }
 }
+
+#[test]
+fn justified_line_with_a_tab_justifies_the_text_after_its_last_tab() {
+    // InDesign justifies only the text after a line's last (left) tab; tab stops stay aligned.
+    let stop = |align| designcraft_doc::TabStop { position: 100.0, align, leader: String::new(), align_on: String::new() };
+    let text = "Name\t42 and some words\u{2028}more";
+    let x_of = |l: &Line, byte: usize| l.glyphs.iter().find(|g| g.byte == byte && g.len > 0).map(|g| g.x).unwrap();
+    let left = ParaAttrs { align: Some(Align::LeftJustified), tabs: Some(vec![stop(TabAlign::Left)]), ..Default::default() };
+    let (d, sid, _) = doc_with(text, Rect::new(0.0, 0.0, 300.0, 100.0), left.clone());
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let l = all_lines(&cs)[0];
+    assert!((l.end_x - l.x1).abs() < 0.6, "line with a left tab ends at {} not {}", l.end_x, l.x1);
+    assert!((x_of(l, 5) - 100.0).abs() < 0.5, "text after the tab starts at the stop: {}", x_of(l, 5));
+    let (d, sid, _) = doc_with(text, Rect::new(0.0, 0.0, 300.0, 100.0), ParaAttrs { align: Some(Align::Left), ..left });
+    let ragged = compose_story(&d, sid, &ComposeOptions::default());
+    let r = all_lines(&ragged)[0];
+    for byte in 0..4 {
+        assert!((x_of(l, byte) - x_of(r, byte)).abs() < 1e-6, "text before the tab keeps its natural position");
+    }
+
+    // After a right tab the line stays as set.
+    let right = ParaAttrs { align: Some(Align::LeftJustified), tabs: Some(vec![stop(TabAlign::Right)]), ..Default::default() };
+    let (d, sid, _) = doc_with("Name\t42\u{2028}more", Rect::new(0.0, 0.0, 300.0, 100.0), right);
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let l = all_lines(&cs)[0];
+    assert!((l.end_x - 100.0).abs() < 0.5, "right-tab line ends at its stop: {}", l.end_x);
+
+    // A footnote's number and tab separator: its first line is justified like the others.
+    let (mut d, sid, fid) = doc_with("Body text.", Rect::new(0.0, 0.0, 200.0, 400.0), ParaAttrs::default());
+    let note = ParaFormat { para: ParaAttrs { align: Some(Align::LeftJustified), ..Default::default() }, ..Default::default() };
+    d.story_mut(sid).unwrap().insert_note(4, LOREM, note);
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let n = &cs.frame(fid).unwrap().notes[0];
+    let lines = all_lines(&n.text);
+    assert!(lines.len() > 2);
+    for l in &lines[..lines.len() - 1] {
+        assert!((l.end_x - l.x1).abs() < 0.6, "footnote line ends at {} not {}", l.end_x, l.x1);
+    }
+    assert!((x_of(lines[0], 0) - 36.0).abs() < 0.5, "note text starts at the default tab stop: {}", x_of(lines[0], 0));
+}
