@@ -2087,6 +2087,17 @@ fn cjk_em_box(g: &Glyph) -> (f64, f64) {
     let top = -height * g.ascent / (g.ascent + g.descent).max(1e-9);
     (top, top + height)
 }
+/// The ideographic character face (ICF) box relative to the baseline: the em box of
+/// [`cjk_em_box`] inset by the font's own ICF insets (`BASE` `icft`/`icfb`, else 5% of the em).
+fn cjk_icf_box(g: &Glyph) -> (f64, f64) {
+    let (top, bottom) = cjk_em_box(g);
+    let (em_top, em_bottom) = g.face.em_box();
+    let (icf_top, icf_bottom) = g.face.icf_box();
+    let em = (em_top - em_bottom).max(1e-9);
+    let height = bottom - top;
+    let inset = |v: f64| if v.is_finite() { v.clamp(0.0, 0.5) } else { 0.05 };
+    (top + inset((em_top - icf_top) / em) * height, bottom - inset((icf_bottom - em_bottom) / em) * height)
+}
 fn cjk_alignment_shift(g: &Glyph, reference: &Glyph) -> f64 {
     use designcraft_doc::cjk::CharacterAlignment as A;
     let (t, b) = cjk_em_box(g);
@@ -2096,8 +2107,8 @@ fn cjk_alignment_shift(g: &Glyph, reference: &Glyph) -> f64 {
         A::EmTop => t - rt,
         A::EmCenter => (t + b - rt - rb) / 2.0,
         A::EmBottom => b - rb,
-        A::IcfTop => reference.ascent - g.ascent,
-        A::IcfBottom => g.descent - reference.descent,
+        A::IcfTop => cjk_icf_box(g).0 - cjk_icf_box(reference).0,
+        A::IcfBottom => cjk_icf_box(g).1 - cjk_icf_box(reference).1,
     }
 }
 fn cjk_line_reference(line: &[Glyph]) -> f64 {

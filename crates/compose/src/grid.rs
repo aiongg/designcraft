@@ -16,10 +16,6 @@ use crate::shape::Glyph;
 /// Most grid lines one line or paragraph takes (input-derived).
 pub(crate) const MAX_GYOUDORI: u32 = 100;
 
-/// The ideographic character face's inset from the em box, top and bottom, as a share of the em.
-/// An approximation: fonts with a `BASE` table give `icft` / `icfb`, which aren't read yet.
-const ICF_INSET: f64 = 0.05;
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Anchor {
     First,
@@ -36,21 +32,22 @@ fn anchor(r: Reference) -> Anchor {
 }
 
 /// The line's grid reference point below its baseline (negative = above), from its largest
-/// character's em box ([`crate::cjk_em_box`], as the leading model measures it).
+/// character's em box ([`crate::cjk_em_box`], as the leading model measures it) or ICF box
+/// ([`crate::cjk_icf_box`]).
 pub(crate) fn reference_offset(line: &[Glyph], r: Reference) -> f64 {
     if r == Reference::Baseline {
         return 0.0;
     }
     let Some(g) = line.iter().filter(|g| g.adv > 0.0).max_by(|a, b| a.size.total_cmp(&b.size)) else { return 0.0 };
     let (top, bottom) = crate::cjk_em_box(g);
-    let inset = (bottom - top) * ICF_INSET;
+    let (icf_top, icf_bottom) = crate::cjk_icf_box(g);
     match r {
         Reference::Baseline => 0.0,
         Reference::EmTop => top,
         Reference::EmCenter => (top + bottom) / 2.0,
         Reference::EmBottom => bottom,
-        Reference::IcfTop => top + inset,
-        Reference::IcfBottom => bottom - inset,
+        Reference::IcfTop => icf_top,
+        Reference::IcfBottom => icf_bottom,
     }
 }
 
