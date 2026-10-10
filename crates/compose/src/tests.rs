@@ -1924,12 +1924,13 @@ fn column_rules_sit_in_the_gutters_inside_the_insets() {
 #[test]
 fn column_rules_centre_on_unequal_gutters_and_ignore_bad_weights() {
     let cols = [Rect::new(200.0, 0.0, 300.0, 50.0), Rect::new(0.0, 0.0, 100.0, 50.0), Rect::new(110.0, 0.0, 180.0, 50.0)];
-    let rules = column_rule_rects(&cols, &[], 1.0);
+    let weight = |w: f64| TextFrameOptions { column_rule_weight: w, ..Default::default() };
+    let rules = column_rule_rects(&cols, &[], &weight(1.0));
     let centres: Vec<f64> = rules.iter().map(|r| r.center().x).collect();
     assert_eq!(centres, [105.0, 190.0]);
-    assert!(column_rule_rects(&cols, &[], f64::NAN).is_empty());
-    assert!(column_rule_rects(&cols, &[], -1.0).is_empty());
-    assert!((column_rule_rects(&cols, &[], 1e12)[0].width() - 1000.0).abs() < 1e-9);
+    assert!(column_rule_rects(&cols, &[], &weight(f64::NAN)).is_empty());
+    assert!(column_rule_rects(&cols, &[], &weight(-1.0)).is_empty());
+    assert!((column_rule_rects(&cols, &[], &weight(1e12))[0].width() - 1000.0).abs() < 1e-9);
 }
 
 #[test]
@@ -1965,4 +1966,31 @@ fn column_rules_break_around_paragraphs_that_span_columns() {
     }
     // The rule resumes below the span and runs to the bottom of the columns.
     assert!(rules.iter().any(|r| (r.y0 - bottom).abs() < 1e-9 && (r.y1 - 380.0).abs() < 1e-9), "{rules:?}");
+}
+
+#[test]
+fn column_rules_take_their_offset_insets_and_tint() {
+    let (d, fid, rules) = ruled("Text", Rect::new(0.0, 0.0, 300.0, 200.0), 2, |d, sid| {
+        let fid = d.story(sid).unwrap().frames[0];
+        let o = &mut d.item_mut(fid).unwrap().text_frame_mut().unwrap().options;
+        o.column_rule_offset = 3.0;
+        o.column_rule_top_inset = 15.0;
+        o.column_rule_bottom_inset = 25.0;
+        o.column_rule_tint = 0.4;
+    });
+    // Gutter centre 150 moved 3 pt; columns 10..180 shortened to 25..155.
+    assert_eq!(rules.len(), 1, "{rules:?}");
+    let r = rules[0];
+    assert!((r.center().x - 153.0).abs() < 1e-9 && (r.y0 - 25.0).abs() < 1e-9 && (r.y1 - 155.0).abs() < 1e-9, "{r:?}");
+    let sid = d.item(fid).unwrap().text_frame().unwrap().story;
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    assert!(cs.frames[0].decos.iter().any(|dc| dc.rect == r && (dc.tint - 0.4).abs() < 1e-6));
+    // Insets that meet leave no rule.
+    let (_, _, rules) = ruled("Text", Rect::new(0.0, 0.0, 300.0, 200.0), 2, |d, sid| {
+        let fid = d.story(sid).unwrap().frames[0];
+        let o = &mut d.item_mut(fid).unwrap().text_frame_mut().unwrap().options;
+        o.column_rule_top_inset = 100.0;
+        o.column_rule_bottom_inset = 100.0;
+    });
+    assert!(rules.is_empty(), "{rules:?}");
 }

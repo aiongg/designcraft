@@ -1039,8 +1039,9 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
     // Column rules, once vertical justification has put the lines in place.
     for (ft, f) in out.frames.iter_mut().zip(frames) {
         if f.opts.column_rule {
-            let rects = column_rule_rects(&ft.columns, &ft.lines, f.opts.column_rule_weight);
-            ft.decos.extend(rects.into_iter().map(|rect| Deco { rect, color: f.opts.column_rule_color.clone(), tint: 1.0 }));
+            let rects = column_rule_rects(&ft.columns, &ft.lines, &f.opts);
+            let tint = if f.opts.column_rule_tint.is_finite() { f.opts.column_rule_tint.clamp(0.0, 1.0) } else { 1.0 };
+            ft.decos.extend(rects.into_iter().map(|rect| Deco { rect, color: f.opts.column_rule_color.clone(), tint }));
         }
     }
     out.styles = styles_tab;
@@ -1142,18 +1143,23 @@ fn para_box_decos(out: &mut ComposedStory, pi: usize, pp: &ParaProps) {
 /// Thickest column rule drawn (points).
 const MAX_COLUMN_RULE_WEIGHT: f64 = 1000.0;
 
-/// Text Frame Options › Column Rules: one bar per gutter, `weight` wide and centred between the
-/// facing edges of the two columns, from the columns' top to their bottom (the text area, inside
-/// the insets). Works in the composed space, so right-to-left and vertical frames (whose columns
-/// are laid out in the turned box) get their rules between the columns too.
+/// Text Frame Options › Column Rules: one bar per gutter, `column_rule_weight` wide, centred
+/// between the facing edges of the two columns and moved by `column_rule_offset`, from the
+/// columns' top to their bottom (the text area, inside the insets) shortened by the rule's top
+/// and bottom insets. Works in the composed space, so right-to-left and vertical frames (whose
+/// columns are laid out in the turned box) get their rules between the columns too.
 ///
 /// A paragraph that spans columns interrupts the rule: the bar stops at the top of its first line
 /// and resumes below its last line. Nothing is drawn for a single column or a weight that is not a
 /// positive finite number.
-pub fn column_rule_rects(columns: &[Rect], lines: &[Line], weight: f64) -> Vec<Rect> {
+pub fn column_rule_rects(columns: &[Rect], lines: &[Line], opts: &TextFrameOptions) -> Vec<Rect> {
+    let weight = opts.column_rule_weight;
     if !weight.is_finite() || weight <= 0.0 || columns.len() < 2 {
         return Vec::new();
     }
+    let finite = |v: f64| if v.is_finite() { v } else { 0.0 };
+    let (offset, top_inset, bottom_inset) =
+        (finite(opts.column_rule_offset), finite(opts.column_rule_top_inset), finite(opts.column_rule_bottom_inset));
     let half = weight.min(MAX_COLUMN_RULE_WEIGHT) / 2.0;
     let mut cols: Vec<Rect> =
         columns.iter().copied().filter(|c| c.x0.is_finite() && c.x1.is_finite() && c.y0.is_finite() && c.y1.is_finite()).collect();
@@ -1162,7 +1168,7 @@ pub fn column_rule_rects(columns: &[Rect], lines: &[Line], weight: f64) -> Vec<R
     for pair in cols.windows(2) {
         let [a, b] = [pair[0], pair[1]];
         let cx = (a.x1 + b.x0) / 2.0;
-        let (top, bottom) = (a.y0.max(b.y0), a.y1.min(b.y1));
+        let (top, bottom) = (a.y0.max(b.y0) + top_inset, a.y1.min(b.y1) - bottom_inset);
         if bottom <= top {
             continue;
         }
@@ -1179,10 +1185,11 @@ pub fn column_rule_rects(columns: &[Rect], lines: &[Line], weight: f64) -> Vec<R
             }
         }
         spans.sort_by(|p, q| p.1.total_cmp(&q.1));
+        let x = cx + offset;
         let mut y = top;
         for (_, t, z) in spans {
             if t > y {
-                out.push(Rect::new(cx - half, y, cx + half, t.min(bottom)));
+                out.push(Rect::new(x - half, y, x + half, t.min(bottom)));
             }
             y = y.max(z);
             if y >= bottom {
@@ -1190,7 +1197,7 @@ pub fn column_rule_rects(columns: &[Rect], lines: &[Line], weight: f64) -> Vec<R
             }
         }
         if y < bottom {
-            out.push(Rect::new(cx - half, y, cx + half, bottom));
+            out.push(Rect::new(x - half, y, x + half, bottom));
         }
     }
     out

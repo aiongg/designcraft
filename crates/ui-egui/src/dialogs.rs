@@ -300,6 +300,8 @@ fn seed_text_frame_options(app: &DesignApp, d: &mut Dialog) {
         "insetTop": fm(o.inset[0]), "insetLeft": fm(o.inset[1]), "insetBottom": fm(o.inset[2]), "insetRight": fm(o.inset[3]),
         "verticalJustification": serde_json::to_value(o.vertical_justification).unwrap_or(Value::Null),
         "columnRule": o.column_rule, "columnRuleWeight": format_measure(o.column_rule_weight, Unit::Points), "columnRuleColor": o.column_rule_color,
+        "columnRuleTint": percent(o.column_rule_tint), "columnRuleTopInset": fm(o.column_rule_top_inset),
+        "columnRuleBottomInset": fm(o.column_rule_bottom_inset), "columnRuleOffset": fm(o.column_rule_offset),
     });
     if let Value::Object(m) = &shown {
         for (k, v) in m {
@@ -307,6 +309,12 @@ fn seed_text_frame_options(app: &DesignApp, d: &mut Dialog) {
         }
     }
     d.fields.insert("_shown".into(), shown);
+}
+
+/// A 0..1 tint as a percentage ("40", "12.5").
+fn percent(t: f32) -> String {
+    let s = format!("{:.2}", f64::from(t) * 100.0);
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
 fn text_frame_options_dialog(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
@@ -365,6 +373,16 @@ fn text_frame_options_dialog(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog)
         crate::rtl::label(ui, tr("Color"));
         combo(ui, d, "columnRuleColor", &opts);
         ui.end_row();
+        for (label, key) in [
+            ("Tint %", "columnRuleTint"),
+            ("Top Inset", "columnRuleTopInset"),
+            ("Bottom Inset", "columnRuleBottomInset"),
+            ("Horizontal Offset", "columnRuleOffset"),
+        ] {
+            crate::rtl::label(ui, tr(label));
+            text_field(ui, d, key, 70.0);
+            ui.end_row();
+        }
     });
 }
 
@@ -413,6 +431,18 @@ fn confirm_text_frame_options(app: &mut DesignApp, d: &mut Dialog) -> Result<Val
     }
     if edited(d, "columnRuleColor") {
         p.insert("columnRuleColor".into(), json!(d.s("columnRuleColor")));
+    }
+    if edited(d, "columnRuleTint") {
+        p.insert("columnRuleTint".into(), json!(d.n("columnRuleTint").ok_or_else(|| bad("the column rule tint is not a number"))? / 100.0));
+    }
+    for (key, what) in [
+        ("columnRuleTopInset", "the column rule top inset is not a measure"),
+        ("columnRuleBottomInset", "the column rule bottom inset is not a measure"),
+        ("columnRuleOffset", "the column rule offset is not a measure"),
+    ] {
+        if edited(d, key) {
+            p.insert(key.into(), json!(d.m(key).ok_or_else(|| bad(what))?));
+        }
     }
     if p.is_empty() {
         return Ok(Value::Null);
@@ -2816,6 +2846,11 @@ mod tests {
         let o = opts(&app);
         assert!(o.column_rule && o.column_rule_weight == 6.0, "{o:?}");
         assert_eq!((o.inset, o.columns, o.gutter), (before.inset, before.columns, before.gutter));
+        // One of the rule's insets edited: the other rule settings stay.
+        open(&mut app, &[("columnRuleBottomInset", json!("0p9")), ("columnRuleTint", json!("40"))]).unwrap();
+        let o = opts(&app);
+        assert_eq!((o.column_rule_bottom_inset, o.column_rule_top_inset, o.column_rule_offset, o.column_rule_weight), (9.0, 0.0, 0.0, 6.0));
+        assert!((o.column_rule_tint - 0.4).abs() < 1e-6 && o.column_rule);
         // One inset side edited: the others keep their values.
         open(&mut app, &[("insetLeft", json!("1p0"))]).unwrap();
         assert_eq!(opts(&app).inset, [1.0, 12.0, 3.0, 4.0]);
@@ -2824,8 +2859,9 @@ mod tests {
         assert!(e.contains("Mauve") && app.ui.dialog.is_some(), "{e}");
         assert_eq!(opts(&app).column_rule_color, designcraft_color::swatch::BLACK);
         // Each OK is one undo step.
-        app.run("edit.undo", json!({})).unwrap();
-        app.run("edit.undo", json!({})).unwrap();
+        for _ in 0..3 {
+            app.run("edit.undo", json!({})).unwrap();
+        }
         assert_eq!(opts(&app), before);
     }
 

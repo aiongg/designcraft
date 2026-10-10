@@ -45,6 +45,10 @@ fn item_json(it: &Item) -> Value {
             if t.options.column_rule {
                 v["columnRuleWeight"] = json!(t.options.column_rule_weight);
                 v["columnRuleColor"] = json!(t.options.column_rule_color);
+                v["columnRuleTint"] = json!(t.options.column_rule_tint);
+                v["columnRuleOffset"] = json!(t.options.column_rule_offset);
+                v["columnRuleTopInset"] = json!(t.options.column_rule_top_inset);
+                v["columnRuleBottomInset"] = json!(t.options.column_rule_bottom_inset);
             }
         }
         Content::Graphic(g) => v["asset"] = json!(g.asset.0),
