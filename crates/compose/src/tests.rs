@@ -2088,6 +2088,15 @@ fn drop_cap_takes_its_character_style_and_nested_styles_count_it() {
     assert_eq!(fill(&cs, at(0)), "Initial Red");
     assert_eq!(fill(&cs, at(2)), "Initial Red");
     assert_eq!(fill(&cs, at(3)), "[Black]");
+    // The drop cap's style is a leading "through 1 drop cap" nested style: the nested styles start
+    // after the drop cap.
+    let one = designcraft_doc::NestedStyle { style: "Lead".into(), through: true, count: 1, until: designcraft_doc::NestedUntil::Characters };
+    d.story_mut(sid).unwrap().paras[0].para.nested_styles = Some(vec![one]);
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let l = &cs.frames[0].lines[0];
+    let at = |b: usize| l.glyphs.iter().find(|g| g.byte == b).unwrap();
+    assert_eq!(fill(&cs, at(0)), "Initial Red");
+    assert_eq!((fill(&cs, at(3)), fill(&cs, at(4))), ("Lead Blue".to_string(), "[Black]".to_string()));
     // A nested style "through 1 drop cap" covers the drop cap; the next one starts after it.
     let ns = |style: &str, until: designcraft_doc::NestedUntil| designcraft_doc::NestedStyle { style: style.into(), through: true, count: 1, until };
     d.story_mut(sid).unwrap().paras[0].para = ParaAttrs {
