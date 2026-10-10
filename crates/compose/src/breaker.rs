@@ -166,6 +166,11 @@ impl Item {
 
 const INF: f64 = 10000.0;
 
+/// A line whose natural width exceeds its measure by no more than this (points) still fits: frame
+/// widths and glyph advances are rounded, so a line that exactly fills the measure can come out a
+/// hair too wide.
+const FIT_EPS: f64 = 0.01;
+
 /// Does the glyph force a line end after it?
 /// A line may break between `a` and `b` in CJK text (any break next to an ideograph, kana or
 /// hangul), except where kinsoku forbids it: no line starts with closing punctuation, small
@@ -454,7 +459,10 @@ fn kp_pass(
                 y[t] = sy[b][t] - n.ty[t];
                 z[t] = sz[b][t] - n.tz[t];
             }
-            let (r, feasible) = tiered_ratio(target - l, y, z);
+            // A line that overruns its measure by a rounding error fits exactly.
+            let d = target - l;
+            let d = if d < 0.0 && d > -FIT_EPS { 0.0 } else { d };
+            let (r, feasible) = tiered_ratio(d, y, z);
             if feasible && !forced {
                 keep.push(a);
             } else {
@@ -664,7 +672,7 @@ pub fn greedy(glyphs: &[Glyph], hyph_after: &[bool], sp: &Spacing, width: &dyn F
                 continue;
             }
             let hang_r = right_hang(g, sp);
-            if x + g.adv - hang_r > w + shrink
+            if x + g.adv - hang_r > w + shrink + FIT_EPS
                 && i > start
                 && (last_ok.is_some() || glyphs.get(i - 1).is_none_or(|p| p.break_after != Some(false) && !p.no_break))
             {
@@ -690,7 +698,7 @@ pub fn greedy(glyphs: &[Glyph], hyph_after: &[bool], sp: &Spacing, width: &dyn F
                     last_ok = Some((i + 1, false));
                 } else if hyph_after[i] && may_hyphenate(hyphens) {
                     let hy = hyphen_width(g, &mut hy_cache) * if sp.optical { 1.0 - hang('-').1 } else { 1.0 };
-                    if x + hy <= w + shrink {
+                    if x + hy <= w + shrink + FIT_EPS {
                         last_ok = Some((i + 1, true));
                     }
                 }

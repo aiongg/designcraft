@@ -1889,3 +1889,28 @@ fn vertical_lines_fit_the_em_box() {
         assert!((l.baseline - col.y0 - ascent).abs() < 1e-9, "{family}: {} {}", l.baseline, col.y0);
     }
 }
+
+/// Lines of `text` set in a frame `width` wide, with `tracking` on every character.
+fn tracked_lines(text: &str, width: f64, para: ParaAttrs, tracking: f64) -> Vec<Line> {
+    let (mut d, sid, _) = doc_with(text, Rect::new(0.0, 0.0, width, 4000.0), para);
+    d.story_mut(sid).unwrap().format_chars(0..text.len(), |f| f.over.tracking = Some(tracking));
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    assert!(!cs.is_overset(), "overset at width {width}");
+    all_lines(&cs).into_iter().cloned().collect()
+}
+
+#[test]
+fn a_line_that_exactly_fills_the_measure_fits() {
+    use designcraft_doc::Composer;
+    let text = "#knowyourplastic";
+    let one = &tracked_lines(text, 1e5, ParaAttrs::default(), 0.0)[0];
+    // The measure a rounding error short of the natural width.
+    let width = one.end_x - one.x0 - 0.005;
+    for composer in [Composer::Paragraph, Composer::SingleLine] {
+        for align in [Align::Left, Align::LeftJustified] {
+            let para = ParaAttrs { composer: Some(composer), align: Some(align), ..Default::default() };
+            let lines = tracked_lines(text, width, para, 0.0);
+            assert_eq!(lines.len(), 1, "{composer:?} {align:?}: {:?}", lines.iter().map(|l| l.range.clone()).collect::<Vec<_>>());
+        }
+    }
+}
