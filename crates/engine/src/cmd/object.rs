@@ -792,16 +792,21 @@ pub fn specs() -> Vec<CommandSpec> {
             }
             Ok(json!({"ids": ids}))
         }),
-        cmd!("object.setLayer", "Move to Layer", [], None, "{layer, ids?}", has_selection, |s, p| {
-            let l = designcraft_doc::LayerId(p.get("layer").and_then(Value::as_u64).unwrap_or(0));
-            set_flag(s, p, move |i| i.layer = l, false)
-        }),
+        cmd!(
+            "object.setLayer",
+            "Move to Layer",
+            [],
+            None,
+            "{layer, ids?} — a group member moves its whole top-level group",
+            has_selection,
+            set_layer
+        ),
         cmd!(
             "object.reorder",
             "Reorder Objects",
             [],
             None,
-            "{ids?, above?: id | below?: id | index?: n (0 = top of the layer), layer?} — moves the objects (siblings on one spread) in the stacking order: in front of `above` or behind `below` (onto that object's layer), or to `index` in `layer` counted from the top (default: the first object's layer, index 0). Group members stay in their group.",
+            "{ids?, above?: id | below?: id | index?: n (0 = top of the layer), layer?} — moves the objects (siblings on one spread) in the stacking order: in front of `above` or behind `below` (onto that object's layer), or to `index` in `layer` counted from the top (default: the first object's layer, index 0). Group members stay in their group. Leaves the document (and undo history) alone when nothing would change.",
             has_doc,
             reorder
         ),
@@ -1342,7 +1347,8 @@ fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(C, "give only one of above, below and index"));
     }
     let target = above.map(|t| (t, true)).or(below.map(|t| (t, false)));
-    s.edit(|d, _| {
+    let d = s.doc()?.doc.clone();
+    let (spread, parent, new_items) = {
         let no_object = |id: ItemId| bad(C, format!("no object {}", id.0));
         let loc = d.find(first).ok_or_else(|| no_object(first))?;
         let Some((_, parent)) = loc.path.split_last() else { return Err(no_object(first)) };
@@ -1394,7 +1400,8 @@ fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
         {
             return Err(bad(C, "group members stay on their group's layer"));
         }
-        let items = siblings_mut(d, loc.spread, &parent).ok_or_else(|| no_object(first))?;
+        let items = d.spread(loc.spread).map(|sp| sp.items.clone()).ok_or_else(|| no_object(first))?;
+        let items = parent.iter().try_fold(items, |items, &i| items.get(i).map(|g| g.children().to_vec())).ok_or_else(|| no_object(first))?;
         // Moved objects keep their relative stacking order.
         let moved: Vec<Arc<Item>> = items.iter().filter(|i| ids.contains(&i.id)).cloned().collect();
         let rest: Vec<Arc<Item>> = items.iter().filter(|i| !ids.contains(&i.id)).cloned().collect();
@@ -1419,13 +1426,59 @@ fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
         };
         let (back, front) = rest.split_at(at.min(rest.len()));
         let moved = moved.into_iter().map(|mut it| {
-            if !in_group {
-                Arc::make_mut(&mut it).layer = target_layer;
+            if !in_group && it.layer != target_layer {
+                set_layer_deep(Arc::make_mut(&mut it), target_layer, 0);
             }
             it
         });
-        *items = back.iter().cloned().chain(moved).chain(front.iter().cloned()).collect();
+        let new_items: Vec<Arc<Item>> = back.iter().cloned().chain(moved).chain(front.iter().cloned()).collect();
+        if new_items.iter().zip(items.iter()).all(|(a, b)| a.id == b.id && a.layer == b.layer) {
+            return ok();
+        }
+        (loc.spread, parent, new_items)
+    };
+    s.edit(|d, _| {
+        let items = siblings_mut(d, spread, &parent).ok_or_else(|| bad(C, "the objects moved"))?;
+        *items = new_items;
         ok()
+    })
+}
+
+/// Sets the layer of `it` and its group members (nesting is bounded).
+fn set_layer_deep(it: &mut Item, l: designcraft_doc::LayerId, depth: usize) {
+    it.layer = l;
+    if depth < 64
+        && let Some(kids) = it.children_mut()
+    {
+        for k in kids {
+            set_layer_deep(Arc::make_mut(k), l, depth + 1);
+        }
+    }
+}
+
+/// `object.setLayer`: moves the objects, or the top-level groups of group members, to a layer.
+fn set_layer(s: &mut Session, p: &Value) -> Result<Value> {
+    const C: &str = "object.setLayer";
+    let l = designcraft_doc::LayerId(p.get("layer").and_then(Value::as_u64).ok_or_else(|| bad(C, "missing layer"))?);
+    let ids = targets(s, p)?;
+    s.edit(|d, _| {
+        if d.layer(l).is_none() {
+            return Err(bad(C, "no such layer"));
+        }
+        let mut tops: Vec<ItemId> = Vec::new();
+        for id in &ids {
+            if let Some(t) = d.top_level_of(*id)
+                && !tops.contains(&t)
+            {
+                tops.push(t);
+            }
+        }
+        for t in &tops {
+            if let Some(it) = d.item_mut(*t) {
+                set_layer_deep(it, l, 0);
+            }
+        }
+        Ok(json!({"changed": tops.len()}))
     })
 }
 
@@ -2895,6 +2948,14 @@ mod reorder_tests {
         // The bottom of a layer is index = its count.
         s.execute("object.reorder", &json!({"ids": [b], "index": 3})).unwrap();
         assert_eq!(stack(&s, l1), [c, y, x, b]);
+        // A reorder that changes nothing adds no undo step.
+        let undo = |s: &Session| s.doc().unwrap().history.undo.len();
+        let steps = undo(&s);
+        s.execute("object.reorder", &json!({"ids": [x], "index": 2})).unwrap();
+        s.execute("object.reorder", &json!({"ids": [y], "above": x})).unwrap();
+        s.execute("object.reorder", &json!({"ids": [c], "layer": l1, "index": 0})).unwrap();
+        assert_eq!(stack(&s, l1), [c, y, x, b]);
+        assert_eq!(undo(&s), steps);
         // One undo step per reorder.
         s.execute("edit.undo", &json!({})).unwrap();
         assert_eq!(stack(&s, l1), [b, c, y, x]);
@@ -2919,5 +2980,19 @@ mod reorder_tests {
         assert!(s.execute("object.reorder", &json!({"ids": [c], "above": a})).is_err(), "into the group");
         assert!(s.execute("object.reorder", &json!({"ids": [a, c], "index": 0})).is_err(), "mixed parents");
         assert_eq!(*s.doc().unwrap().doc, *before);
+    }
+
+    #[test]
+    fn moving_a_group_member_to_a_layer_moves_its_group() {
+        let mut s = Session::new();
+        s.execute("file.new", &json!({})).unwrap();
+        let (a, b) = (frame(&mut s), frame(&mut s));
+        let g = s.execute("object.group", &json!({"ids": [a, b]})).unwrap()["id"].as_u64().unwrap();
+        let art = s.execute("layer.new", &json!({"name": "Art"})).unwrap()["id"].as_u64().unwrap();
+        let r = s.execute("object.setLayer", &json!({"ids": [a, b], "layer": art})).unwrap();
+        assert_eq!(r["changed"], 1, "the group, once");
+        let d = &s.doc().unwrap().doc;
+        assert!([g, a, b].iter().all(|i| d.item(ItemId(*i)).unwrap().layer.0 == art));
+        assert!(s.execute("object.setLayer", &json!({"ids": [a], "layer": 999})).is_err());
     }
 }

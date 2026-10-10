@@ -3,7 +3,9 @@
 //! lock columns per layer and per object and a selection square in the layer colour. Drag a
 //! layer row to reorder layers, an object row to restack it or move it to another layer (group
 //! members restack within their group), and a filled selection square onto another layer to move
-//! the selection there.
+//! the selection there. A selected row drags the selected objects that share its parent (for a
+//! top-level row, those on its layer). Locked and hidden layers take drops only with Cmd/Ctrl
+//! held.
 
 use designcraft_doc::{Content, Document, Item, ItemId, LayerId};
 use egui::{Color32, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
@@ -144,6 +146,8 @@ struct Row {
     layer: LayerId,
     /// Index of `layer` in `doc.layers`.
     layer_index: usize,
+    /// The layer is locked or hidden.
+    closed: bool,
     kind: RowKind,
     /// Bottom of the row's block: the last row of an open layer or group, else the row itself.
     end: f32,
@@ -155,9 +159,13 @@ enum Indicator {
 }
 
 /// The drop for `drag` with the pointer at `p`, and how to show it. `None` where it can't land.
-fn drop_target(drag: &LayersDrag, rows: &[Row], p: egui::Pos2) -> Option<(DropAt, Indicator)> {
+/// Objects land on a locked or hidden layer only with `force` (Cmd/Ctrl held).
+fn drop_target(drag: &LayersDrag, rows: &[Row], p: egui::Pos2, force: bool) -> Option<(DropAt, Indicator)> {
     let r = rows.iter().find(|r| r.rect.contains(p))?;
     let header = rows.iter().find(|h| h.layer == r.layer && matches!(h.kind, RowKind::Layer))?;
+    if r.closed && !force && !matches!(drag, LayersDrag::Layer(_)) {
+        return None;
+    }
     match drag {
         LayersDrag::Layer(src) => {
             let before = p.y < (header.rect.min.y + header.end) / 2.0;
@@ -190,8 +198,15 @@ fn drop_command(drag: &LayersDrag, at: DropAt, doc: &Document, selected: &[ItemI
             Some(("layer.move", json!({"id": id.0, "to": to})))
         }
         (LayersDrag::Selection, DropAt::OntoLayer(l)) => {
-            let moves = selected.iter().any(|i| doc.item(*i).is_some_and(|it| it.layer != l));
-            moves.then(|| ("object.setLayer", json!({"layer": l.0, "ids": ids(selected)})))
+            // Group members move with their group.
+            let mut tops: Vec<ItemId> = Vec::new();
+            for t in selected.iter().filter_map(|i| doc.top_level_of(*i)) {
+                if !tops.contains(&t) {
+                    tops.push(t);
+                }
+            }
+            let moves = tops.iter().any(|i| doc.item(*i).is_some_and(|it| it.layer != l));
+            moves.then(|| ("object.setLayer", json!({"layer": l.0, "ids": ids(&tops)})))
         }
         (LayersDrag::Objects { ids: o, .. }, DropAt::OntoLayer(l)) => Some(("object.reorder", json!({"ids": ids(o), "layer": l.0, "index": 0}))),
         (LayersDrag::Objects { ids: o, .. }, DropAt::Object { id, above }) => {
@@ -213,6 +228,7 @@ struct Listing<'a> {
     layer_index: usize,
     layer_color: Color32,
     layer_visible: bool,
+    layer_closed: bool,
 }
 
 /// Rows for `items` (topmost first) under `group` at `depth`; the commands their clicks run go
@@ -254,7 +270,8 @@ fn object_rows(
             if it.hidden { t.text_dim } else { t.text },
         );
         let sq = selection_square(ui, ls.language, row, ls.layer_color, is_sel, true, ("item", it.id.0)).clicked();
-        // Dragging a selected row drags the selected objects that share its parent.
+        // Dragging a selected row drags the selected objects that share its parent (top-level
+        // rows: those on this layer).
         let dragged: Vec<ItemId> = if is_sel {
             let siblings: &[std::sync::Arc<Item>] = items;
             siblings.iter().map(|i| i.id).filter(|i| ls.selected.contains(i)).collect()
@@ -276,7 +293,14 @@ fn object_rows(
             cmds.push(("selection.set", json!({"ids": [it.id.0], "add": add})));
         }
         let at = rows.len();
-        rows.push(Row { rect: row, layer: ls.layer, layer_index: ls.layer_index, kind: RowKind::Object { id: it.id, group }, end: row.max.y });
+        rows.push(Row {
+            rect: row,
+            layer: ls.layer,
+            layer_index: ls.layer_index,
+            closed: ls.layer_closed,
+            kind: RowKind::Object { id: it.id, group },
+            end: row.max.y,
+        });
         if open {
             object_rows(ui, ls, it.children(), Some(it.id), depth + 1, rows, cmds);
             let end = rows.last().map_or(row.max.y, |r| r.end.max(r.rect.max.y));
@@ -393,14 +417,22 @@ pub fn show(app: &mut DesignApp, ui: &mut Ui) {
             }
         });
         let at = rows.len();
-        rows.push(Row { rect: row, layer: l.id, layer_index: li, kind: RowKind::Layer, end: row.max.y });
+        rows.push(Row { rect: row, layer: l.id, layer_index: li, closed: l.locked || !l.visible, kind: RowKind::Layer, end: row.max.y });
         if !open {
             continue;
         }
         // The layer's objects keep their spread order; the panel lists them topmost first.
         let on_layer: Vec<std::sync::Arc<Item>> = spread_items.iter().filter(|i| i.layer == l.id).cloned().collect();
-        let ls =
-            Listing { doc: &doc, language: &language, selected: &selected, layer: l.id, layer_index: li, layer_color: lc, layer_visible: l.visible };
+        let ls = Listing {
+            doc: &doc,
+            language: &language,
+            selected: &selected,
+            layer: l.id,
+            layer_index: li,
+            layer_color: lc,
+            layer_visible: l.visible,
+            layer_closed: l.locked || !l.visible,
+        };
         object_rows(ui, &ls, &on_layer, None, 0, &mut rows, &mut cmds);
         let end = rows.last().map_or(row.max.y, |r| r.end.max(r.rect.max.y));
         if let Some(r) = rows.get_mut(at) {
@@ -411,7 +443,7 @@ pub fn show(app: &mut DesignApp, ui: &mut Ui) {
     // one command on release.
     if let Some(drag) = egui::DragAndDrop::payload::<LayersDrag>(ui.ctx())
         && let Some(p) = ui.ctx().pointer_latest_pos()
-        && let Some((at, indicator)) = drop_target(&drag, &rows, p)
+        && let Some((at, indicator)) = drop_target(&drag, &rows, p, ui.input(|i| i.modifiers.command))
     {
         let x = ui.max_rect().x_range();
         match indicator {
@@ -546,6 +578,30 @@ mod tests {
         drag(&mut h, row(1, 0.5, true), row(0, 0.5, false));
         assert_eq!(layer_of(&h, x), art);
         assert_eq!(layer_of(&h, a), l1);
+    }
+
+    #[test]
+    fn locked_layers_take_drops_with_cmd_and_group_members_move_with_their_group() {
+        let mut app = app();
+        let l1 = app.session.active().unwrap().active_layer;
+        let a = app.run("frame.create", json!({"rect": [0, 0, 10, 10]})).unwrap()["id"].as_u64().unwrap();
+        let b = app.run("frame.create", json!({"rect": [0, 0, 10, 10]})).unwrap()["id"].as_u64().unwrap();
+        let g = app.run("object.group", json!({"ids": [a, b]})).unwrap()["id"].as_u64().unwrap();
+        let art = LayerId(app.run("layer.new", json!({"name": "Art"})).unwrap()["id"].as_u64().unwrap());
+        app.run("layer.set", json!({"id": art.0, "locked": true})).unwrap();
+        // Select a group member directly.
+        app.run("selection.set", json!({"ids": [a]})).unwrap();
+        let mut h = panel(app);
+        let layer_of =
+            |h: &egui_kittest::Harness<'static, DesignApp>, id: u64| h.state().session.active().unwrap().doc.item(ItemId(id)).unwrap().layer;
+        // Rows: Art (open, empty), Layer 1. Without Cmd the locked layer refuses the drop.
+        drag(&mut h, row(1, 0.5, true), row(0, 0.5, false));
+        assert_eq!(layer_of(&h, g), l1);
+        h.event(egui::Event::ModifiersChanged(egui::Modifiers::COMMAND));
+        drag(&mut h, row(1, 0.5, true), row(0, 0.5, false));
+        h.event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+        h.run_steps(1);
+        assert!([g, a, b].iter().all(|i| layer_of(&h, *i) == art), "the whole group moved");
     }
 
     fn click(h: &mut egui_kittest::Harness<'static, DesignApp>, p: egui::Pos2) {
