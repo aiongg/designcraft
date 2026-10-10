@@ -1305,6 +1305,192 @@ fn ruby_and_kenten_sit_over_their_text() {
 }
 
 #[test]
+fn warichu_stacks_the_run_inside_the_line_and_closes_up() {
+    let text = "ABCDEFGHZ";
+    let mut d = Document::new(&designcraft_doc::build::NewDocument::default());
+    let lid = d.default_layer();
+    let (_, sid) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(36.0, 36.0, 500.0, 200.0), lid, text, ParaFormat::default()).unwrap();
+    let plain = compose_story(&d, sid, &ComposeOptions::default()).frames[0].lines[0].glyphs.clone();
+    let z0 = plain.iter().find(|g| g.byte == 8 && g.len > 0).unwrap().x;
+    let sx0 = plain.iter().find(|g| g.byte == 0 && g.len > 0).unwrap().sx;
+    d.story_mut(sid).unwrap().format_chars(0..8, |f| {
+        f.over.warichu = Some(true);
+        f.over.warichu_alignment = Some(designcraft_doc::cjk::WarichuAlignment::Left);
+    });
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let l = &cs.frames[0].lines[0];
+    let run: Vec<_> = l.glyphs.iter().filter(|g| g.byte < 8 && g.len > 0).collect();
+    assert_eq!(run.len(), 8, "the note keeps one glyph per letter");
+    let size = cs.styles[run[0].style as usize].size;
+    assert!((run[0].sx - sx0 * 0.5).abs() < 1e-6, "half the parent size");
+    let y_of = |slice: &[&PlacedGlyph]| slice.iter().map(|g| g.y).sum::<f64>() / slice.len() as f64;
+    let (y_top, y_bot) = (y_of(&run[..4]), y_of(&run[4..]));
+    assert!((y_bot - y_top - size * 0.5).abs() < 0.05 * size, "two lines one small em apart: {y_top} {y_bot} {size}");
+    assert!((run[0].x - run[4].x).abs() < 1e-6, "left alignment shares the start");
+    let z = l.glyphs.iter().find(|g| g.byte == 8 && g.len > 0).unwrap();
+    let right = run.iter().map(|g| g.x + g.adv).fold(f64::MIN, f64::max);
+    assert!((z.x - right).abs() < 1e-3, "the next character follows the note: {} {right}", z.x);
+    assert!(z.x < z0 - 1.0, "the note is narrower than the full-size run: {} {z0}", z.x);
+    assert!((l.end_x - (z.x + z.adv)).abs() < 1e-3, "the line-end caret follows the close-up");
+}
+
+#[test]
+fn warichu_break_minimum_keeps_a_short_run_on_one_line() {
+    let mut d = Document::new(&designcraft_doc::build::NewDocument::default());
+    let lid = d.default_layer();
+    let (_, sid) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(36.0, 36.0, 500.0, 200.0), lid, "ABCD", ParaFormat::default()).unwrap();
+    d.story_mut(sid).unwrap().format_chars(0..4, |f| {
+        f.over.warichu = Some(true);
+        f.over.warichu_lines = Some(2);
+        f.over.warichu_chars_before_break = Some(3);
+        f.over.warichu_chars_after_break = Some(3);
+    });
+    let l = &compose_story(&d, sid, &ComposeOptions::default()).frames[0].lines[0];
+    let run: Vec<_> = l.glyphs.iter().filter(|g| g.len > 0 && g.byte < 4).collect();
+    assert_eq!(run.len(), 4);
+    let y0 = run[0].y;
+    assert!(run.iter().all(|g| (g.y - y0).abs() < 1e-6), "not enough characters to break");
+}
+
+#[test]
+fn warichu_break_minimums_apply_to_the_first_and_last_line() {
+    let mut d = Document::new(&designcraft_doc::build::NewDocument::default());
+    let lid = d.default_layer();
+    let (_, sid) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(36.0, 36.0, 500.0, 200.0), lid, "ABCDEFGH", ParaFormat::default()).unwrap();
+    d.story_mut(sid).unwrap().format_chars(0..8, |f| {
+        f.over.warichu = Some(true);
+        f.over.warichu_lines = Some(2);
+        f.over.warichu_alignment = Some(designcraft_doc::cjk::WarichuAlignment::Left);
+        f.over.warichu_chars_before_break = Some(1);
+        f.over.warichu_chars_after_break = Some(5);
+    });
+    let l = &compose_story(&d, sid, &ComposeOptions::default()).frames[0].lines[0];
+    let run: Vec<_> = l.glyphs.iter().filter(|g| g.len > 0 && g.byte < 8).collect();
+    let y0 = run[0].y;
+    let first = run.iter().filter(|g| (g.y - y0).abs() < 1e-6).count();
+    let second = run.len() - first;
+    assert_eq!(first + second, run.len());
+    assert!(first >= 1 && second >= 5, "before 1 and after 5 on eight letters: {first} {second}");
+}
+
+#[test]
+fn warichu_rows_balance_by_width() {
+    let mut d = Document::new(&designcraft_doc::build::NewDocument::default());
+    let lid = d.default_layer();
+    let (_, sid) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(36.0, 36.0, 500.0, 200.0), lid, "IIIIWWWW", ParaFormat::default()).unwrap();
+    d.story_mut(sid).unwrap().format_chars(0..8, |f| {
+        f.over.warichu = Some(true);
+        f.over.warichu_lines = Some(2);
+        f.over.warichu_alignment = Some(designcraft_doc::cjk::WarichuAlignment::Left);
+    });
+    let l = &compose_story(&d, sid, &ComposeOptions::default()).frames[0].lines[0];
+    let run: Vec<_> = l.glyphs.iter().filter(|g| g.len > 0 && g.byte < 8).collect();
+    let y0 = run[0].y;
+    let width = |pred: bool| run.iter().filter(|g| ((g.y - y0).abs() < 1e-6) == pred).map(|g| g.adv).sum::<f64>();
+    let (top, bot) = (width(true), width(false));
+    let widest = run.iter().map(|g| g.adv).fold(0.0_f64, f64::max);
+    assert!((top - bot).abs() <= widest + 0.05, "rows differ by at most one glyph: {top} {bot}");
+}
+
+#[test]
+fn warichu_negative_spacing_tightens_the_rows() {
+    let mut d = Document::new(&designcraft_doc::build::NewDocument::default());
+    let lid = d.default_layer();
+    let (_, sid) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(36.0, 36.0, 500.0, 200.0), lid, "ABCDEFGH", ParaFormat::default()).unwrap();
+    d.story_mut(sid).unwrap().format_chars(0..8, |f| {
+        f.over.warichu = Some(true);
+        f.over.warichu_alignment = Some(designcraft_doc::cjk::WarichuAlignment::Left);
+        f.over.warichu_line_spacing = Some(-1.0);
+    });
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let l = &cs.frames[0].lines[0];
+    let run: Vec<_> = l.glyphs.iter().filter(|g| g.len > 0 && g.byte < 8).collect();
+    let size = cs.styles[run[0].style as usize].size;
+    let gap = run[4].y - run[0].y;
+    assert!((gap - (size * 0.5 - 1.0)).abs() < 0.05, "one point tighter than a small em: {gap} {size}");
+}
+
+#[test]
+fn warichu_tab_leaders_stay_in_the_gap() {
+    let frame = |warichu: bool| {
+        let mut doc = Document::new(&designcraft_doc::build::NewDocument::default());
+        let lid = doc.default_layer();
+        let pf = ParaFormat {
+            para: ParaAttrs {
+                tabs: Some(vec![designcraft_doc::TabStop {
+                    position: 200.0,
+                    align: designcraft_doc::TabAlign::Right,
+                    leader: ".".into(),
+                    align_on: String::new(),
+                }]),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let (_, sid) = doc.add_text_frame(SpreadRef::Doc(0), Rect::new(0.0, 0.0, 300.0, 100.0), lid, "Intro\tABCDEFGH", pf).unwrap();
+        if warichu {
+            let at = "Intro\t".len();
+            doc.story_mut(sid).unwrap().format_chars(at..at + 8, |f| {
+                f.over.warichu = Some(true);
+                f.over.warichu_alignment = Some(designcraft_doc::cjk::WarichuAlignment::Left);
+            });
+        }
+        let cs = compose_story(&doc, sid, &ComposeOptions::default());
+        let line = cs.frames[0].lines[0].clone();
+        let dots: Vec<f64> = line.glyphs.iter().filter(|g| g.len == 0 && g.visible).map(|g| g.x).collect();
+        (dots, line)
+    };
+    let (plain, _) = frame(false);
+    let (noted, line) = frame(true);
+    assert!(plain.len() > 5 && plain.len() == noted.len(), "the leader is not rebuilt or dropped: {} {}", plain.len(), noted.len());
+    for (a, b) in plain.iter().zip(&noted) {
+        assert!((a - b).abs() < 1e-6, "a leader before the note stays put: {a} {b}");
+    }
+    let note_x = line.glyphs.iter().filter(|g| g.len > 0 && g.byte >= "Intro\t".len()).map(|g| g.x).fold(f64::INFINITY, f64::min);
+    assert!(noted.iter().all(|x| *x < note_x), "leaders stay ahead of the note");
+}
+
+#[test]
+fn warichu_hit_caret_and_selection_follow_each_row() {
+    let text = "ABCDEFGHZ";
+    let mut d = Document::new(&designcraft_doc::build::NewDocument::default());
+    let lid = d.default_layer();
+    let (_, sid) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(36.0, 36.0, 500.0, 200.0), lid, text, ParaFormat::default()).unwrap();
+    d.story_mut(sid).unwrap().format_chars(0..8, |f| {
+        f.over.warichu = Some(true);
+        f.over.warichu_alignment = Some(designcraft_doc::cjk::WarichuAlignment::Left);
+    });
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let l = &cs.frames[0].lines[0];
+    let at = |byte: usize| l.glyphs.iter().find(|g| g.byte == byte && g.len > 0).unwrap();
+    let top = at(0);
+    let bot = at(4);
+    let z = at(8);
+    let (_, _, y0, asc, _) = caret(&cs, 0).unwrap();
+    let (_, _, y4, _, _) = caret(&cs, 4).unwrap();
+    let (_, x_end, y_end, _, _) = caret(&cs, text.len()).unwrap();
+    assert!((y0 - (l.baseline + top.y)).abs() < 1e-6 && (y4 - (l.baseline + bot.y)).abs() < 1e-6, "caret sits on the row");
+    assert!(asc < l.ascent * 0.8, "the row caret is shorter than the parent line");
+    assert!((y_end - l.baseline).abs() < 1e-6 && (x_end - l.end_x).abs() < 1e-3, "the line end stays on the parent baseline");
+    let click = |g: &PlacedGlyph| hit(&cs, 0, designcraft_geom::Point::new(g.x + g.adv * 0.25, l.baseline + g.y)).unwrap();
+    assert_eq!(click(top), 0);
+    assert_eq!(click(bot), 4);
+    assert_eq!(hit(&cs, 0, designcraft_geom::Point::new(z.x + z.adv * 0.25, l.baseline)).unwrap(), 8);
+    let up = adjacent_row(l, bot.x + bot.adv * 0.25, l.baseline + bot.y, true).unwrap();
+    assert!(hit(&cs, 0, designcraft_geom::Point::new(bot.x + bot.adv * 0.25, up)).unwrap() < 4);
+    assert!(adjacent_row(l, top.x + 0.1, l.baseline + top.y, true).is_none(), "the top row does not move up inside the note");
+    assert!(adjacent_row(l, z.x + 0.1, l.baseline, false).is_none(), "the character after the note is not inside a row");
+    let quads = highlight_quads(l, 0, 8, false);
+    assert_eq!(quads.len(), 2, "one band per row");
+    let mid_y = |q: &[designcraft_geom::Point; 4]| (q[0].y + q[2].y) / 2.0;
+    assert!(mid_y(&quads[0]) < l.baseline && mid_y(&quads[1]) > l.baseline, "the bands sit on either side of the parent baseline");
+    let style = &cs.styles[top.style as usize];
+    assert!((rule_baseline(style, l, top) - (l.baseline + top.y)).abs() < 1e-9);
+    let z_style = &cs.styles[z.style as usize];
+    assert!(!z_style.warichu && (rule_baseline(z_style, l, z) - l.baseline).abs() < 1e-9);
+}
+
+#[test]
 fn tate_chu_yoko_sets_digits_across_one_em() {
     let mut d = Document::new(&designcraft_doc::build::NewDocument::default());
     let lid = d.default_layer();

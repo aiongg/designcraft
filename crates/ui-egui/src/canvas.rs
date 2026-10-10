@@ -1014,32 +1014,8 @@ fn draw_text_selection(
             if s > e || (s == e && !(l.range.end < range.end && e == l.range.end)) {
                 continue;
             }
-            let quad = |x0: f64, x1: f64| {
-                [
-                    Point::new(x0, l.baseline - l.ascent),
-                    Point::new(x1, l.baseline - l.ascent),
-                    Point::new(x1, l.baseline + l.descent),
-                    Point::new(x0, l.baseline + l.descent),
-                ]
-            };
-            if l.glyphs.iter().any(|g| g.rtl) {
-                // Mixed directions: the selected glyphs' boxes, joined where they touch.
-                let mut spans: Vec<(f64, f64)> =
-                    l.glyphs.iter().filter(|g| g.len > 0 && g.byte >= s && g.byte < e).map(|g| (g.x, g.x + g.adv)).collect();
-                spans.sort_by(|a, b| a.0.total_cmp(&b.0));
-                let mut merged: Vec<(f64, f64)> = Vec::new();
-                for (a, b) in spans {
-                    match merged.last_mut() {
-                        Some(m) if a <= m.1 + 0.5 => m.1 = m.1.max(b),
-                        _ => merged.push((a, b)),
-                    }
-                }
-                quads.extend(merged.into_iter().map(|(a, b)| quad(a, b)));
-            } else {
-                let x0 = compose::caret_x(l, s);
-                let x1 = if e == l.range.end && range.end > l.range.end { l.end_x.max(x0 + 3.0) } else { compose::caret_x(l, e) };
-                quads.push(quad(x0, x1));
-            }
+            let past = e == l.range.end && range.end > l.range.end;
+            quads.extend(compose::highlight_quads(l, s, e, past));
             // A selected drop cap is highlighted down to its baseline.
             if let Some(dc) = l.drop_cap {
                 let sel = l.glyphs.iter().filter(|g| g.len > 0 && g.byte < dc.end && g.byte >= s && g.byte < e);
@@ -1109,15 +1085,11 @@ fn draw_cell_selection(
             if s > e || (s == e && !(l.range.end < range.end && e == l.range.end)) {
                 continue;
             }
-            let x0 = compose::caret_x(l, s);
-            let x1 = if e == l.range.end && range.end > l.range.end { l.end_x.max(x0 + 3.0) } else { compose::caret_x(l, e) };
-            let q = [
-                xf.to_screen(m * Point::new(x0, l.baseline - l.ascent)),
-                xf.to_screen(m * Point::new(x1, l.baseline - l.ascent)),
-                xf.to_screen(m * Point::new(x1, l.baseline + l.descent)),
-                xf.to_screen(m * Point::new(x0, l.baseline + l.descent)),
-            ];
-            painter.add(egui::Shape::convex_polygon(q.to_vec(), Color32::from_rgba_unmultiplied(80, 140, 255, 110), Stroke::NONE));
+            let past = e == l.range.end && range.end > l.range.end;
+            for q in compose::highlight_quads(l, s, e, past) {
+                let poly = q.map(|p| xf.to_screen(m * p));
+                painter.add(egui::Shape::convex_polygon(poly.to_vec(), Color32::from_rgba_unmultiplied(80, 140, 255, 110), Stroke::NONE));
+            }
         }
     }
     if ts.is_caret()

@@ -1059,6 +1059,7 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Tate-Chu-Yoko", "نص أفقي داخل النص العمودي"),
     ("Ruby…", "روبي…"),
     ("Kenten", "علامات توكيد"),
+    ("Warichu", "واريشو"),
     ("Tabs", "علامات الجدولة"),
     ("Story", "القصة"),
     ("Create Outlines", "إنشاء حدود خارجية"),
