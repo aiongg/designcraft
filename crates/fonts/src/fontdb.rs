@@ -806,6 +806,12 @@ fn typo_ascent(f: &skrifa::FontRef<'_>, location: &Location, upem: f64) -> Optio
         v += mvar.metric_delta(skrifa::raw::tables::mvar::tags::HASC, location.coords()).map_or(0.0, |d| d.to_f64());
     }
     plausible(Some(v), upem)
+/// `family` without what layout apps add to a family name, if it has any: InDesign's `$ID/`
+/// prefix (`$ID/Arial` → `Arial`) and the font-format suffix appended when a family is installed
+/// in several formats (`Minion Pro (OTF)` → `Minion Pro`).
+fn plain_family(family: &str) -> Option<&str> {
+    let unprefixed = family.trim_start().strip_prefix("$ID/").map(str::trim).filter(|f| !f.is_empty());
+    without_format_suffix(unprefixed.unwrap_or(family)).or(unprefixed)
 }
 
 /// `family` without the font-format suffix layout apps append when a family is installed in
@@ -1491,7 +1497,7 @@ impl ScopedFonts<'_> {
     /// Regular first, then by weight.
     fn style_traits(&self, family: &str) -> Vec<(bool, f32, String)> {
         let v = self.exact_style_traits(family);
-        match without_format_suffix(family) {
+        match plain_family(family) {
             Some(base) if v.is_empty() => self.exact_style_traits(base),
             _ => v,
         }
@@ -1520,12 +1526,13 @@ impl ScopedFonts<'_> {
 
     /// Resolve a family + style to a face, falling back to the closest style of the family, then to
     /// Source Sans 3 Regular. Installed system fonts are found by name whatever ran before. A
-    /// family with a format suffix (`Minion Pro (OTF)`) that isn't found is looked up without it.
+    /// family with InDesign's `$ID/` prefix or a format suffix (`Minion Pro (OTF)`) that isn't
+    /// found is looked up without them.
     pub fn face(&self, family: &str, style: &str) -> Arc<FontFace> {
         let canonical = self
             .canonical_family(family)
-            .or_else(|| without_format_suffix(family).and_then(|base| self.canonical_family(base)))
-            .unwrap_or_else(|| self.substitute_family(without_format_suffix(family).unwrap_or(family)));
+            .or_else(|| plain_family(family).and_then(|base| self.canonical_family(base)))
+            .unwrap_or_else(|| self.substitute_family(plain_family(family).unwrap_or(family)));
         if let Some(f) = self.find_or_load(&canonical, style) {
             return f;
         }
@@ -1547,9 +1554,9 @@ impl ScopedFonts<'_> {
     }
 
     /// Is `family` available (the document's, loaded, or installed on the system), as named or
-    /// without a format suffix (see [`ScopedFonts::face`])?
+    /// without an `$ID/` prefix or a format suffix (see [`ScopedFonts::face`])?
     pub fn has_family(&self, family: &str) -> bool {
-        self.canonical_family(family).is_some() || without_format_suffix(family).is_some_and(|base| self.canonical_family(base).is_some())
+        self.canonical_family(family).is_some() || plain_family(family).is_some_and(|base| self.canonical_family(base).is_some())
     }
 
     /// A variable font's axes: (tag, name, min, default, max), empty for static fonts.
