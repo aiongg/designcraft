@@ -1366,6 +1366,47 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                 }
             }
         }
+        // The end of a split block: text after it continues below its deepest sub-column, which
+        // are balanced first. A block that ends the story fills its sub-columns in turn.
+        if let Some(sb) = cur.split {
+            let next =
+                story.paras.get(pi + 1).filter(|_| story.para_table(pi + 1).is_none()).and_then(|p| SplitCfg::of(&doc.styles.resolve_para(p).0));
+            if next != Some(sb.cfg) {
+                cur.split = None;
+                let part = out.frames.get(cur.fi).and_then(|ft| {
+                    let lines = ft.lines.get(sb.line0?..)?;
+                    let top = lines.first().map(|l| l.baseline - l.ascent)?;
+                    let deepest = lines.iter().map(|l| (l.baseline, l.descent)).max_by(|a, b| (a.0 + a.1).total_cmp(&(b.0 + b.1)))?;
+                    Some((sb.top.unwrap_or(top), deepest))
+                });
+                if pi + 1 < np
+                    && let Some((top, (baseline, descent))) = part
+                {
+                    let key = (cur.fi, cur.col, sb.para);
+                    let active = split_trial.as_ref().is_some_and(|t| t.key == key);
+                    if !active && let Some(t) = split_trial.take() {
+                        set_limit(&mut split_limits, t.key, None);
+                    }
+                    if sb.part_lines > 1 && (active || limit_of(&split_limits, key).is_none() && split_runs < split_budget) {
+                        let bottom = baseline + descent;
+                        let mut t = split_trial.take().unwrap_or(Trial { key, span: pi, lo: top, hi: bottom, tries: 0, done: false });
+                        // This layout fits: its bottom is the best so far.
+                        t.hi = t.hi.min(bottom);
+                        let next = if t.done { t.hi } else { t.next() };
+                        set_limit(&mut split_limits, key, Some(next));
+                        if !t.done {
+                            split_trial = Some(t);
+                            split_runs += 1;
+                            rewind(key.2, &snaps, &note_snaps, &mut notes, &mut out, &mut cur, &mut list_counter, &mut force_col, &mut line_cap);
+                            pi = key.2;
+                            continue 'paras;
+                        }
+                    }
+                    cur.last_baseline = Some(baseline);
+                    cur.last_descent = descent;
+                }
+            }
+        }
         cur.pending += pp.space_after;
         pi += 1;
     }
