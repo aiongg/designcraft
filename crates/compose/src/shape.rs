@@ -82,7 +82,8 @@ impl Glyph {
         matches!(self.ch, ' ' | '\u{2002}'..='\u{200A}') || (self.ch == '\u{3000}' && self.ideographic_space_elastic)
     }
     /// A space whose width justification and word spacing vary: U+0020, the nonbreaking space
-    /// U+00A0 and an elastic ideographic space. Fixed-width spaces (U+2002–U+200A, U+202F) keep theirs.
+    /// U+00A0 and an elastic ideographic space. Fixed-width spaces (U+2002–U+200A, U+202F) get no
+    /// word-space stretch or shrink.
     pub fn is_word_space(&self) -> bool {
         matches!(self.ch, ' ' | NBSP) || (self.ch == '\u{3000}' && self.ideographic_space_elastic)
     }

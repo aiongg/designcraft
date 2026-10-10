@@ -100,9 +100,10 @@ impl Spacing {
             [moji_shrink, g.space * (self.letter_desired - self.letter_min).max(0.0), natural * (self.glyph_desired - self.glyph_min).max(0.0)],
         )
     }
-    /// Word-space stretch and shrink of space glyph `g` (see [`Glyph::is_word_space`]).
+    /// Word-space stretch and shrink of space glyph `g` (see [`Glyph::is_word_space`]); none
+    /// inside a jidori run, whose width is fitted.
     fn space_elastic(&self, g: &Glyph) -> (f64, f64) {
-        if !g.is_word_space() {
+        if !g.is_word_space() || g.locked_advance {
             return (0.0, 0.0);
         }
         (g.space * (self.word_max - self.word_desired).max(0.0), g.space * (self.word_desired - self.word_min).max(0.0))

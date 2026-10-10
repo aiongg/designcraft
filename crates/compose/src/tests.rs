@@ -621,6 +621,49 @@ fn nonbreaking_space_stretches_and_fixed_width_one_does_not() {
     }
 }
 
+#[test]
+fn jidori_run_keeps_its_width_on_a_justified_line() {
+    fn first_line(text: &str, width: f64, para: ParaAttrs, run: std::ops::Range<usize>) -> Line {
+        let (mut d, sid, _) = doc_with(text, Rect::new(0.0, 0.0, width, 1000.0), para);
+        d.story_mut(sid).unwrap().format_chars(run, |f| f.over.jidori = Some(6));
+        let cs = compose_story(&d, sid, &ComposeOptions::default());
+        all_lines(&cs)[0].clone()
+    }
+    for sp in ['\u{A0}', ' '] {
+        let text = format!("aa{sp}aa bbbb cccc dddd eeee ffff gggg hhhh");
+        let run = 0..4 + sp.len_utf8();
+        let run_width = |l: &Line| l.glyphs.iter().filter(|g| run.contains(&g.byte)).map(|g| g.adv).sum::<f64>();
+        let ragged = first_line(&text, 1000.0, ParaAttrs::default(), run.clone());
+        let gap = ragged.glyphs.iter().find(|g| g.byte == text.find(" dddd").unwrap()).unwrap();
+        let width = gap.x - ragged.x0 + gap.adv + 2.0 * ragged.x0;
+        let para = ParaAttrs { align: Some(Align::LeftJustified), word_space_max: Some(4.0), ..Default::default() };
+        let line = first_line(&text, width, para, run.clone());
+        assert_eq!(text[line.range.clone()].trim_end(), format!("aa{sp}aa bbbb cccc"));
+        assert!((line.end_x - line.x1).abs() < 0.1, "{sp:?}: line ends at {} not {}", line.end_x, line.x1);
+        assert!((run_width(&line) - run_width(&ragged)).abs() < 1e-6, "{sp:?}: run is {} not {}", run_width(&line), run_width(&ragged));
+    }
+}
+
+#[test]
+fn nonbreaking_space_alone_fills_a_justified_line() {
+    let text = "10\u{A0}km 1234";
+    let (d, sid, _) = doc_with(text, Rect::new(0.0, 0.0, 1000.0, 100.0), ParaAttrs::default());
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let ragged = all_lines(&cs)[0];
+    let natural = ragged.glyphs.iter().map(|g| (g.byte, g.adv)).collect::<std::collections::HashMap<_, _>>();
+    let m = ragged.glyphs.iter().find(|g| g.byte == 5).unwrap();
+    let width = m.x - ragged.x0 + m.adv + 15.0 + 2.0 * ragged.x0;
+    let line = justified_first_line(text, width, None);
+    assert_eq!(text[line.range.clone()].trim_end(), "10\u{A0}km");
+    for g in line.glyphs.iter().filter(|g| g.byte < 6) {
+        if g.byte == 2 {
+            assert!((g.adv - natural[&2] - 15.0).abs() < 0.1, "U+00A0 is {}", g.adv);
+        } else {
+            assert!((g.adv - natural[&g.byte]).abs() < 1e-6, "glyph at {} is {}", g.byte, g.adv);
+        }
+    }
+}
+
 /// Story of `n` one-line filler paragraphs followed by `extra` paragraphs, in a 2-column frame.
 fn keep_doc(fillers: usize, extra: &[&str], height: f64) -> (Document, StoryId, Vec<usize>) {
     let mut parts: Vec<String> = (0..fillers).map(|k| format!("Filler {k}")).collect();

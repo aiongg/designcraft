@@ -2654,7 +2654,8 @@ fn layout_line(
     // a line whose last tab is a right, centre, character or right-indent tab is not justified.
     let seg = last_tab.map_or(0, |(i, _)| i + 1);
     let seg_justifies = last_tab.is_none_or(|(_, left)| left);
-    let spaces: Vec<usize> = line.iter().enumerate().skip(seg).filter(|(_, g)| g.is_justify_space()).map(|(i, _)| i).collect();
+    // Spaces inside a jidori run keep the run's fitted width, as in the breaker.
+    let spaces: Vec<usize> = line.iter().enumerate().skip(seg).filter(|(_, g)| g.is_justify_space() && !g.locked_advance).map(|(i, _)| i).collect();
     let align = match pp.align {
         Align::TowardsSpine => {
             if left_page {
