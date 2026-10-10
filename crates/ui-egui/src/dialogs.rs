@@ -2770,18 +2770,24 @@ fn basic_character_formats(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
     let lang = app.ui.language.clone();
     let lang = lang.as_str();
     let fonts = crate::panels::fonts(app);
+    let menu = crate::panels::font_menu(app);
     egui::Grid::new("psc").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
         crate::rtl::label(ui, crate::i18n::tr(lang, "Font Family:"));
         let fam = cf.get(d, "fontFamily").as_str().unwrap_or("").to_string();
-        ui.horizontal(|ui| {
-            if let Some(f) = crate::panels::font_combo(app, ui, "psfam", &fam, 200.0) {
-                cf.set(d, "fontFamily", json!(f));
-            }
-            // A style may leave the family unset.
-            if cf.sparse && !fam.is_empty() && ui.small_button("×").on_hover_text(crate::i18n::tr(lang, "Clear")).clicked() {
-                cf.set(d, "fontFamily", Value::Null);
-            }
-        });
+        let shown = if fam.is_empty() { "—".to_string() } else { crate::panels::font_label(app, &menu, &fam) };
+        egui::ComboBox::from_id_salt("psfam")
+            .selected_text(shown)
+            .width(200.0)
+            .height(440.0)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .show_ui(ui, |ui| {
+                if cf.sparse && ui.selectable_label(fam.is_empty(), " ").clicked() {
+                    cf.set(d, "fontFamily", Value::Null);
+                }
+                if let Some(f) = crate::panels::font_menu_body(app, ui, &menu, &fam, 200.0) {
+                    cf.set(d, "fontFamily", json!(f));
+                }
+            });
         ui.end_row();
         crate::rtl::label(ui, crate::i18n::tr(lang, "Font Style:"));
         let sty = cf.get(d, "fontStyle").as_str().unwrap_or("").to_string();
