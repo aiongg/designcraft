@@ -1208,10 +1208,10 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
             if let Some(ok) = crate::section_options::actions(app, &mut actions) {
                 result = Some(ok);
             }
-            if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            if !popup_open && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                 result = Some(true);
             }
-            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            if !popup_open && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                 result = Some(false);
             }
         }
