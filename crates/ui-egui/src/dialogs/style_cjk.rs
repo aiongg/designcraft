@@ -323,10 +323,10 @@ fn japanese_composition(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, cf: &Char
                 d.fields.insert("p.kinsoku".into(), Value::Null);
             }
             for k in &sets {
-                if ui.selectable_label(name.as_deref() == Some(k.name.as_str()), crate::rtl::widget(ui, kinsoku_label(lang, &k.name))).clicked() {
-                    if let Ok(v) = serde_json::to_value(k) {
-                        d.fields.insert("p.kinsoku".into(), v);
-                    }
+                if ui.selectable_label(name.as_deref() == Some(k.name.as_str()), crate::rtl::widget(ui, kinsoku_label(lang, &k.name))).clicked()
+                    && let Ok(v) = serde_json::to_value(k)
+                {
+                    d.fields.insert("p.kinsoku".into(), v);
                 }
             }
         });
