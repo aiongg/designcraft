@@ -573,6 +573,23 @@ fn column_break_moves_following_text() {
     assert!(lines[1].baseline < 20.0, "second column starts at the top");
 }
 
+/// InDesign: a break character ends its paragraph; the next paragraph starts on the next page (odd
+/// or even for those breaks), with no empty line where the break was.
+#[test]
+fn break_characters_end_their_paragraph_and_keep_page_parity() {
+    use designcraft_doc::story::{EVEN_PAGE_BREAK, ODD_PAGE_BREAK, PAGE_BREAK};
+    let mut d = Document::new(&NewDocument { pages: 4, facing_pages: false, primary_text_frame: true, ..Default::default() });
+    let sid = d.settings.primary_story.unwrap();
+    let text = format!("one{ODD_PAGE_BREAK}\ntwo{EVEN_PAGE_BREAK}\nthree{PAGE_BREAK}\nfour");
+    d.story_mut(sid).unwrap().insert(0, &text);
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    // Frame i is on page i + 1: "one" on 1, "two" on the next odd page (3), "three" on the next
+    // even page (4), and "four" has no page left.
+    let lines: Vec<(usize, usize)> = cs.frames.iter().enumerate().flat_map(|(fi, f)| f.lines.iter().map(move |l| (fi, l.para))).collect();
+    assert_eq!(lines, vec![(0, 0), (2, 1), (3, 2)]);
+    assert_eq!(cs.overset_at, Some(text.find("four").unwrap()));
+}
+
 #[test]
 fn line_before_a_break_character_is_a_last_line() {
     // As in InDesign: column, frame and page breaks end the paragraph's last line (set with the
@@ -816,6 +833,46 @@ fn footnotes_sit_at_the_column_bottom_and_push_text() {
 }
 
 #[test]
+fn footnote_first_line_wraps_at_the_column_edge_after_its_number() {
+    // InDesign sets the footnote number and separator as part of the first line: that line
+    // wraps at the same right edge as the others, whatever the separator. A tab separator
+    // reaches the footnote style's tab stop.
+    let tab_at = |position: f64| {
+        let stop = designcraft_doc::TabStop { position, align: TabAlign::Left, leader: String::new(), align_on: String::new() };
+        ParaAttrs { tabs: Some(vec![stop]), ..Default::default() }
+    };
+    let right_edge = |l: &Line, source: &str| {
+        let space = |g: &&PlacedGlyph| g.len > 0 && source.get(g.byte..).and_then(|s| s.chars().next()).is_some_and(char::is_whitespace);
+        l.glyphs.iter().filter(|g| g.visible && !space(g)).map(|g| g.x + g.adv).fold(0.0, f64::max)
+    };
+    let cases =
+        [("\t", tab_at(100.0)), ("\t", ParaAttrs::default()), (" ", ParaAttrs::default()), (".\u{2003}\u{2003}\u{2003}", ParaAttrs::default())];
+    for (sep, para) in cases {
+        let (mut d, sid, _) = doc_with("Short text.", Rect::new(36.0, 36.0, 300.0, 400.0), ParaAttrs::default());
+        d.footnote_options.separator = sep.into();
+        d.footnote_options.start_at = 1234;
+        d.story_mut(sid).unwrap().insert_note(5, &LOREM.repeat(2), ParaFormat { para, ..Default::default() });
+        let cs = compose_story(&d, sid, &ComposeOptions::default());
+        let n = &cs.frames[0].notes[0];
+        let width = n.rect.width();
+        let lines = &n.text.frames[0].lines;
+        assert!(lines.len() >= 3, "{sep:?}: {} lines", lines.len());
+        for (i, l) in lines.iter().enumerate() {
+            let right = right_edge(l, &n.source);
+            assert!(right <= width + 0.01, "{sep:?}: line {i} ends at {right}, past the column's {width}");
+        }
+        assert!(lines[0].glyphs.first().is_some_and(|g| g.len == 0 && g.x < 1.0), "{sep:?}: the number leads line 0");
+    }
+    // The same holds for a tab in body text.
+    let text = format!("Term\t{LOREM}");
+    let (d, sid, _) = doc_with(&text, Rect::new(36.0, 36.0, 300.0, 400.0), tab_at(100.0));
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let l = &cs.frames[0].lines[0];
+    let edge = cs.frames[0].columns[0].x1;
+    assert!(right_edge(l, &text) <= edge + 0.01, "body line 0 ends at {}, past {edge}", right_edge(l, &text));
+}
+
+#[test]
 fn footnote_line_at_column_top_still_sets() {
     // A note taller than the frame can't push its reference line forever.
     let (mut d, sid, _) = doc_with("Short text.", Rect::new(0.0, 0.0, 200.0, 40.0), ParaAttrs::default());
@@ -1006,6 +1063,192 @@ fn ruby_and_kenten_sit_over_their_text() {
     let dot = l.glyphs.last().unwrap();
     let de = &l.glyphs[2];
     assert!((dot.x + dot.adv / 2.0 - (de.x + de.adv / 2.0)).abs() < 1.0 && dot.y < 0.0);
+}
+
+#[test]
+fn warichu_stacks_the_run_inside_the_line_and_closes_up() {
+    let text = "ABCDEFGHZ";
+    let mut d = Document::new(&designcraft_doc::build::NewDocument::default());
+    let lid = d.default_layer();
+    let (_, sid) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(36.0, 36.0, 500.0, 200.0), lid, text, ParaFormat::default()).unwrap();
+    let plain = compose_story(&d, sid, &ComposeOptions::default()).frames[0].lines[0].glyphs.clone();
+    let z0 = plain.iter().find(|g| g.byte == 8 && g.len > 0).unwrap().x;
+    let sx0 = plain.iter().find(|g| g.byte == 0 && g.len > 0).unwrap().sx;
+    d.story_mut(sid).unwrap().format_chars(0..8, |f| {
+        f.over.warichu = Some(true);
+        f.over.warichu_alignment = Some(designcraft_doc::cjk::WarichuAlignment::Left);
+    });
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let l = &cs.frames[0].lines[0];
+    let run: Vec<_> = l.glyphs.iter().filter(|g| g.byte < 8 && g.len > 0).collect();
+    assert_eq!(run.len(), 8, "the note keeps one glyph per letter");
+    let size = cs.styles[run[0].style as usize].size;
+    assert!((run[0].sx - sx0 * 0.5).abs() < 1e-6, "half the parent size");
+    let y_of = |slice: &[&PlacedGlyph]| slice.iter().map(|g| g.y).sum::<f64>() / slice.len() as f64;
+    let (y_top, y_bot) = (y_of(&run[..4]), y_of(&run[4..]));
+    assert!((y_bot - y_top - size * 0.5).abs() < 0.05 * size, "two lines one small em apart: {y_top} {y_bot} {size}");
+    assert!((run[0].x - run[4].x).abs() < 1e-6, "left alignment shares the start");
+    let z = l.glyphs.iter().find(|g| g.byte == 8 && g.len > 0).unwrap();
+    let right = run.iter().map(|g| g.x + g.adv).fold(f64::MIN, f64::max);
+    assert!((z.x - right).abs() < 1e-3, "the next character follows the note: {} {right}", z.x);
+    assert!(z.x < z0 - 1.0, "the note is narrower than the full-size run: {} {z0}", z.x);
+    assert!((l.end_x - (z.x + z.adv)).abs() < 1e-3, "the line-end caret follows the close-up");
+}
+
+#[test]
+fn warichu_break_minimum_keeps_a_short_run_on_one_line() {
+    let mut d = Document::new(&designcraft_doc::build::NewDocument::default());
+    let lid = d.default_layer();
+    let (_, sid) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(36.0, 36.0, 500.0, 200.0), lid, "ABCD", ParaFormat::default()).unwrap();
+    d.story_mut(sid).unwrap().format_chars(0..4, |f| {
+        f.over.warichu = Some(true);
+        f.over.warichu_lines = Some(2);
+        f.over.warichu_chars_before_break = Some(3);
+        f.over.warichu_chars_after_break = Some(3);
+    });
+    let l = &compose_story(&d, sid, &ComposeOptions::default()).frames[0].lines[0];
+    let run: Vec<_> = l.glyphs.iter().filter(|g| g.len > 0 && g.byte < 4).collect();
+    assert_eq!(run.len(), 4);
+    let y0 = run[0].y;
+    assert!(run.iter().all(|g| (g.y - y0).abs() < 1e-6), "not enough characters to break");
+}
+
+#[test]
+fn warichu_break_minimums_apply_to_the_first_and_last_line() {
+    let mut d = Document::new(&designcraft_doc::build::NewDocument::default());
+    let lid = d.default_layer();
+    let (_, sid) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(36.0, 36.0, 500.0, 200.0), lid, "ABCDEFGH", ParaFormat::default()).unwrap();
+    d.story_mut(sid).unwrap().format_chars(0..8, |f| {
+        f.over.warichu = Some(true);
+        f.over.warichu_lines = Some(2);
+        f.over.warichu_alignment = Some(designcraft_doc::cjk::WarichuAlignment::Left);
+        f.over.warichu_chars_before_break = Some(1);
+        f.over.warichu_chars_after_break = Some(5);
+    });
+    let l = &compose_story(&d, sid, &ComposeOptions::default()).frames[0].lines[0];
+    let run: Vec<_> = l.glyphs.iter().filter(|g| g.len > 0 && g.byte < 8).collect();
+    let y0 = run[0].y;
+    let first = run.iter().filter(|g| (g.y - y0).abs() < 1e-6).count();
+    let second = run.len() - first;
+    assert_eq!(first + second, run.len());
+    assert!(first >= 1 && second >= 5, "before 1 and after 5 on eight letters: {first} {second}");
+}
+
+#[test]
+fn warichu_rows_balance_by_width() {
+    let mut d = Document::new(&designcraft_doc::build::NewDocument::default());
+    let lid = d.default_layer();
+    let (_, sid) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(36.0, 36.0, 500.0, 200.0), lid, "IIIIWWWW", ParaFormat::default()).unwrap();
+    d.story_mut(sid).unwrap().format_chars(0..8, |f| {
+        f.over.warichu = Some(true);
+        f.over.warichu_lines = Some(2);
+        f.over.warichu_alignment = Some(designcraft_doc::cjk::WarichuAlignment::Left);
+    });
+    let l = &compose_story(&d, sid, &ComposeOptions::default()).frames[0].lines[0];
+    let run: Vec<_> = l.glyphs.iter().filter(|g| g.len > 0 && g.byte < 8).collect();
+    let y0 = run[0].y;
+    let width = |pred: bool| run.iter().filter(|g| ((g.y - y0).abs() < 1e-6) == pred).map(|g| g.adv).sum::<f64>();
+    let (top, bot) = (width(true), width(false));
+    let widest = run.iter().map(|g| g.adv).fold(0.0_f64, f64::max);
+    assert!((top - bot).abs() <= widest + 0.05, "rows differ by at most one glyph: {top} {bot}");
+}
+
+#[test]
+fn warichu_negative_spacing_tightens_the_rows() {
+    let mut d = Document::new(&designcraft_doc::build::NewDocument::default());
+    let lid = d.default_layer();
+    let (_, sid) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(36.0, 36.0, 500.0, 200.0), lid, "ABCDEFGH", ParaFormat::default()).unwrap();
+    d.story_mut(sid).unwrap().format_chars(0..8, |f| {
+        f.over.warichu = Some(true);
+        f.over.warichu_alignment = Some(designcraft_doc::cjk::WarichuAlignment::Left);
+        f.over.warichu_line_spacing = Some(-1.0);
+    });
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let l = &cs.frames[0].lines[0];
+    let run: Vec<_> = l.glyphs.iter().filter(|g| g.len > 0 && g.byte < 8).collect();
+    let size = cs.styles[run[0].style as usize].size;
+    let gap = run[4].y - run[0].y;
+    assert!((gap - (size * 0.5 - 1.0)).abs() < 0.05, "one point tighter than a small em: {gap} {size}");
+}
+
+#[test]
+fn warichu_tab_leaders_stay_in_the_gap() {
+    let frame = |warichu: bool| {
+        let mut doc = Document::new(&designcraft_doc::build::NewDocument::default());
+        let lid = doc.default_layer();
+        let pf = ParaFormat {
+            para: ParaAttrs {
+                tabs: Some(vec![designcraft_doc::TabStop {
+                    position: 200.0,
+                    align: designcraft_doc::TabAlign::Right,
+                    leader: ".".into(),
+                    align_on: String::new(),
+                }]),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let (_, sid) = doc.add_text_frame(SpreadRef::Doc(0), Rect::new(0.0, 0.0, 300.0, 100.0), lid, "Intro\tABCDEFGH", pf).unwrap();
+        if warichu {
+            let at = "Intro\t".len();
+            doc.story_mut(sid).unwrap().format_chars(at..at + 8, |f| {
+                f.over.warichu = Some(true);
+                f.over.warichu_alignment = Some(designcraft_doc::cjk::WarichuAlignment::Left);
+            });
+        }
+        let cs = compose_story(&doc, sid, &ComposeOptions::default());
+        let line = cs.frames[0].lines[0].clone();
+        let dots: Vec<f64> = line.glyphs.iter().filter(|g| g.len == 0 && g.visible).map(|g| g.x).collect();
+        (dots, line)
+    };
+    let (plain, _) = frame(false);
+    let (noted, line) = frame(true);
+    assert!(plain.len() > 5 && plain.len() == noted.len(), "the leader is not rebuilt or dropped: {} {}", plain.len(), noted.len());
+    for (a, b) in plain.iter().zip(&noted) {
+        assert!((a - b).abs() < 1e-6, "a leader before the note stays put: {a} {b}");
+    }
+    let note_x = line.glyphs.iter().filter(|g| g.len > 0 && g.byte >= "Intro\t".len()).map(|g| g.x).fold(f64::INFINITY, f64::min);
+    assert!(noted.iter().all(|x| *x < note_x), "leaders stay ahead of the note");
+}
+
+#[test]
+fn warichu_hit_caret_and_selection_follow_each_row() {
+    let text = "ABCDEFGHZ";
+    let mut d = Document::new(&designcraft_doc::build::NewDocument::default());
+    let lid = d.default_layer();
+    let (_, sid) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(36.0, 36.0, 500.0, 200.0), lid, text, ParaFormat::default()).unwrap();
+    d.story_mut(sid).unwrap().format_chars(0..8, |f| {
+        f.over.warichu = Some(true);
+        f.over.warichu_alignment = Some(designcraft_doc::cjk::WarichuAlignment::Left);
+    });
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let l = &cs.frames[0].lines[0];
+    let at = |byte: usize| l.glyphs.iter().find(|g| g.byte == byte && g.len > 0).unwrap();
+    let top = at(0);
+    let bot = at(4);
+    let z = at(8);
+    let (_, _, y0, asc, _) = caret(&cs, 0).unwrap();
+    let (_, _, y4, _, _) = caret(&cs, 4).unwrap();
+    let (_, x_end, y_end, _, _) = caret(&cs, text.len()).unwrap();
+    assert!((y0 - (l.baseline + top.y)).abs() < 1e-6 && (y4 - (l.baseline + bot.y)).abs() < 1e-6, "caret sits on the row");
+    assert!(asc < l.ascent * 0.8, "the row caret is shorter than the parent line");
+    assert!((y_end - l.baseline).abs() < 1e-6 && (x_end - l.end_x).abs() < 1e-3, "the line end stays on the parent baseline");
+    let click = |g: &PlacedGlyph| hit(&cs, 0, designcraft_geom::Point::new(g.x + g.adv * 0.25, l.baseline + g.y)).unwrap();
+    assert_eq!(click(top), 0);
+    assert_eq!(click(bot), 4);
+    assert_eq!(hit(&cs, 0, designcraft_geom::Point::new(z.x + z.adv * 0.25, l.baseline)).unwrap(), 8);
+    let up = adjacent_row(l, bot.x + bot.adv * 0.25, l.baseline + bot.y, true).unwrap();
+    assert!(hit(&cs, 0, designcraft_geom::Point::new(bot.x + bot.adv * 0.25, up)).unwrap() < 4);
+    assert!(adjacent_row(l, top.x + 0.1, l.baseline + top.y, true).is_none(), "the top row does not move up inside the note");
+    assert!(adjacent_row(l, z.x + 0.1, l.baseline, false).is_none(), "the character after the note is not inside a row");
+    let quads = highlight_quads(l, 0, 8, false);
+    assert_eq!(quads.len(), 2, "one band per row");
+    let mid_y = |q: &[designcraft_geom::Point; 4]| (q[0].y + q[2].y) / 2.0;
+    assert!(mid_y(&quads[0]) < l.baseline && mid_y(&quads[1]) > l.baseline, "the bands sit on either side of the parent baseline");
+    let style = &cs.styles[top.style as usize];
+    assert!((rule_baseline(style, l, top) - (l.baseline + top.y)).abs() < 1e-9);
+    let z_style = &cs.styles[z.style as usize];
+    assert!(!z_style.warichu && (rule_baseline(z_style, l, z) - l.baseline).abs() < 1e-9);
 }
 
 #[test]
@@ -1934,6 +2177,102 @@ fn vertical_lines_fit_the_em_box() {
         let (l, col) = vertical_line(family, "一二", |_| {});
         assert!((l.ascent - ascent).abs() < 1e-9 && (l.descent - descent).abs() < 1e-9, "{family}: {} {}", l.ascent, l.descent);
         assert!((l.baseline - col.y0 - ascent).abs() < 1e-9, "{family}: {} {}", l.baseline, col.y0);
+    }
+}
+
+#[test]
+fn justified_line_with_a_tab_justifies_the_text_after_its_last_tab() {
+    // InDesign justifies only the text after a line's last (left) tab; tab stops stay aligned.
+    let stop = |align| designcraft_doc::TabStop { position: 100.0, align, leader: String::new(), align_on: String::new() };
+    let text = "Name\t42 and some words\u{2028}more";
+    let x_of = |l: &Line, byte: usize| l.glyphs.iter().find(|g| g.byte == byte && g.len > 0).map(|g| g.x).unwrap();
+    let left = ParaAttrs { align: Some(Align::LeftJustified), tabs: Some(vec![stop(TabAlign::Left)]), ..Default::default() };
+    let (d, sid, _) = doc_with(text, Rect::new(0.0, 0.0, 300.0, 100.0), left.clone());
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let l = all_lines(&cs)[0];
+    assert!((l.end_x - l.x1).abs() < 0.6, "line with a left tab ends at {} not {}", l.end_x, l.x1);
+    assert!((x_of(l, 5) - 100.0).abs() < 0.5, "text after the tab starts at the stop: {}", x_of(l, 5));
+    let (d, sid, _) = doc_with(text, Rect::new(0.0, 0.0, 300.0, 100.0), ParaAttrs { align: Some(Align::Left), ..left });
+    let ragged = compose_story(&d, sid, &ComposeOptions::default());
+    let r = all_lines(&ragged)[0];
+    for byte in 0..4 {
+        assert!((x_of(l, byte) - x_of(r, byte)).abs() < 1e-6, "text before the tab keeps its natural position");
+    }
+
+    // After a right tab the line stays as set.
+    let right = ParaAttrs { align: Some(Align::LeftJustified), tabs: Some(vec![stop(TabAlign::Right)]), ..Default::default() };
+    let (d, sid, _) = doc_with("Name\t42\u{2028}more", Rect::new(0.0, 0.0, 300.0, 100.0), right);
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let l = all_lines(&cs)[0];
+    assert!((l.end_x - 100.0).abs() < 0.5, "right-tab line ends at its stop: {}", l.end_x);
+
+    // A footnote's number and tab separator: its first line is justified like the others.
+    let (mut d, sid, fid) = doc_with("Body text.", Rect::new(0.0, 0.0, 200.0, 400.0), ParaAttrs::default());
+    let note = ParaFormat { para: ParaAttrs { align: Some(Align::LeftJustified), ..Default::default() }, ..Default::default() };
+    d.story_mut(sid).unwrap().insert_note(4, LOREM, note);
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let n = &cs.frame(fid).unwrap().notes[0];
+    let lines = all_lines(&n.text);
+    assert!(lines.len() > 2);
+    for l in &lines[..lines.len() - 1] {
+        assert!((l.end_x - l.x1).abs() < 0.6, "footnote line ends at {} not {}", l.end_x, l.x1);
+    }
+    assert!((x_of(lines[0], 0) - 36.0).abs() < 0.5, "note text starts at the default tab stop: {}", x_of(lines[0], 0));
+}
+
+#[test]
+fn list_first_line_wraps_at_the_column_edge_after_its_label() {
+    use designcraft_doc::{ListType, TabStop};
+    // A hanging indent (left 18, first line −18): the label sits at the column start, a tab
+    // after it reaches the left indent (an implicit stop when no explicit stop comes first), and
+    // the first line wraps at the same right edge as the others.
+    let right_edge = |l: &Line, source: &str| {
+        let space = |g: &&PlacedGlyph| g.len > 0 && source.get(g.byte..).and_then(|s| s.chars().next()).is_some_and(char::is_whitespace);
+        l.glyphs.iter().filter(|g| g.visible && !space(g)).map(|g| g.x + g.adv).fold(0.0, f64::max)
+    };
+    let text_start = |l: &Line| l.glyphs.iter().find(|g| g.len > 0 && g.visible).map_or(f64::NAN, |g| g.x);
+    let stop = |position: f64| TabStop { position, align: TabAlign::Left, leader: String::new(), align_on: String::new() };
+    let text = format!("{LOREM}\n{LOREM}");
+    // (list, separator, explicit tab stops, where line 0's text starts past the column start:
+    // None = right after the label, wherever that is).
+    let cases = [
+        (ListType::Bullets, "\t", None, Some(18.0)),
+        (ListType::Numbers, "\t", None, Some(18.0)),
+        (ListType::Numbers, "\t", Some(vec![stop(12.0)]), Some(12.0)),
+        (ListType::Numbers, "\t", Some(vec![stop(30.0)]), Some(18.0)),
+        (ListType::Bullets, " ", None, None),
+        (ListType::Numbers, "\u{2003}", None, None),
+    ];
+    for (list, sep, tabs, first_at) in cases {
+        let para = ParaAttrs {
+            list_type: Some(list),
+            list_separator: Some(sep.into()),
+            left_indent: Some(18.0),
+            first_line_indent: Some(-18.0),
+            tabs: tabs.clone(),
+            ..Default::default()
+        };
+        let (d, sid, _) = doc_with(&text, Rect::new(36.0, 36.0, 300.0, 400.0), para);
+        let cs = compose_story(&d, sid, &ComposeOptions::default());
+        let col = cs.frames[0].columns[0];
+        let lines = &cs.frames[0].lines;
+        let what = format!("{list:?} {sep:?} {tabs:?}");
+        assert!(lines.len() >= 6, "{what}: {} lines", lines.len());
+        for (i, l) in lines.iter().enumerate() {
+            let right = right_edge(l, &text);
+            assert!(right <= col.x1 + 0.01, "{what}: line {i} ends at {right}, past the column's {}", col.x1);
+            let start = text_start(l) - col.x0;
+            if !l.first_in_para {
+                assert!((start - 18.0).abs() < 0.01, "{what}: line {i} text starts at {start}, not the left indent");
+            } else if let Some(at) = first_at {
+                assert!((start - at).abs() < 0.01, "{what}: line {i} text starts at {start}, not {at}");
+            } else {
+                assert!(start > 0.0, "{what}: line {i} text starts at {start}");
+            }
+            if l.first_in_para {
+                assert!(l.glyphs.first().is_some_and(|g| g.len == 0 && (g.x - col.x0).abs() < 0.01), "{what}: the label leads line {i}");
+            }
+        }
     }
 }
 
