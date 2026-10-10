@@ -158,6 +158,8 @@ struct Item {
     start_elastic: [f64; 2],
     /// Auto hyphenation points: index of the break opportunity before the word (or `NONE`).
     zone_from: usize,
+    /// An emergency break inside a word wider than the measure.
+    emergency: bool,
 }
 
 const NONE: usize = usize::MAX;
@@ -176,6 +178,7 @@ impl Item {
             edge_elastic: [0.0; 2],
             start_elastic: [0.0; 2],
             zone_from: NONE,
+            emergency: false,
         }
     }
     fn glue(w: f64, st: f64, sh: f64) -> Item {
@@ -191,6 +194,7 @@ impl Item {
             edge_elastic: [0.0; 2],
             start_elastic: [0.0; 2],
             zone_from: NONE,
+            emergency: false,
         }
     }
     fn penalty(w: f64, p: f64, flagged: bool) -> Item {
@@ -206,11 +210,21 @@ impl Item {
             edge_elastic: [0.0; 2],
             start_elastic: [0.0; 2],
             zone_from: NONE,
+            emergency: false,
         }
     }
 }
 
 const INF: f64 = 10000.0;
+
+/// A line whose natural width exceeds its measure by no more than this (points) still fits: frame
+/// widths and glyph advances are rounded, so a line that exactly fills the measure can come out a
+/// hair too wide.
+const FIT_EPS: f64 = 0.01;
+
+/// Penalty for an emergency break inside a word wider than the measure: high, so a paragraph
+/// takes no more of them than it must, but below [`INF`] so they are legal.
+const EMERGENCY_PENALTY: f64 = 5000.0;
 
 /// Does the glyph force a line end after it?
 /// A line may break between `a` and `b` in CJK text (any break next to an ideograph, kana or
@@ -320,7 +334,8 @@ fn push_inword(it: &mut Vec<Item>, ig: &mut Vec<usize>, p: Item, g: usize, sp: &
 }
 
 /// Build Knuth items. `item_glyph[k]` = glyph index of item k (penalties: the glyph *before* which the break happens).
-fn items(glyphs: &[Glyph], hyph_after: &[bool], sp: &Spacing) -> (Vec<Item>, Vec<usize>) {
+/// `emergency_after[i]` allows an emergency break after glyph `i` (see [`overlong_words`]).
+fn items(glyphs: &[Glyph], hyph_after: &[bool], emergency_after: &[bool], sp: &Spacing) -> (Vec<Item>, Vec<usize>) {
     let mut it: Vec<Item> = Vec::with_capacity(glyphs.len() * 2 + 2);
     let mut ig = Vec::with_capacity(glyphs.len() * 2 + 2);
     let n = glyphs.len();
@@ -408,6 +423,10 @@ fn items(glyphs: &[Glyph], hyph_after: &[bool], sp: &Spacing) -> (Vec<Item>, Vec
                     p.hang = hw * hang('-').1;
                 }
                 push_inword(&mut it, &mut ig, p, i + 1, sp);
+            } else if emergency_after.get(i) == Some(&true) {
+                let mut p = Item::penalty(0.0, EMERGENCY_PENALTY, false);
+                p.emergency = true;
+                push_inword(&mut it, &mut ig, p, i + 1, sp);
             }
         }
     }
@@ -443,13 +462,57 @@ pub fn knuth_plass(glyphs: &[Glyph], hyph_after: &[bool], sp: &Spacing, width: &
     if glyphs.is_empty() {
         return vec![Break { start: 0, end: 0, next: 0, hyphen: false, forced: true }];
     }
-    let (items, ig) = items(glyphs, hyph_after, sp);
+    let (mut items, mut ig) = items(glyphs, hyph_after, &[], sp);
+    let narrowest = (0..=glyphs.len().min(64)).map(width).fold(f64::INFINITY, f64::min).max(1.0);
+    if let Some(emergency_after) = overlong_words(&items, &ig, glyphs, narrowest) {
+        (items, ig) = self::items(glyphs, hyph_after, &emergency_after, sp);
+    }
     for tolerance in [2.5, 12.0, f64::INFINITY] {
         if let Some(b) = kp_pass(&items, &ig, glyphs, sp, width, tolerance, tolerance.is_infinite()) {
             return b;
         }
     }
     greedy(glyphs, hyph_after, sp, width, &|_, _, _| 0.0)
+}
+
+/// Glyphs after which a word wider than `measure` may take an emergency break, or `None` when every
+/// word fits. A word is a run of boxes between two break opportunities (so a word with hyphenation
+/// points only gets emergency breaks where a part between them is still too wide), measured at
+/// its narrowest (fully shrunk) width. Emergency breaks respect no-break text and kinsoku.
+fn overlong_words(items: &[Item], ig: &[usize], glyphs: &[Glyph], measure: f64) -> Option<Vec<bool>> {
+    let mut out: Option<Vec<bool>> = None;
+    let mut seg: Option<(usize, usize)> = None;
+    let mut w = 0.0;
+    for (k, it) in items.iter().enumerate() {
+        match it.kind {
+            Kind::Box => {
+                let g = ig.get(k).copied().unwrap_or(0);
+                seg = Some(seg.map_or((g, g), |(a, _)| (a, g)));
+                w += it.w - it.sh.iter().sum::<f64>();
+            }
+            Kind::Penalty if it.p >= INF => {}
+            Kind::Glue | Kind::Penalty => {
+                if let Some((a, b)) = seg.take()
+                    && w > measure + FIT_EPS
+                {
+                    let marks = out.get_or_insert_with(|| vec![false; glyphs.len()]);
+                    for i in a..b {
+                        let (Some(g), Some(next)) = (glyphs.get(i), glyphs.get(i + 1)) else { continue };
+                        let ok = !g.no_break
+                            && g.break_after != Some(false)
+                            && next.ch != SOFT_HYPHEN
+                            && !is_forced(next.ch)
+                            && kinsoku_allows(g.ch, next.ch);
+                        if let Some(m) = marks.get_mut(i) {
+                            *m = ok;
+                        }
+                    }
+                }
+                w = 0.0;
+            }
+        }
+    }
+    out
 }
 
 /// Upper bound on the hyphen-count states tracked per breakpoint.
@@ -527,7 +590,15 @@ fn kp_pass(
             }
             y[0] = (y[0] + it.edge_elastic[0]).max(0.0);
             z[0] = (z[0] + it.edge_elastic[1]).max(0.0);
-            let (r, feasible) = tiered_ratio(target - l, y, z);
+            // A line that overruns its measure by a rounding error fits exactly.
+            let d = target - l;
+            let d = if d < 0.0 && d > -FIT_EPS { 0.0 } else { d };
+            let (mut r, feasible) = tiered_ratio(d, y, z);
+            if it.emergency && sp.justify && r > 0.0 {
+                // A piece of an overlong word usually has no elastic material: rate it by the
+                // space it leaves, so the fullest piece wins (the break at the last glyph that fits).
+                r = d / target;
+            }
             if feasible && !forced {
                 keep.push(a);
             } else {
@@ -749,7 +820,7 @@ pub fn greedy(
                     shrink += sp.space_elastic(g).1;
                 }
                 last_ok = Some((i, false));
-                if x <= w {
+                if x <= w + FIT_EPS {
                     last_natural = last_ok;
                 }
                 last_space = Some((i, x));
@@ -762,13 +833,13 @@ pub fn greedy(
             let end_shrink = crate::mojikumi::end_elastic(g, sp.justify, sp.kinsoku_priority != 3)[1];
             let available = shrink + sp.box_elastic(g).1.iter().sum::<f64>() + end_shrink;
             if sp.kinsoku_priority == 2
-                && x + adv - hang_r > w
+                && x + adv - hang_r > w + FIT_EPS
                 && let Some((end, hyphen)) = last_natural
             {
                 brk = Some((end, hyphen, false));
                 break;
             }
-            if x + adv - hang_r > w + available.max(0.0)
+            if x + adv - hang_r > w + available.max(0.0) + FIT_EPS
                 && i > start
                 && (last_ok.is_some() || glyphs.get(i - 1).is_none_or(|p| p.break_after != Some(false) && !p.no_break))
             {
@@ -790,12 +861,12 @@ pub fn greedy(
                     || g.break_after.unwrap_or_else(|| cjk_break(g, &glyphs[i + 1], sp))
                 {
                     last_ok = Some((i + 1, false));
-                    if x - hang_r <= w {
+                    if x - hang_r <= w + FIT_EPS {
                         last_natural = last_ok;
                     }
                 } else if hyph_after[i] && may_hyphenate(hyphens) {
                     let hy = hyphen_width(g, &mut hy_cache) * if sp.optical { 1.0 - hang('-').1 } else { 1.0 };
-                    if x + hy <= w + shrink {
+                    if x + hy <= w + shrink + FIT_EPS {
                         last_ok = Some((i + 1, true));
                     }
                 }
