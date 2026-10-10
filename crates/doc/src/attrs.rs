@@ -563,6 +563,9 @@ pub enum TabAlign {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TabStop {
+    /// A file that held a non-finite position (written as `null`) reads it back as NaN, which
+    /// [`TabStop::sanitized_list`] drops.
+    #[serde(deserialize_with = "position_or_nan")]
     pub position: f64,
     #[serde(default)]
     pub align: TabAlign,
@@ -609,24 +612,91 @@ impl TabStop {
     /// A tab-stop list as the Tabs commands keep it: at most [`MAX_TAB_STOPS`] stops, positions
     /// clamped, leaders and align-on characters checked, a char stop aligning on `.` unless it
     /// names a character, sorted by position, and one stop per position (the later one wins).
-    pub fn checked_list(tabs: Vec<TabStop>) -> Result<Vec<TabStop>, String> {
+    pub fn checked_list(mut tabs: Vec<TabStop>) -> Result<Vec<TabStop>, String> {
         if tabs.len() > MAX_TAB_STOPS {
             return Err(format!("a paragraph holds at most {MAX_TAB_STOPS} tab stops"));
         }
-        let mut out: Vec<TabStop> = Vec::with_capacity(tabs.len());
-        for mut t in tabs {
+        for t in &mut tabs {
             t.position = Self::clamp_position(t.position)?;
             Self::check_leader(&t.leader)?;
             Self::check_align_on(&t.align_on)?;
+        }
+        Ok(Self::normalized(tabs))
+    }
+
+    /// A tab-stop list read from a file, repaired to what [`checked_list`](Self::checked_list)
+    /// accepts: stops with a non-finite position dropped, positions clamped, control characters
+    /// removed from leaders and align-on characters and both cut to their limits, sorted, one stop
+    /// per position (the later one wins), and the first [`MAX_TAB_STOPS`] by position kept.
+    pub fn sanitized_list(tabs: Vec<TabStop>) -> Vec<TabStop> {
+        let tabs = tabs
+            .into_iter()
+            .filter_map(|mut t| {
+                t.position = Self::clamp_position(t.position).ok()?;
+                if Self::check_leader(&t.leader).is_err() {
+                    t.leader = t.leader.chars().filter(|c| !c.is_control()).take(MAX_TAB_LEADER).collect();
+                }
+                if Self::check_align_on(&t.align_on).is_err() {
+                    t.align_on = t.align_on.chars().filter(|c| !c.is_control()).take(1).collect();
+                }
+                Some(t)
+            })
+            .collect();
+        let mut out = Self::normalized(tabs);
+        out.truncate(MAX_TAB_STOPS);
+        out
+    }
+
+    /// Finite, clamped stops sorted by position, one per position: of stops closer than
+    /// [`SAME_TAB_POSITION`], the later one in `tabs` wins. A char stop with no character aligns
+    /// on `.`.
+    fn normalized(tabs: Vec<TabStop>) -> Vec<TabStop> {
+        let mut stops: Vec<(usize, TabStop)> = tabs.into_iter().enumerate().collect();
+        stops.sort_by(|a, b| a.1.position.total_cmp(&b.1.position));
+        let mut out: Vec<(usize, TabStop)> = Vec::with_capacity(stops.len());
+        for (i, mut t) in stops {
             if t.align == TabAlign::Char && t.align_on.is_empty() {
                 t.align_on = ".".into();
             }
-            out.retain(|o| (o.position - t.position).abs() >= SAME_TAB_POSITION);
-            out.push(t);
+            match out.last_mut() {
+                Some(last) if t.position - last.1.position < SAME_TAB_POSITION => {
+                    if i > last.0 {
+                        *last = (i, t);
+                    }
+                }
+                _ => out.push((i, t)),
+            }
         }
-        out.sort_by(|a, b| a.position.total_cmp(&b.position));
-        Ok(out)
+        out.into_iter().map(|(_, t)| t).collect()
     }
+}
+
+/// A stop's position; `null` (how JSON writes a non-finite number) reads as NaN.
+fn position_or_nan<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
+    Ok(Option::<f64>::deserialize(d)?.unwrap_or(f64::NAN))
+}
+
+/// A paragraph's tab-stop list in either attribute form, as read from a file.
+trait FileTabs: Sized {
+    fn sanitized(self) -> Self;
+}
+
+impl FileTabs for Vec<TabStop> {
+    fn sanitized(self) -> Self {
+        TabStop::sanitized_list(self)
+    }
+}
+
+impl FileTabs for Option<Vec<TabStop>> {
+    fn sanitized(self) -> Self {
+        self.map(TabStop::sanitized_list)
+    }
+}
+
+/// Deserializes a `tabs` field through [`TabStop::sanitized_list`]: a saved document's tab lists
+/// get the limits the Tabs commands keep.
+fn sanitized_tabs<'de, D: serde::Deserializer<'de>, T: Deserialize<'de> + FileTabs>(d: D) -> Result<T, D::Error> {
+    T::deserialize(d).map(FileTabs::sanitized)
 }
 
 /// A paragraph rule (Rule Above / Rule Below).
@@ -1110,6 +1180,7 @@ attr_set! {
         split_outside_gutter: f64 = 0.0,
         rule_above: Rule = Rule::default(),
         rule_below: Rule = Rule::default(),
+        #[serde(deserialize_with = "sanitized_tabs")]
         tabs: Vec<TabStop> = Vec::new(),
         list_type: ListType = ListType::None,
         /// Named list (Define Lists) the numbers belong to ("" = the story's own list).
@@ -1477,6 +1548,36 @@ mod tests {
         assert!(TabStop::checked_list((0..=MAX_TAB_STOPS).map(|i| stop(i as f64)).collect()).is_err());
         let list = TabStop::checked_list(vec![stop(50.0), TabStop { leader: ".".into(), ..stop(10.0) }, stop(50.001)]).unwrap();
         assert_eq!(list.iter().map(|t| t.position).collect::<Vec<_>>(), [10.0, 50.001], "sorted, one stop per position");
+    }
+
+    /// A file's tab list is repaired, never refused; a list the commands accept comes through
+    /// unchanged.
+    #[test]
+    fn tab_lists_from_files_are_sanitized() {
+        let stop = |position: f64| TabStop { position, align: TabAlign::Left, leader: String::new(), align_on: String::new() };
+        let mut tabs: Vec<TabStop> = (0..500).rev().map(|i| stop(i as f64 * 10.0)).collect();
+        tabs.push(stop(f64::NAN));
+        tabs.push(stop(f64::NEG_INFINITY));
+        tabs.push(TabStop { leader: "\u{7}0123456789".into(), align: TabAlign::Char, align_on: "\n,;".into(), ..stop(-3.0) });
+        let list = TabStop::sanitized_list(tabs);
+        assert_eq!(list.len(), MAX_TAB_STOPS);
+        assert!(list.windows(2).all(|w| w[1].position - w[0].position >= SAME_TAB_POSITION), "sorted, one stop per position");
+        let first = &list[0];
+        assert_eq!((first.position, first.leader.as_str(), first.align_on.as_str()), (0.0, "01234567", ","), "the later stop at 0 wins");
+        assert_eq!(list.last().map(|t| t.position), Some(990.0), "the first stops by position are kept");
+
+        let ok = TabStop::checked_list(vec![stop(72.0), TabStop { align: TabAlign::Char, ..stop(10.0) }]).unwrap();
+        assert_eq!(TabStop::sanitized_list(ok.clone()), ok);
+
+        // `null` is how JSON writes a non-finite position; that stop is dropped, the others kept.
+        let json = r#"{"tabs":[{"position":null},{"position":20000,"leader":"0123456789"},{"position":5}]}"#;
+        let a: ParaAttrs = serde_json::from_str(json).unwrap();
+        let tabs = a.tabs.unwrap();
+        assert_eq!(tabs.iter().map(|t| t.position).collect::<Vec<_>>(), [5.0, MAX_TAB_POSITION]);
+        assert_eq!(tabs[1].leader, "01234567");
+        let p: ParaProps = serde_json::from_str(json).unwrap();
+        assert_eq!(p.tabs, tabs);
+        assert!(serde_json::from_str::<TabStop>("{}").is_err(), "a stop names its position");
     }
 
     #[test]
