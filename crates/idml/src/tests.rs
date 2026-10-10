@@ -1967,3 +1967,46 @@ fn split_columns_import_and_round_trip() {
     let b = para(&import_idml(&export_idml(&doc)).unwrap());
     assert_eq!((b.span_columns, b.split_inside_gutter, b.split_outside_gutter), (a.span_columns, a.split_inside_gutter, a.split_outside_gutter));
 }
+
+#[test]
+fn list_numbering_format_expression_and_bullet_import_and_round_trip() {
+    let styles = STYLES.replace(
+        "    </ParagraphStyleGroup>",
+        r#"      <ParagraphStyle Self="ParagraphStyle/Text%3aHead" Name="Text:Head" BulletsAndNumberingListType="NumberedList" NumberingExpression="^#.^t">
+        <Properties><NumberingFormat type="string">A, B, C, D...</NumberingFormat></Properties>
+      </ParagraphStyle>
+      <ParagraphStyle Self="ParagraphStyle/Text%3aTable" Name="Text:Table" BulletsAndNumberingListType="NumberedList" NumberingExpression="Tabel ^#^t">
+        <Properties><NumberingFormat type="string">001, 002, 003...</NumberingFormat></Properties>
+      </ParagraphStyle>
+      <ParagraphStyle Self="ParagraphStyle/Text%3aKanji" Name="Text:Kanji" BulletsAndNumberingListType="NumberedList">
+        <Properties><NumberingFormat type="string">一, 二, 三, 四...</NumberingFormat></Properties>
+      </ParagraphStyle>
+      <ParagraphStyle Self="ParagraphStyle/Text%3aPoint" Name="Text:Point" BulletsAndNumberingListType="BulletList" BulletsTextAfter="^&gt;">
+        <Properties><BulletChar BulletCharacterType="UnicodeOnly" BulletCharacterValue="9632"/></Properties>
+      </ParagraphStyle>
+    </ParagraphStyleGroup>"#,
+    );
+    let bytes = zip_files(&[
+        ("designmap.xml", DESIGNMAP),
+        ("Resources/Graphic.xml", GRAPHIC),
+        ("Resources/Styles.xml", &styles),
+        ("Resources/Preferences.xml", PREFS),
+        ("MasterSpreads/MasterSpread_m1.xml", MASTER),
+        ("Spreads/Spread_sp1.xml", SPREAD),
+        ("Stories/Story_s1.xml", STORY),
+    ]);
+    let check = |d: &Document| {
+        let (head, _) = d.styles.resolve_para_style("Text/Head");
+        assert_eq!(head.number_style, designcraft_doc::NumberStyle::UpperLetters);
+        assert_eq!(head.number_label(2), "B.\t");
+        let (table, _) = d.styles.resolve_para_style("Text/Table");
+        assert_eq!(table.number_label(7), "Tabel 007\t");
+        let (kanji, _) = d.styles.resolve_para_style("Text/Kanji");
+        assert_eq!(kanji.number_style, designcraft_doc::NumberStyle::Arabic);
+        let (point, _) = d.styles.resolve_para_style("Text/Point");
+        assert_eq!(point.bullet_label(), "\u{25A0}\u{2002}");
+    };
+    let d = import_idml(&bytes).unwrap();
+    check(&d);
+    check(&import_idml(&export_idml(&d)).unwrap());
+}

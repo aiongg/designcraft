@@ -1390,6 +1390,17 @@ impl<'r> Importer<'r> {
             "NumberedList" => ListType::Numbers,
             _ => ListType::None,
         });
+        // A format with no counterpart (CJK, Arabic, Hebrew numbering) is left unset: decimal.
+        a.number_style = e.prop("NumberingFormat").and_then(|v| names::numbering_format_in(&v));
+        a.number_expression = e.prop("NumberingExpression");
+        a.list_separator = e.prop("BulletsTextAfter");
+        if let Some(b) = e.prop_el("BulletChar") {
+            // A glyph of a named font (`GlyphWithFont`) has no character to map to.
+            let unicode = matches!(b.get("BulletCharacterType"), Some("UnicodeOnly" | "UnicodeWithFont"));
+            if let Some(c) = b.get("BulletCharacterValue").and_then(|v| v.trim().parse::<u32>().ok()).and_then(char::from_u32).filter(|_| unicode) {
+                a.bullet_char = Some(c.to_string());
+            }
+        }
         a.balance_ragged = e.prop("BalanceRaggedLines").map(|v| v.trim() != "NoBalancing" && v.trim() != "false");
         a.shading_on = e.boolean("ParagraphShadingOn");
         if let Some(c) = e.prop("ParagraphShadingColor") {
