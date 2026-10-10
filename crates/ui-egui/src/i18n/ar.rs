@@ -503,6 +503,7 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Release to Objects", "تحرير إلى كائنات"),
     ("Reverse the gradient", "عكس التدرج"),
     ("Rotate 90° Counterclockwise", "تدوير 90° عكس عقارب الساعة"),
+    ("Rotate 180°", "تدوير 180°"),
     ("Rotation Angle", "زاوية الدوران"),
     ("Row Height", "ارتفاع الصف"),
     ("Run", "تشغيل"),
