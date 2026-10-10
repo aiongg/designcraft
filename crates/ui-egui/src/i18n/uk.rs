@@ -1581,9 +1581,6 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Mode:", "Режим:"),
     ("Continue from Previous Number", "Продовжити з попереднього номера"),
     ("Start At", "Почати з"),
-    ("Advanced Character Formats", "Розширені формати символів"),
-    ("OpenType Features", "Функції OpenType"),
-    ("Tint:", "Відтінок:"),
 ];
 
 /// Contexts whose Ukrainian noun differs from the shared action/text-layout label.
