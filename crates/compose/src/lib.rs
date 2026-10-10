@@ -1052,8 +1052,18 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                 let lx0 = x0 + ind_l;
                 let lx1 = x1 - ind_r;
                 let last = k + 1 == breaks.len();
+                // The break character that ends this line, if any (it is the line's last glyph).
+                let brk = if b.forced && e > s {
+                    e.checked_sub(1).and_then(|i| glyphs.get(i)).map(|g| g.ch).filter(|&c| breaker::is_forced(c))
+                } else {
+                    None
+                };
+                // A column, frame or page break ends the line as a paragraph's last line (last-line
+                // alignment); a justified line ended by a forced line break stays justified.
+                let ends_para = last || matches!(brk, Some(story::COLUMN_BREAK | story::FRAME_BREAK | story::PAGE_BREAK));
+                let forced_mid = brk == Some(story::FORCED_LINE_BREAK) && !last;
                 let (mut placed, end_x, ratio) =
-                    layout_line(&glyphs, s, e, b.hyphen, lx0, lx1, col.x0, &pp, &spacing, last, b.forced && !last, f.left_page, &bidi_info);
+                    layout_line(&glyphs, s, e, b.hyphen, lx0, lx1, col.x0, &pp, &spacing, ends_para, forced_mid, f.left_page, &bidi_info);
                 // The spaces the break trimmed off the end follow the line undrawn, so the caret
                 // and the selection reach them; alignment and justification ignore them.
                 if pp.direction != designcraft_doc::TextDirection::RightToLeft && !placed.iter().any(|g| g.rtl) {
@@ -1143,7 +1153,6 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                 line_no += 1;
                 // Column / frame / page break characters.
                 if b.forced && e < glyphs.len() + 1 {
-                    let brk = glyphs.get(g0 + b.next.saturating_sub(1)).map(|g| g.ch);
                     let jumped = match brk {
                         Some(story::COLUMN_BREAK) => {
                             next_column(&mut cur);
