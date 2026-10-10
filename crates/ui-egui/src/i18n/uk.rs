@@ -1498,6 +1498,18 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Underline On", "Підкреслення увімкнено"),
     ("Vertical Scale:", "Вертикальний масштаб:"),
     ("dropcap", "буквиця"),
+    ("Left-aligned tab", "Табуляція з вирівнюванням ліворуч"),
+    ("Centered tab", "Табуляція з вирівнюванням по центру"),
+    ("Right-aligned tab", "Табуляція з вирівнюванням праворуч"),
+    ("Tab aligned on a character", "Табуляція з вирівнюванням за символом"),
+    ("X:", "X:"),
+    ("Leader:", "Заповнювач:"),
+    ("Align On:", "Вирівнювати за:"),
+    ("Position panel above text frame", "Розмістити панель над текстовим фреймом"),
+    ("Clear All", "Очистити все"),
+    ("Delete Tab", "Видалити табуляцію"),
+    ("Repeat Tab", "Повторити табуляцію"),
+    ("Reset Indents", "Скинути відступи"),
 ];
 
 /// Contexts whose Ukrainian noun differs from the shared action/text-layout label.

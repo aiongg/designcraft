@@ -274,6 +274,9 @@ pub struct UiState {
     pub palette: Option<String>,
     #[serde(skip)]
     pub flyout: Option<usize>,
+    /// Type › Tabs: the selected stop and where the panel sits.
+    #[serde(skip)]
+    pub tabs_panel: panels::tabs::PanelState,
 }
 
 impl Default for UiState {
@@ -345,6 +348,7 @@ impl Default for UiState {
             dialog: None,
             palette: None,
             flyout: None,
+            tabs_panel: Default::default(),
         }
     }
 }
