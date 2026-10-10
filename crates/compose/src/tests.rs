@@ -2849,6 +2849,37 @@ fn cjk_center_leading_measures_em_centers_across_different_sizes() {
 }
 
 #[test]
+fn cjk_aki_below_sets_the_upper_lines_leading_below_it() {
+    let lines_with = |para: ParaAttrs| {
+        let (mut d, sid, _) = doc_with("A\nB", Rect::new(0.0, 0.0, 300.0, 200.0), para);
+        let st = d.story_mut(sid).unwrap();
+        st.format_chars(0..3, |f| f.over.leading_model = Some(designcraft_doc::cjk::LeadingModel::AkiBelow));
+        st.format_chars(0..2, |f| {
+            f.over.size = Some(24.0);
+            f.over.leading = Some(designcraft_doc::Leading::Points(40.0));
+        });
+        st.format_chars(2..3, |f| {
+            f.over.size = Some(12.0);
+            f.over.leading = Some(designcraft_doc::Leading::Points(20.0));
+        });
+        let cs = compose_story(&d, sid, &ComposeOptions::default());
+        all_lines(&cs).into_iter().cloned().collect::<Vec<_>>()
+    };
+    let lines = lines_with(japanese());
+    assert_eq!(lines.len(), 2);
+    let em_bottom = |l: &Line| {
+        let g = &l.glyphs[0];
+        let (a, b) = g.face.vertical_metrics();
+        l.baseline + b / (a + b) * g.face.units_per_em() * g.sy
+    };
+    let gap = em_bottom(&lines[1]) - em_bottom(&lines[0]);
+    assert!((gap - 40.0).abs() < 1e-6, "{gap}");
+    // The other composers advance by the lower line's leading, baseline to baseline.
+    let lines = lines_with(ParaAttrs::default());
+    assert!((lines[1].baseline - lines[0].baseline - 20.0).abs() < 1e-6);
+}
+
+#[test]
 fn cjk_em_center_alignment_moves_small_characters() {
     let line_with = |para: ParaAttrs| {
         let (mut d, sid, _) = doc_with("AB", Rect::new(0.0, 0.0, 300.0, 100.0), para);
