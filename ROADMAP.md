@@ -129,6 +129,8 @@ list) · [roadmap.md](docs/roadmap.md) (milestones, plan) · [parity-checklist.m
 
 Newest first.
 
+- **2026-10-11** · Live corners: the yellow widget on a selected rectangle frame shows corner
+  diamonds; dragging one rounds the corners, Alt-click steps the corner shape (#186).
 - **2026-10-10** · Version 0.6.0; releases add a Linux riscv64 tar.gz (cross-compiled, CLI
   smoke-tested under QEMU).
 - **2026-10-10** · Readiness per audience: full ~47% (method aligned with the standard, was

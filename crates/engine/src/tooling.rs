@@ -138,6 +138,7 @@ impl Session {
                 Action::Dialog(id, params) => self.ui_requests.push(UiRequest::Dialog { id, params }),
                 Action::SwitchTool(id) => self.set_tool(&id),
                 Action::View(params) => self.ui_requests.push(UiRequest::View { params }),
+                Action::Handled => {}
             }
         }
         Ok(())

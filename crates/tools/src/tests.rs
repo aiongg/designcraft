@@ -705,3 +705,145 @@ fn pen_click_snaps_to_a_guide() {
     let x = p["anchors"][0]["p"][0].as_f64().unwrap();
     assert!((x - 100.0).abs() < 1e-6, "anchor x {x}");
 }
+
+/// A 200 × 150 pt rectangle frame, selected.
+fn live_corner_doc() -> (Document, ItemId) {
+    let mut d = Document::new(&NewDocument::default());
+    let id = add_rect(&mut d, Rect::new(100.0, 100.0, 300.0, 250.0));
+    (d, id)
+}
+
+fn corner_preview(a: &[Action]) -> Vec<(String, f64)> {
+    let p = match a {
+        [Action::Preview(cmd, p)] | [Action::Exec(cmd, p)] if cmd == "object.cornerOptions" => p,
+        other => panic!("{other:?}"),
+    };
+    p["corners"].as_array().unwrap().iter().map(|c| (c["shape"].as_str().unwrap().to_string(), c["size"].as_f64().unwrap())).collect()
+}
+
+fn diamonds(o: &[Overlay]) -> Vec<Point> {
+    o.iter().filter_map(|o| if let Overlay::LiveCornerDiamond(p) = o { Some(*p) } else { None }).collect()
+}
+
+#[test]
+fn live_corners_click_widget_then_drag_rounds_all_corners() {
+    let (d, id) = live_corner_doc();
+    let s = Selection { items: vec![id], ..Default::default() };
+    let (c, l) = (Cache::new(), CanvasLayout::new(&d, false));
+    let cx = ctx(&d, &s, &c, &l);
+    let at = |x, y| spread_pt(&l, x, y);
+    let mut t = create("selection");
+    // The widget sits on the right edge, a little below the top-right corner.
+    let w = at(300.0, 111.5);
+    assert!(t.overlays(&cx).iter().any(|o| matches!(o, Overlay::LiveCornerWidget(p) if near(*p, w))));
+    assert!(diamonds(&t.overlays(&cx)).is_empty());
+    assert_eq!(t.pointer(&cx, &PointerEvent::new(PointerKind::Down, w.x, w.y)), vec![Action::Handled]);
+    assert!(t.pointer(&cx, &PointerEvent::new(PointerKind::Up, w.x, w.y)).is_empty());
+    // Without corner sizes the diamonds sit 12 px along the top and bottom edges.
+    let want = [at(112.0, 100.0), at(288.0, 100.0), at(288.0, 250.0), at(112.0, 250.0)];
+    let got = diamonds(&t.overlays(&cx));
+    assert!(got.len() == 4 && got.iter().zip(want).all(|(g, w)| near(*g, w)), "{got:?}");
+    assert!(!t.overlays(&cx).iter().any(|o| matches!(o, Overlay::LiveCornerWidget(_))));
+    // Drag the top-left diamond 20 pt toward the centre.
+    let a = t.pointer(&cx, &PointerEvent::new(PointerKind::Down, want[0].x, want[0].y));
+    assert_eq!(a, vec![Action::Begin("Corner Options".into())]);
+    let a = t.pointer(&cx, &PointerEvent::new(PointerKind::Drag, want[0].x + 20.0, want[0].y + 3.0));
+    assert_eq!(corner_preview(&a), vec![("rounded".to_string(), 20.0); 4]);
+    // The size stops at half the shorter side.
+    let a = t.pointer(&cx, &PointerEvent::new(PointerKind::Drag, want[0].x + 500.0, want[0].y));
+    assert_eq!(corner_preview(&a), vec![("rounded".to_string(), 75.0); 4]);
+    assert_eq!(t.pointer(&cx, &PointerEvent::new(PointerKind::Up, want[0].x + 500.0, want[0].y)), vec![Action::Commit]);
+}
+
+#[test]
+fn live_corners_shift_drag_and_alt_click_change_one_corner() {
+    let (mut d, id) = live_corner_doc();
+    d.item_mut(id).unwrap().corners = designcraft_geom::corners::CornerOptions::uniform(designcraft_geom::corners::CornerShape::Rounded, 30.0);
+    let s = Selection { items: vec![id], ..Default::default() };
+    let (c, l) = (Cache::new(), CanvasLayout::new(&d, false));
+    let cx = ctx(&d, &s, &c, &l);
+    let at = |x, y| spread_pt(&l, x, y);
+    let mut t = create("selection");
+    let w = at(300.0, 111.5);
+    t.pointer(&cx, &PointerEvent::new(PointerKind::Down, w.x, w.y));
+    t.pointer(&cx, &PointerEvent::new(PointerKind::Up, w.x, w.y));
+    // With 30 pt corners the diamonds sit 30 pt along the edges.
+    let tr = at(270.0, 100.0);
+    assert!(diamonds(&t.overlays(&cx)).iter().any(|p| near(*p, tr)));
+    let shift = Mods { shift: true, ..Default::default() };
+    t.pointer(&cx, &PointerEvent::new(PointerKind::Down, tr.x, tr.y).with_mods(shift));
+    let a = t.pointer(&cx, &PointerEvent::new(PointerKind::Drag, tr.x - 10.0, tr.y).with_mods(shift));
+    let r = |n: f64| ("rounded".to_string(), n);
+    assert_eq!(corner_preview(&a), vec![r(30.0), r(40.0), r(30.0), r(30.0)]);
+    t.pointer(&cx, &PointerEvent::new(PointerKind::Up, tr.x - 10.0, tr.y));
+    // Alt-click steps the bottom-right corner's shape; Shift+Alt steps every corner.
+    let br = at(270.0, 250.0);
+    let alt = Mods { alt: true, ..Default::default() };
+    let a = t.pointer(&cx, &PointerEvent::new(PointerKind::Down, br.x, br.y).with_mods(alt));
+    assert_eq!(corner_preview(&a), vec![r(30.0), r(30.0), ("inverseRounded".to_string(), 30.0), r(30.0)]);
+    assert!(t.pointer(&cx, &PointerEvent::new(PointerKind::Drag, br.x - 30.0, br.y).with_mods(alt)).is_empty());
+    assert!(t.pointer(&cx, &PointerEvent::new(PointerKind::Up, br.x - 30.0, br.y)).is_empty());
+    let a = t.pointer(&cx, &PointerEvent::new(PointerKind::Down, br.x, br.y).with_mods(Mods { alt: true, shift: true, ..Default::default() }));
+    assert_eq!(corner_preview(&a), vec![("inverseRounded".to_string(), 30.0); 4]);
+}
+
+#[test]
+fn live_corners_end_on_escape_empty_click_and_other_selection() {
+    let (mut d, id) = live_corner_doc();
+    let other = add_rect(&mut d, Rect::new(400.0, 100.0, 500.0, 200.0));
+    let s = Selection { items: vec![id], ..Default::default() };
+    let (c, l) = (Cache::new(), CanvasLayout::new(&d, false));
+    let cx = ctx(&d, &s, &c, &l);
+    let w = spread_pt(&l, 300.0, 111.5);
+    let mut t = create("selection");
+    let enter = |t: &mut Box<dyn Tool>| {
+        t.pointer(&cx, &PointerEvent::new(PointerKind::Down, w.x, w.y));
+        t.pointer(&cx, &PointerEvent::new(PointerKind::Up, w.x, w.y));
+        assert_eq!(diamonds(&t.overlays(&cx)).len(), 4);
+    };
+    // Escape leaves corner editing and keeps the selection; the next Escape deselects.
+    enter(&mut t);
+    assert_eq!(t.key(&cx, ToolKey::Escape, Mods::default()), vec![Action::Handled]);
+    assert!(diamonds(&t.overlays(&cx)).is_empty());
+    assert_eq!(t.key(&cx, ToolKey::Escape, Mods::default()), vec![Action::Exec("selection.set".into(), serde_json::json!({"ids": []}))]);
+    // A click on empty canvas.
+    enter(&mut t);
+    let e = spread_pt(&l, 350.0, 400.0);
+    t.pointer(&cx, &PointerEvent::new(PointerKind::Down, e.x, e.y));
+    t.pointer(&cx, &PointerEvent::new(PointerKind::Up, e.x, e.y));
+    assert!(diamonds(&t.overlays(&cx)).is_empty());
+    // Another selection.
+    enter(&mut t);
+    let s2 = Selection { items: vec![other], ..Default::default() };
+    let cx2 = ctx(&d, &s2, &c, &l);
+    assert!(diamonds(&t.overlays(&cx2)).is_empty());
+    t.pointer(&cx2, &PointerEvent::new(PointerKind::Move, 0.0, 0.0));
+    assert!(diamonds(&t.overlays(&cx)).is_empty());
+    // A frame too small on screen has no widget.
+    let mut far = ctx(&d, &s, &c, &l);
+    far.zoom = 0.1;
+    assert!(!t.overlays(&far).iter().any(|o| matches!(o, Overlay::LiveCornerWidget(_))));
+}
+
+#[test]
+fn live_corner_diamonds_follow_a_rotated_frame() {
+    let mut d = Document::new(&NewDocument::default());
+    let id = add_rotated(&mut d, Rect::new(100.0, 100.0, 300.0, 250.0), 30.0);
+    let s = Selection { items: vec![id], ..Default::default() };
+    let (c, l) = (Cache::new(), CanvasLayout::new(&d, false));
+    let cx = ctx(&d, &s, &c, &l);
+    let m = l.xf(SpreadRef::Doc(0)) * d.item(id).unwrap().xf;
+    let mut t = create("selection");
+    // The widget: 11.5 pt from the top-right corner along the turned right edge.
+    let w = m * Point::new(300.0, 111.5);
+    t.pointer(&cx, &PointerEvent::new(PointerKind::Down, w.x, w.y));
+    t.pointer(&cx, &PointerEvent::new(PointerKind::Up, w.x, w.y));
+    let tl = m * Point::new(112.0, 100.0);
+    assert!(diamonds(&t.overlays(&cx)).iter().any(|p| near(*p, tl)), "{:?}", t.overlays(&cx));
+    // Dragging along the turned top edge sets the size.
+    t.pointer(&cx, &PointerEvent::new(PointerKind::Down, tl.x, tl.y));
+    let to = m * Point::new(137.0, 100.0);
+    let a = t.pointer(&cx, &PointerEvent::new(PointerKind::Drag, to.x, to.y));
+    let got = corner_preview(&a);
+    assert!(got.iter().all(|(shape, size)| shape == "rounded" && (size - 25.0).abs() < 1e-6), "{got:?}");
+}
