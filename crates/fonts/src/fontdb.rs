@@ -1119,7 +1119,7 @@ impl FontDb {
         // decide what is a font.
         for p in unscanned_font_files((self.font_files)(), &mut scanned) {
             for f in file_face_names(&p) {
-                found.push(CatalogEntry { family: f.family, style: f.style, path: p.clone(), group: f.group, native: f.native });
+                found.push(CatalogEntry { family: f.family, style: f.style, path: p.clone(), group: f.group, native: f.native, aliases: f.aliases });
             }
         }
         let n = found.len();
