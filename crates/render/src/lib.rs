@@ -768,7 +768,7 @@ impl Renderer {
         let hidden = HIDDEN_LAYERS.with(|h| h.borrow().clone());
         let data = if !hidden.is_empty() && is_pdf(&asset.data) { pdf_layers::layered(&asset.data, &hidden) } else { asset.data.clone() };
         // A placed PDF cropped to a box: the whole page, placed so that the box spans graphic space.
-        let [l, t, r, b] = asset.shown_box().unwrap_or([0.0, 0.0, 1.0, 1.0]);
+        let [l, t, r, b] = shown_box(asset).unwrap_or([0.0, 0.0, 1.0, 1.0]);
         let (page_w, page_h) = (g.size.0 / (r - l), g.size.1 / (b - t));
         let page = Rect::new(-l * page_w, -t * page_h, (1.0 - l) * page_w, (1.0 - t) * page_h);
         let Some(pm) = images::mip(&data, asset.page, page_w, on_screen) else { return };
@@ -1135,6 +1135,39 @@ pub fn pdf_crop_box(bytes: &[u8], page: usize, crop: designcraft_doc::PdfCrop) -
     };
     let size = ((frac[2] - frac[0]) * w, (frac[3] - frac[1]) * h);
     (frac.iter().all(|v| v.is_finite()) && size.0 > 0.0 && size.1 > 0.0).then_some((frac, size))
+}
+
+/// The part of the page a placed PDF shows ([`designcraft_doc::Asset::shown_box`]). A Bounding
+/// Box crop that import left unmeasured is measured here, once per file, page and crop: that
+/// renders the page, which only drawing or exporting the graphic needs.
+pub fn shown_box(asset: &designcraft_doc::Asset) -> Option<[f64; 4]> {
+    if !asset.content_box_pending() {
+        return asset.shown_box();
+    }
+    asset.shown(content_box(&asset.data, asset.page, asset.pdf_crop)?)
+}
+
+type ContentBoxes = HashMap<(usize, u32, designcraft_doc::PdfCrop), (std::sync::Weak<Vec<u8>>, Option<[f64; 4]>)>;
+
+/// [`pdf_crop_box`]'s box, cached by the file's allocation. The weak reference keeps that address
+/// from naming another file while the entry lives.
+fn content_box(bytes: &Arc<Vec<u8>>, page: u32, crop: designcraft_doc::PdfCrop) -> Option<[f64; 4]> {
+    static CACHE: std::sync::Mutex<Option<ContentBoxes>> = std::sync::Mutex::new(None);
+    let key = (Arc::as_ptr(bytes) as usize, page, crop);
+    let cached = CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref().and_then(|c| c.get(&key)).and_then(|(file, b)| {
+        let same = file.upgrade().is_some_and(|f| Arc::ptr_eq(&f, bytes));
+        same.then_some(*b)
+    });
+    if let Some(b) = cached {
+        return b;
+    }
+    // Render outside the lock: other graphics keep drawing meanwhile.
+    let b = pdf_crop_box(bytes, page as usize, crop).map(|(frac, _)| frac);
+    let mut cache = CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let cache = cache.get_or_insert_with(HashMap::new);
+    cache.retain(|_, (file, _)| file.strong_count() > 0);
+    cache.insert(key, (Arc::downgrade(bytes), b));
+    b
 }
 
 /// The bounds of the non-transparent pixels of PDF page `page`, as fractions of the page.

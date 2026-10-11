@@ -401,7 +401,8 @@ fn package(s: &mut Session, p: &Value) -> Result<Value> {
     }
     if p.get("pdf").and_then(Value::as_bool).unwrap_or(false) {
         let path = package_output_path(&dir, &title, "pdf")?;
-        let bytes = designcraft_pdf::export_pdf(&packed, &s.cache, &Default::default()).map_err(|e| EngineError::Other(e.to_string()))?;
+        let bytes = designcraft_pdf::export_pdf(&super::interchange::with_pdf_boxes(&packed), &s.cache, &Default::default())
+            .map_err(|e| EngineError::Other(e.to_string()))?;
         root.write(&path, &bytes)?;
         files.push(path);
     }

@@ -57,7 +57,8 @@ fn print(s: &mut Session, p: &Value) -> Result<Value> {
         let copies = p.get("copies").and_then(Value::as_u64).unwrap_or(1).clamp(1, 999);
         let printer = str_param(p, "printer").map(str::to_string);
         let dry = p.get("dryRun").and_then(Value::as_bool).unwrap_or(false);
-        let pdf = designcraft_pdf::export_pdf(d, &s.cache, &opts).map_err(|e| EngineError::Other(e.to_string()))?;
+        let pdf =
+            designcraft_pdf::export_pdf(&super::interchange::with_pdf_boxes(d), &s.cache, &opts).map_err(|e| EngineError::Other(e.to_string()))?;
         let mut file = secure_print_file()?;
         let file_path = file.path().to_path_buf();
         let mut cmd: Vec<String> = vec!["lpr".into()];
