@@ -995,7 +995,8 @@ impl Tool for SelectionTool {
             Drag::Move { .. } | Drag::Resize { .. } | Drag::Rotate { .. } | Drag::Anchor { .. } => self.guides.clone(),
             _ => vec![],
         };
-        if !self.direct {
+        // The loaded text cursor places text: the frame's corners aren't edited meanwhile.
+        if !self.direct && self.loaded.and_then(|l| l.resolve(cx.doc)).is_none() {
             if let Some(f) = self.live_corners(cx) {
                 out.extend(f.diamonds(cx.zoom).into_iter().map(Overlay::LiveCornerDiamond));
             } else if let Some(f) = corners::live_frame(cx) {
