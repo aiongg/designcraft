@@ -1807,10 +1807,10 @@ pub fn confirm(app: &mut DesignApp) -> Result<Value, String> {
             )
         }
         "paragraphStyleOptions" => {
-            let r = confirm_paragraph_style_options(app, &d);
+            let mut d = d;
+            let r = confirm_paragraph_style_options(app, &mut d);
             if let Err(e) = &r {
                 // Keep the dialog open with the reason, on the section it concerns.
-                let mut d = d;
                 if e.contains("bad GREP") {
                     d.fields.insert("section".into(), json!("grep"));
                 }
@@ -2169,7 +2169,7 @@ fn grep_error(p: &str) -> Option<String> {
     designcraft_compose::grep::Grep::new(p, Default::default()).err().map(|e| e.to_string())
 }
 
-fn confirm_paragraph_style_options(app: &mut DesignApp, d: &Dialog) -> Result<Value, String> {
+fn confirm_paragraph_style_options(app: &mut DesignApp, d: &mut Dialog) -> Result<Value, String> {
     let name = d.s("name");
     let mut para = serde_json::Map::new();
     let mut chars = serde_json::Map::new();
@@ -2211,6 +2211,11 @@ fn confirm_paragraph_style_options(app: &mut DesignApp, d: &Dialog) -> Result<Va
         let style = if !rename.is_empty() && rename != name { rename } else { name };
         (app.run("style.paragraph.edit", params)?, style)
     };
+    // The style now exists under `style`: if a later step fails, the dialog stays open on it and
+    // a second OK edits it rather than creating another one.
+    d.fields.insert("new".into(), json!(false));
+    d.fields.insert("name".into(), json!(&style));
+    d.fields.insert("rename".into(), json!(&style));
     if d.fields.contains_key("x.tag") {
         let tag = d.s("x.tag");
         let tag = if tag == "[Automatic]" { String::new() } else { tag };
