@@ -158,8 +158,15 @@ pub fn check(s: &Session, min_ppi: f64) -> Vec<Issue> {
                         .insert("Paragraph Kashida width preset is preserved; automatic elongation uses the engine's bounded allocation".into());
                 }
             }
-            if let Err(reason) = designcraft_doc::mojikumi::Rules::resolve(&d.styles, &para.mojikumi) {
-                unsupported_typography.insert(format!("Mojikumi `{}` is not applied: {reason}", para.mojikumi));
+            match designcraft_doc::mojikumi::Rules::resolve(&d.styles, &para.mojikumi) {
+                Err(reason) => {
+                    unsupported_typography.insert(format!("Mojikumi `{}` is not applied: {reason}", para.mojikumi));
+                }
+                Ok(Some(rules)) if rules.assumed_base() => {
+                    unsupported_typography
+                        .insert(format!("Mojikumi `{}` names no base set; its rules apply on the default half-em set", para.mojikumi));
+                }
+                Ok(_) => {}
             }
             if !matches!(
                 para.kinsoku_type.as_str(),
