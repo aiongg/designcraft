@@ -752,7 +752,12 @@ mod font_menu_ui_tests {
         for (what, panel, dialog, shown) in [
             ("Glyphs", Some("glyphs"), None, designcraft_fonts::DEFAULT_FAMILY),
             ("Paragraph Style Options", None, Some(("paragraphStyleOptions", paragraph)), designcraft_fonts::DEFAULT_FAMILY),
-            ("Find/Replace Font", None, Some(("findFont", json!({}))), "—"),
+            (
+                "Find/Replace Font",
+                None,
+                Some(("findFont", json!({"toFamily": designcraft_fonts::DEFAULT_FAMILY}))),
+                designcraft_fonts::DEFAULT_FAMILY,
+            ),
         ] {
             let app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
             let mut h = test_window::open(app, vec2(1440.0, 900.0));
