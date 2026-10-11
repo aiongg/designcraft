@@ -124,4 +124,13 @@ mod tests {
         let got: Vec<&str> = o.iter().map(|(r, _)| &text[r.clone()]).collect();
         assert_eq!(got, ["и ", "он ", "в "]);
     }
+
+    #[test]
+    fn grep_style_with_lookbehind() {
+        // Polish one-letter words kept with the next one; the space before is not styled.
+        let text = "Ala i kot w domu.\n".to_string();
+        let o = overlays(&text, 0..text.len(), &[], &[GrepStyle { style: "nobreak".into(), pattern: r"(?<=\s)[aiouwzAIOUWZ]\s".into() }]);
+        let got: Vec<&str> = o.iter().map(|(r, _)| &text[r.clone()]).collect();
+        assert_eq!(got, ["i ", "w "]);
+    }
 }

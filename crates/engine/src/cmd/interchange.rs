@@ -14,7 +14,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "{path?, embedImages?: true} — writes an IDML package to `path`, or returns {base64} without a path",
             has_doc, export_idml),
         cmd!(noundo "file.openIdml", "Open IDML", [], None,
-            "{path | base64, name?} — opens an IDML package, or an InDesign document or template (.indd, .indt: converted to IDML first; its conversion warnings join `warnings`), as a new document (linked images are read next to the file or from its Links/ folder; the fonts in a `Document Fonts` folder beside it load first) → {index, documentFonts, warnings: conversion warnings, package parts missing, font files skipped}",
+            "{path | base64, name?} — opens an IDML package, or an InDesign document or template (.indd, .indt: converted to IDML first; its conversion warnings join `warnings`), as a new document (linked images are read next to the file or from its Links/ folder; the fonts in a `Document Fonts` folder beside it load first) → {index, documentFonts, warnings: conversion warnings, package parts missing, font files skipped, GREP styles whose pattern can't compile}",
             always, open_idml),
     ]
 }
@@ -216,6 +216,7 @@ pub(crate) fn open_idml(s: &mut Session, p: &Value) -> Result<Value> {
         None => (None, 0, Vec::new()),
     };
     warnings.extend(font_warnings);
+    warnings.extend(super::style::grep_style_warnings(&d));
     // Never save over the .idml or .indd with the native format: the document starts unsaved.
     let mut st = DocState::new(d, None);
     st.fonts = fonts;

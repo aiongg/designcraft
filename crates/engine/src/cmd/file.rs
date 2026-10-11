@@ -39,7 +39,7 @@ pub fn specs() -> Vec<CommandSpec> {
             ok()
         }),
         cmd!(noundo "file.open", "Open…", ["File"], Some("Cmd+O"),
-            "{path} — a DesignCraft or IDML file (recognised by its content, so the extension may be missing), or an InDesign .indd/.indt (recognised by its signature or extension, converted to IDML; its conversion warnings join `warnings`); the fonts in a `Document Fonts` folder beside it load first → {index, documentFonts: faces loaded, warnings: font files skipped and, for IDML and InDesign files, package parts missing}",
+            "{path} — a DesignCraft or IDML file (recognised by its content, so the extension may be missing), or an InDesign .indd/.indt (recognised by its signature or extension, converted to IDML; its conversion warnings join `warnings`); the fonts in a `Document Fonts` folder beside it load first → {index, documentFonts: faces loaded, warnings: font files skipped, GREP styles whose pattern can't compile and, for IDML and InDesign files, package parts missing}",
             always, file_open),
         cmd!(noundo "file.openBytes", "Open Bytes", [], None, "{name, base64} — DesignCraft JSON, an IDML package or an InDesign .indd/.indt", always, file_open_bytes),
         cmd!(noundo "file.save", "Save", ["File"], Some("Cmd+S"), "{path?} — a `path` without the .designcraft extension gets it → {path: the file written, bytes}", has_doc, file_save),
@@ -273,7 +273,8 @@ fn file_open(s: &mut Session, p: &Value) -> Result<Value> {
         let mut d = from_bytes(&bytes)?;
         super::interchange::resolve_packaged_links(&mut d, std::path::Path::new(path).parent());
         super::datamerge::resolve_sources_on_open(&mut d, Some(std::path::Path::new(path)));
-        let (fonts, faces, warnings) = load_document_fonts(&mut d, path);
+        let (fonts, faces, mut warnings) = load_document_fonts(&mut d, path);
+        warnings.extend(super::style::grep_style_warnings(&d));
         let mut st = DocState::new(d, Some(path.to_string()));
         st.fonts = fonts;
         let i = s.add_document(st);
