@@ -10,13 +10,36 @@ use crate::theme::{Tokens, semibold};
 use crate::widgets::{caption, measure, number};
 use crate::{DesignApp, icons};
 
+/// Height of the application bar (InDesign 2026), then a 7 pt lower band and a 1 pt border. The
+/// band covers the panel's 1 pt separator line, so the frame's bottom margin is 1 pt short of it.
+const APP_BAR: f32 = 36.0;
+const APP_BAR_BAND: f32 = 7.0;
+const SEPARATOR: f32 = 1.0;
+/// Height of the application bar on macOS, where it is the window's title bar (#333). AppKit draws
+/// the traffic lights itself, centred in the standard 28 pt title-bar band at the top of the
+/// window; moving them would take AppKit calls (`unsafe`, which the workspace forbids). So the bar
+/// is that band: the lights sit vertically centred in it, with the bar's controls beside them.
+pub const MAC_APP_BAR: f32 = 28.0;
+/// The traffic lights as AppKit lays them out: button diameter, centre-to-centre pitch and the
+/// first button's left edge (8–10 pt depending on the macOS version; the larger value keeps the
+/// gap after them from shrinking).
+const MAC_LIGHT: f32 = 12.0;
+const MAC_LIGHT_PITCH: f32 = 20.0;
+const MAC_LIGHTS_LEFT: f32 = 10.0;
+/// Where the bar's content starts to the right of the traffic lights: the end of the three lights
+/// plus the same gap the lights keep from the top of the window.
+pub const MAC_CONTENT_LEFT: f32 = MAC_LIGHTS_LEFT + 2.0 * MAC_LIGHT_PITCH + MAC_LIGHT + (MAC_APP_BAR - MAC_LIGHT) / 2.0;
+
 pub fn app_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
-    let left = if app.integrated_titlebar { 78 } else { 8 };
-    // 36 pt bar + 7 pt lower band (InDesign 2026), then a 1 pt border.
+    let mac = app.integrated_titlebar;
+    let left = if mac { MAC_CONTENT_LEFT as i8 } else { 8 };
+    let bar = if mac { MAC_APP_BAR } else { APP_BAR };
+    // The tallest control keeps a margin above and below it in the shorter macOS bar.
+    let home = if mac { 22.0 } else { 24.0 };
     let resp = egui::Panel::top("app_bar")
-        .exact_size(43.0)
-        .frame(egui::Frame::NONE.fill(t.app_bar).inner_margin(egui::Margin { left, right: 10, top: 0, bottom: 7 }))
+        .exact_size(bar + APP_BAR_BAND)
+        .frame(egui::Frame::NONE.fill(t.app_bar).inner_margin(egui::Margin { left, right: 10, top: 0, bottom: (APP_BAR_BAND - SEPARATOR) as i8 }))
         .show(ui, |ui| {
             let full = ui.max_rect();
             let mut menus_end = full.min.x;
@@ -28,7 +51,7 @@ pub fn app_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
             crate::widgets::overflow_scrolling(ui);
             egui::ScrollArea::horizontal().id_salt("app_bar_scroll").auto_shrink([false, false]).show(ui, |ui| {
                 ui.horizontal_centered(|ui| {
-                    if icons::button(ui, "home", 24.0, app.session.active().is_none(), crate::i18n::tr(&app.ui.language, "Home")).clicked() {
+                    if icons::button(ui, "home", home, app.session.active().is_none(), crate::i18n::tr(&app.ui.language, "Home")).clicked() {
                         app.session_home();
                     }
                     ui.add_space(6.0);
@@ -147,11 +170,11 @@ pub fn app_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
             let w = galley.size().x;
             let cx = full.center().x;
             if cx - w / 2.0 > menus_end + 12.0 && cx + w / 2.0 < tools_start - 12.0 {
-                ui.painter().galley(egui::pos2(cx - w / 2.0, full.min.y + 18.0 - galley.size().y / 2.0), galley, t.text);
+                ui.painter().galley(egui::pos2(cx - w / 2.0, full.center().y - galley.size().y / 2.0), galley, t.text);
             }
         });
     let r = resp.response.rect;
-    ui.painter().rect_filled(egui::Rect::from_min_max(egui::pos2(r.min.x, r.max.y - 7.0), r.max), 0.0, t.pasteboard);
+    ui.painter().rect_filled(egui::Rect::from_min_max(egui::pos2(r.min.x, r.max.y - APP_BAR_BAND), r.max), 0.0, t.pasteboard);
     ui.painter().line_segment([egui::pos2(r.min.x, r.max.y), egui::pos2(r.max.x, r.max.y)], Stroke::new(1.0, t.border));
 }
 
@@ -805,6 +828,29 @@ mod tests {
         h.run_steps(4);
         let item = rect(&h, "[Black]");
         assert!(item.min.y > fill.max.y && (item.min.x - chip.x).abs() < 120.0, "popup item at {item:?}, control at {chip:?}");
+    }
+
+    #[test]
+    fn the_mac_app_bar_centres_and_clears_the_traffic_lights() {
+        use super::{MAC_APP_BAR, MAC_CONTENT_LEFT, MAC_LIGHT, MAC_LIGHT_PITCH, MAC_LIGHTS_LEFT};
+        // Content keeps the same gap after the lights as the lights keep from the top.
+        let margin = (MAC_APP_BAR - MAC_LIGHT) / 2.0;
+        assert_eq!(MAC_CONTENT_LEFT - (MAC_LIGHTS_LEFT + 2.0 * MAC_LIGHT_PITCH + MAC_LIGHT), margin);
+        // `egui::Margin` is in `i8`.
+        assert!(MAC_CONTENT_LEFT <= f32::from(i8::MAX));
+        let mut app = app();
+        app.integrated_titlebar = true;
+        let h = test_window::open(app, vec2(1400.0, 900.0));
+        // The bar's controls share the lights' centre line and start after them (relative to the
+        // bar, which the test window insets).
+        let bar = test_window::panel_rect(&h, "app_bar").min.to_vec2();
+        let home = rect(&h, "Home").translate(-bar);
+        assert_eq!(home.center().y, MAC_APP_BAR / 2.0, "{home:?}");
+        assert!(home.min.y >= 2.0 && home.min.x >= MAC_CONTENT_LEFT, "{home:?}");
+        for label in ["File", "Help", "Share"] {
+            let r = rect(&h, label).translate(-bar);
+            assert!((r.center().y - MAC_APP_BAR / 2.0).abs() <= 0.5 && r.max.y <= MAC_APP_BAR, "{label} at {r:?}");
+        }
     }
 
     #[test]
