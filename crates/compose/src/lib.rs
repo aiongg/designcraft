@@ -1074,6 +1074,9 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
         // the next column.
         let spanning = matches!(pp.span_columns, SpanColumns::Span(n) if n != 1);
         span_paras[pi] = spanning;
+        // Span space applies where the paragraph spans more than one column; in a one-column frame
+        // a span changes nothing.
+        let spans_in = |fi: usize| spanning && cols.get(fi).is_some_and(|c| c.len() > 1);
         // Consecutive paragraphs with the same Split Columns settings share a split block; within
         // it, a paragraph moves on to the next sub-column.
         let split_cfg = SplitCfg::of(&pp);
@@ -1146,7 +1149,7 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                 cur.col = 0;
                 cur.last_baseline = Some(baseline);
                 cur.last_descent = descent;
-                text_above = true;
+                text_above = multi;
             } else if cur.col != 0 {
                 cur.col = 0;
                 cur.resume();
@@ -1605,7 +1608,7 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                 descent: l.descent,
                 reference: cur.last_reference,
                 aki_below: cur.aki_below,
-                pending: pp.space_after.max(pp.span_space_after),
+                pending: if spans_in(cur.fi) { pp.space_after.max(pp.span_space_after) } else { pp.space_after },
             };
             cur.band = Band { para: pi + 1, line0: ft.lines.len(), above: Some(above) };
         }
@@ -1683,7 +1686,7 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                 }
             }
         }
-        cur.pending += if spanning || ends_split { pp.space_after.max(pp.span_space_after) } else { pp.space_after };
+        cur.pending += if spans_in(cur.fi) || ends_split { pp.space_after.max(pp.span_space_after) } else { pp.space_after };
         pi += 1;
     }
     notes.finish(doc, story, frames, &cols, &mut out);

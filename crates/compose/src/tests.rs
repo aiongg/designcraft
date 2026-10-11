@@ -5492,6 +5492,29 @@ fn space_before_and_after_a_span_moves_the_span_and_the_text_below() {
     assert!((span2 - span0).abs() < 0.01 && (below2 - below0 - 18.0).abs() < 0.01, "{below0} → {below2}");
 }
 
+#[test]
+fn span_space_applies_only_where_the_paragraph_spans_columns() {
+    // Every paragraph spans with 12 pt span space after; the frame has `columns` columns.
+    let tops = |columns: u32, span: bool| {
+        let (mut d, sid, fid) = doc_with("One\nTwo\nThree", Rect::new(0.0, 0.0, 400.0, 400.0), ParaAttrs::default());
+        d.item_mut(fid).unwrap().text_frame_mut().unwrap().options.columns = columns;
+        for p in &mut d.story_mut(sid).unwrap().paras {
+            if span {
+                p.para.span_columns = Some(SpanColumns::Span(0));
+            }
+            p.para.span_space_after = Some(12.0);
+        }
+        let cs = compose_story(&d, sid, &ComposeOptions::default());
+        first_lines(&cs).iter().map(|l| l.baseline).collect::<Vec<_>>()
+    };
+    let plain = tops(1, false);
+    assert_eq!(plain.len(), 3);
+    assert_eq!(tops(1, true), plain, "a span in a one-column frame adds no space");
+    let spread = tops(3, true);
+    let gap = |v: &[f64], i: usize| v[i + 1] - v[i];
+    assert!((gap(&spread, 0) - gap(&plain, 0) - 12.0).abs() < 0.01, "{spread:?} vs {plain:?}");
+}
+
 /// The first line of each paragraph.
 fn first_lines(cs: &ComposedStory) -> Vec<&Line> {
     all_lines(cs).into_iter().filter(|l| l.first_in_para).collect()
