@@ -15,10 +15,11 @@ list (author, source, license) is in ASSETS.md.
 - Source Sans 3 and Source Serif 4 (assets/fonts/Source*) — SIL Open Font License 1.1. See assets/fonts/OFL-SourceSans3.txt, OFL-SourceSerif4.txt.
 - Inter (assets/fonts/Inter-*.ttf) — SIL Open Font License 1.1. See assets/fonts/OFL-Inter.txt.
 - JetBrains Mono (assets/fonts/JetBrainsMono-*.ttf) — SIL Open Font License 1.1. See assets/fonts/OFL-JetBrainsMono.txt.
-- English hyphenation word list (assets/hyphenation/en-us.dic) — derived from the Moby Hyphenator II
-  list by Grady Ward, public domain (Project Gutenberg eBook #3204). The hyphenation patterns
-  (assets/hyphenation/en-us.pat) are trained from it by DesignCraft and released as CC0-1.0.
-- Spanish hyphenation patterns, embedded through the hypher crate (feature "spanish"):
+- English hyphenation word list, bundled by craft-hyphen (https://github.com/storytold/craft-libs,
+  crates/hyphen/assets/en-us.dic) — derived from the Moby Hyphenator II list by Grady Ward, public
+  domain (Project Gutenberg eBook #3204). craft-hyphen's patterns (en-us.pat) are trained from it
+  and released as CC0-1.0.
+- Spanish hyphenation patterns, embedded through craft-hyphen and the hypher crate (feature "spanish"):
   hyph-es.tex 5.0 from hyph-utf8, https://github.com/hyphenation/tex-hyphen.
   Copyright (C) 1993, 1997 Javier Bezos, 2001-2019 Javier Bezos, CervanTeX. MIT License:
   Permission is hereby granted, free of charge, to any person obtaining a copy of this software

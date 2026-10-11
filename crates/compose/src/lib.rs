@@ -13,7 +13,7 @@
 mod bidi;
 pub mod breaker;
 mod cache;
-pub mod hyphen;
+pub use craft_hyphen as hyphen;
 mod notes;
 mod overlay;
 mod ruby;

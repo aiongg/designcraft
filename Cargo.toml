@@ -69,6 +69,8 @@ zip = { version = "3", default-features = false, features = ["deflate"] }
 # ui
 # Shared frontend components; keep this dependency above the engine boundary.
 craft-ui = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "5c874d51eeb3de70e735c8ce87a59a7dedd47675", features = ["serde"] }
+# storytold/craft-libs#19, not merged yet. Without "spanish", Spanish text silently stops hyphenating.
+craft-hyphen = { git = "https://github.com/aiongg/craft-libs", rev = "ddef9ae40697df0aabeb685fac26fa0fa00fa987", features = ["spanish"] }
 egui = "0.36"
 egui_extras = { version = "0.36", default-features = false, features = ["svg"] }
 eframe = { version = "0.36", default-features = false }
