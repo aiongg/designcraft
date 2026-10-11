@@ -23,6 +23,7 @@ impl Aki {
 pub struct Rules<'a> {
     chinese: bool,
     rows: &'a [MojikumiAki],
+    assumed_base: bool,
 }
 impl<'a> Rules<'a> {
     pub fn resolve(styles: &'a Styles, name: &str) -> Result<Option<Self>, String> {
@@ -31,7 +32,14 @@ impl<'a> Rules<'a> {
         }
         let key = name.strip_prefix("MojikumiTable/").unwrap_or(name);
         let table = styles.mojikumi_tables.iter().find(|t| t.name == key);
-        let base = table.map_or(key, |t| if t.based_on.is_empty() { t.name.as_str() } else { t.based_on.as_str() });
+        // A custom table whose base set is missing (IDML leaves `BasedOnMojikumiSet`
+        // out when it cannot name the base) keeps its rows on the half-em default set.
+        let assumed_base = table.is_some_and(|t| t.based_on.is_empty());
+        let base = match table {
+            Some(t) if t.based_on.is_empty() => "LineEndAllOneHalfEmEnum",
+            Some(t) => t.based_on.as_str(),
+            None => key,
+        };
         let chinese = match base.trim_start_matches("$ID/") {
             "SimpChineseDefault" | "TradChineseDefault" => true,
             "LineEndAllOneHalfEmEnum" | "kMojikumiDefaultName1" => false,
@@ -50,7 +58,12 @@ impl<'a> Rules<'a> {
                 return Err("invalid spacing range or priority".into());
             }
         }
-        Ok(Some(Self { chinese, rows }))
+        Ok(Some(Self { chinese, rows, assumed_base }))
+    }
+
+    /// True when the table names no base set and the default one was used.
+    pub fn assumed_base(&self) -> bool {
+        self.assumed_base
     }
 
     fn override_pair(&self, left: i16, right: i16) -> Option<&MojikumiAki> {

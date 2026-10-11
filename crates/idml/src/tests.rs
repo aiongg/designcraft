@@ -1437,6 +1437,36 @@ fn cjk_mojikumi_overrides_and_priority_round_trip() {
     assert!(back.stories.values().flat_map(|s| &s.paras).any(|p| p.para.mojikumi.as_deref() == Some("MojikumiTable/Spacing")));
 }
 
+/// A custom table with no `BasedOnMojikumiSet` keeps its own rows on the
+/// default half-em set, and the attribute stays absent on export.
+#[test]
+fn cjk_mojikumi_table_without_base_set_applies_its_rows() {
+    let map = DESIGNMAP.replace("</Document>", r#"<MojikumiTable Self="uMojikumi2" Name="Baseless"><Properties><OverrideMojikumiAkiList>
+    <OverrideMojikumiAkiType TargetMojikumiClass="12" SideMojikumiClass="18" SideIsAfterTarget="true" Minimum="0.25" Desired="0.75" Maximum="1" CompressionPriority="2" AkiDoesNotFloat="false"/>
+    </OverrideMojikumiAkiList></Properties></MojikumiTable></Document>"#);
+    let story = STORY.replace("<ParagraphStyleRange ", "<ParagraphStyleRange Mojikumi=\"uMojikumi2\" ");
+    let bytes = zip_files(&[
+        ("designmap.xml", &map),
+        ("Resources/Graphic.xml", GRAPHIC),
+        ("Resources/Styles.xml", STYLES),
+        ("Resources/Preferences.xml", PREFS),
+        ("MasterSpreads/MasterSpread_m1.xml", MASTER),
+        ("Spreads/Spread_sp1.xml", SPREAD),
+        ("Stories/Story_s1.xml", &story),
+    ]);
+    let d = import_idml(&bytes).unwrap();
+    let name = d.stories.values().flat_map(|s| &s.paras).find_map(|p| p.para.mojikumi.clone()).unwrap();
+    assert_eq!(name, "MojikumiTable/Baseless");
+    let rules = designcraft_doc::mojikumi::Rules::resolve(&d.styles, &name).unwrap().unwrap();
+    assert!(rules.assumed_base());
+    let pair = rules.pair(12, 18);
+    assert_eq!((pair.min, pair.desired, pair.max, pair.priority), (0.25, 0.75, 1.0, 2));
+    // Pairs the table does not list use the half-em set: no blank at line start.
+    assert_eq!(rules.pair(22, designcraft_doc::mojikumi::class('（')).desired, 0.0);
+    let back = import_idml(&export_idml(&d)).unwrap();
+    assert_eq!(back.styles.mojikumi_tables, d.styles.mojikumi_tables);
+}
+
 #[test]
 fn arabic_controls_import_independent_xml_and_round_trip() {
     let story = r#"<idPkg:Story xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging"><Story Self="s1">

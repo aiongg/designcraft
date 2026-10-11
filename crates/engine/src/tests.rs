@@ -880,3 +880,21 @@ fn direct_selection_drag_and_arrow_keys_move_placed_content() {
     assert_eq!(frame2, frame0);
     assert_eq!(g2 - g0, designcraft_geom::Vec2::new(1.0, 10.0));
 }
+
+#[test]
+fn preflight_notes_an_assumed_mojikumi_base_set_without_calling_the_table_unapplied() {
+    let mut s = session();
+    s.execute("frame.create", &json!({"rect": [36, 36, 300, 300], "content": "text", "text": "中文 A1"})).unwrap();
+    let story = s.doc().unwrap().doc.stories.keys().next().unwrap().0;
+    let d = std::sync::Arc::make_mut(&mut s.doc_mut().unwrap().doc);
+    std::sync::Arc::make_mut(&mut d.styles)
+        .mojikumi_tables
+        .push(designcraft_doc::cjk::MojikumiTable { name: "Baseless".into(), ..Default::default() });
+    s.execute("text.select", &json!({"story": story, "anchor": 0, "focus": 1})).unwrap();
+    s.execute("type.para", &json!({"attrs": {"mojikumi": "MojikumiTable/Baseless"}})).unwrap();
+    let result = s.execute("preflight.run", &json!({})).unwrap();
+    let messages: Vec<_> =
+        result["issues"].as_array().unwrap().iter().filter(|i| i["kind"] == "unsupportedTypography").filter_map(|i| i["message"].as_str()).collect();
+    assert!(messages.iter().any(|m| m.contains("Baseless") && m.contains("no base set")), "{messages:?}");
+    assert!(!messages.iter().any(|m| m.contains("not applied")), "{messages:?}");
+}
