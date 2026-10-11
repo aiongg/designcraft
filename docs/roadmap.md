@@ -57,7 +57,7 @@ set exists; depth gaps are in gaps.md.
 | # | Milestone | State |
 |---|---|---|
 | M0 | Skeleton + vertical slice | ✅ |
-| M1 | Selection, transform, layers, pages, MCP | ✅ core; handle and snapping issues (#186, #188, #337) |
+| M1 | Selection, transform, layers, pages, MCP | ✅ core; handle and snapping issues (#188, #337) |
 | M2 | Type I (Type tool, threading, Character/Paragraph, composer) | partial: Type tool and composer ✅; **manual threading missing** (alpha blocker); caret formatting (#289); no IME (#322) |
 | M3 | Styles (nested/GREP, bullets, keeps, span columns) | ✅; style editing reliability (#169) |
 | M4 | Color & effects | ✅ core; colour management depth |

@@ -8,11 +8,16 @@
 //! Content (a placed graphic, or items pasted into a frame) moves inside its frame: the Direct
 //! Selection tool selects and drags it, the Selection tool drags it by the content grabber (the
 //! circle at the frame's centre), and double-clicking a frame toggles between frame and content.
+//!
+//! A selected rectangle frame shows the live-corner widget: clicking it shows a diamond at each
+//! corner; dragging a diamond sets the corner size (Shift: that corner only), Alt-clicking one
+//! steps its shape (Shift+Alt: every corner). Escape or clicking empty canvas ends corner editing.
 
 use designcraft_doc::{Content, Item, ItemId, SpreadRef};
 use designcraft_geom::{Affine, Point, Rect, Vec2};
 use serde_json::{Value, json};
 
+use crate::corners::{self, LiveFrame};
 use crate::thread::Loaded;
 use crate::{Action, Cursor, Gesture, Mods, Overlay, PointerEvent, PointerKind, SnapRequest, Tool, ToolContext, ToolKey, rect_json, spread_json};
 
@@ -51,6 +56,13 @@ enum Drag {
     Place {
         start: Point,
         cur: Point,
+    },
+    /// Dragging live-corner diamond `corner`. `frame` is read at pointer down: during the drag
+    /// the document is the previous preview.
+    Corner {
+        frame: LiveFrame,
+        corner: usize,
+        start: Point,
     },
     Anchor {
         id: u64,
@@ -116,11 +128,37 @@ pub struct SelectionTool {
     shift_release: Option<u64>,
     /// The loaded text cursor.
     loaded: Option<Loaded>,
+    /// Frame whose live corners are being edited (diamonds shown).
+    live: Option<ItemId>,
 }
 
 impl SelectionTool {
     pub fn new(direct: bool) -> Self {
-        Self { direct, drag: Drag::None, hover_handle: None, guides: vec![], shift_release: None, loaded: None }
+        Self { direct, drag: Drag::None, hover_handle: None, guides: vec![], shift_release: None, loaded: None, live: None }
+    }
+
+    /// The frame in live-corner editing, while it is still the selection.
+    fn live_corners(&self, cx: &ToolContext) -> Option<LiveFrame> {
+        let id = self.live?;
+        corners::live_frame(cx).filter(|f| f.id == id)
+    }
+
+    /// The frame whose live-corner widget is under `p` (not while editing its corners).
+    fn widget_at(&self, cx: &ToolContext, p: Point) -> Option<LiveFrame> {
+        if self.direct || self.live_corners(cx).is_some() {
+            return None;
+        }
+        corners::live_frame(cx).filter(|f| (f.widget(cx.zoom) - p).hypot() <= cx.tol(corners::HIT_PX))
+    }
+
+    /// The frame and the index of the live-corner diamond under `p`.
+    fn diamond_at(&self, cx: &ToolContext, p: Point) -> Option<(LiveFrame, usize)> {
+        if self.direct {
+            return None;
+        }
+        let f = self.live_corners(cx)?;
+        let i = f.diamond_at(p, cx.zoom, cx.tol(corners::HIT_PX))?;
+        Some((f, i))
     }
 
     /// Ports and the loaded text cursor. None: not a threading event.
@@ -499,6 +537,12 @@ impl Tool for SelectionTool {
 
     fn pointer(&mut self, cx: &ToolContext, ev: &PointerEvent) -> Vec<Action> {
         let p = ev.pos;
+        // Selecting something else ends live-corner editing.
+        if let Some(id) = self.live
+            && cx.selection.items != [id]
+        {
+            self.live = None;
+        }
         if !self.direct
             && let Some(actions) = self.thread_pointer(cx, ev)
         {
@@ -537,6 +581,20 @@ impl Tool for SelectionTool {
                     let at = anchor_spread_point(cx, id, si, ai);
                     self.drag = Drag::Anchor { id, si, ai, handle, start: p, at };
                     return vec![Action::Begin(if handle.is_some() { "Move Direction Handle".into() } else { "Move Anchor".into() })];
+                }
+                if let Some((frame, corner)) = self.diamond_at(cx, p) {
+                    if ev.mods.alt {
+                        self.drag = Drag::None;
+                        let opts = frame.cycled(corner, ev.mods.shift);
+                        return vec![Action::Exec("object.cornerOptions".into(), corners::params(frame.id, &opts))];
+                    }
+                    self.drag = Drag::Corner { frame, corner, start: p };
+                    return vec![Action::Begin("Corner Options".into())];
+                }
+                if let Some(frame) = self.widget_at(cx, p) {
+                    self.live = Some(frame.id);
+                    self.drag = Drag::None;
+                    return vec![Action::Handled];
                 }
                 if !self.direct
                     && handle_at(cx, p).is_none()
@@ -595,6 +653,7 @@ impl Tool for SelectionTool {
                         out
                     }
                     None => {
+                        self.live = None;
                         self.drag = Drag::Pending { start: p, hit: false, content: false };
                         if ev.mods.shift { vec![] } else { vec![Action::Exec("selection.set".into(), json!({"ids": []}))] }
                     }
@@ -777,6 +836,11 @@ impl Tool for SelectionTool {
                     vec![]
                 }
                 Drag::Place { .. } => vec![],
+                Drag::Corner { frame, corner, start } => {
+                    let Some(d) = frame.drag_delta(corner, start, p) else { return vec![] };
+                    let opts = frame.dragged(corner, frame.size(corner) + d, ev.mods.shift);
+                    vec![Action::Preview("object.cornerOptions".into(), corners::params(frame.id, &opts))]
+                }
                 Drag::Rotate { center, start_angle, start_rotation } => {
                     let mut a = ((p - center).atan2() - start_angle).to_degrees();
                     self.guides.clear();
@@ -867,7 +931,7 @@ impl Tool for SelectionTool {
                 let release = self.shift_release.take();
                 let d = std::mem::replace(&mut self.drag, Drag::None);
                 match d {
-                    Drag::Move { .. } | Drag::Resize { .. } | Drag::Anchor { .. } | Drag::Rotate { .. } => vec![Action::Commit],
+                    Drag::Move { .. } | Drag::Resize { .. } | Drag::Anchor { .. } | Drag::Rotate { .. } | Drag::Corner { .. } => vec![Action::Commit],
                     Drag::Pending { .. } => match release {
                         Some(id) => vec![Action::Exec("selection.toggle".into(), json!({"id": id}))],
                         None => vec![],
@@ -902,6 +966,9 @@ impl Tool for SelectionTool {
             return vec![Action::Cancel];
         }
         let inc = cx.doc.settings.keyboard_increment * if mods.shift { 10.0 } else { 1.0 };
+        if key == ToolKey::Escape && self.live.take().is_some_and(|id| cx.selection.items == [id]) {
+            return vec![Action::Handled];
+        }
         let mv = |dx: f64, dy: f64| vec![Action::Exec("transform.move".into(), json!({"dx": dx, "dy": dy, "copy": mods.alt}))];
         if cx.selection.items.is_empty() {
             return vec![];
@@ -917,8 +984,8 @@ impl Tool for SelectionTool {
         }
     }
 
-    fn overlays(&self, _cx: &ToolContext) -> Vec<Overlay> {
-        match &self.drag {
+    fn overlays(&self, cx: &ToolContext) -> Vec<Overlay> {
+        let mut out = match &self.drag {
             Drag::Marquee { start, cur } | Drag::Place { start, cur } => vec![Overlay::Marquee(Rect::from_points(*start, *cur))],
             Drag::Move { content: true, exclude, .. } => {
                 let mut v: Vec<Overlay> = exclude.iter().map(|id| Overlay::ContentGhost(*id)).collect();
@@ -927,7 +994,15 @@ impl Tool for SelectionTool {
             }
             Drag::Move { .. } | Drag::Resize { .. } | Drag::Rotate { .. } | Drag::Anchor { .. } => self.guides.clone(),
             _ => vec![],
+        };
+        if !self.direct {
+            if let Some(f) = self.live_corners(cx) {
+                out.extend(f.diamonds(cx.zoom).into_iter().map(Overlay::LiveCornerDiamond));
+            } else if let Some(f) = corners::live_frame(cx) {
+                out.push(Overlay::LiveCornerWidget(f.widget(cx.zoom)));
+            }
         }
+        out
     }
 
     fn cursor(&self, cx: &ToolContext, p: Point, _m: Mods) -> Cursor {
@@ -947,7 +1022,11 @@ impl Tool for SelectionTool {
             Drag::Move { .. } => return Cursor::Move,
             Drag::Resize { handle, .. } => return handle_cursor(handle),
             Drag::Rotate { .. } => return Cursor::Rotate,
+            Drag::Corner { .. } => return Cursor::Arrow,
             _ => {}
+        }
+        if self.diamond_at(cx, p).is_some() || self.widget_at(cx, p).is_some() {
+            return Cursor::Arrow;
         }
         match handle_at(cx, p) {
             Some(h) => handle_cursor(h),

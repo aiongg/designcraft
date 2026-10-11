@@ -830,6 +830,13 @@ fn draw_item_edges(painter: &egui::Painter, xf: &Xf, doc: &Document, it: &Item, 
     }
 }
 
+/// Layer colour of the first selected item: live-corner marks are outlined in it.
+fn selection_color(app: &DesignApp) -> Color32 {
+    let fallback = Color32::from_rgb(79, 153, 255);
+    let Some(st) = app.session.active() else { return fallback };
+    st.selection.items.first().and_then(|id| st.doc.item(*id)).map_or(fallback, |it| layer_color(&st.doc, it))
+}
+
 fn layer_color(doc: &Document, it: &Item) -> Color32 {
     doc.layer(it.layer).map(|l| c32(l.color)).unwrap_or(Color32::from_rgb(79, 153, 255))
 }
@@ -908,15 +915,8 @@ fn draw_selection(app: &DesignApp, painter: &egui::Painter, xf: &Xf, doc: &Docum
             painter.rect_stroke(u, 0.0, Stroke::new(1.0, color), StrokeKind::Middle);
         }
         let hs = 6.5;
-        // Centre point and the live-corner widget.
+        // Centre point. The Selection tool draws the live-corner widget as an overlay.
         painter.rect_filled(Rect::from_center_size(u.center(), vec2(3.5, 3.5)), 0.0, color);
-        if sel.items.len() == 1
-            && doc.item(sel.items[0]).is_some_and(|i| matches!(i.shape, designcraft_doc::Shape::Rectangle) && i.children().is_empty())
-        {
-            let lc = Rect::from_center_size(pos2(u.max.x, u.min.y + 11.5), vec2(6.0, 6.0));
-            painter.rect_filled(lc, 0.0, Color32::from_rgb(0xff, 0xe5, 0x00));
-            painter.rect_stroke(lc, 0.0, Stroke::new(1.0, color), StrokeKind::Inside);
-        }
         for h in designcraft_tools::select::handles(DRect::new(u.min.x as f64, u.min.y as f64, u.max.x as f64, u.max.y as f64)) {
             let r = Rect::from_center_size(pos2(h.x as f32, h.y as f32), vec2(hs, hs));
             painter.rect_filled(r, 0.0, Color32::WHITE);
@@ -1233,6 +1233,7 @@ fn draw_tool_overlays(app: &mut DesignApp, painter: &egui::Painter, xf: &Xf) {
     let ov = app.session.overlays(app.view_info());
     let doc = app.session.active().map(|st| st.doc.clone());
     let layout = app.session.layout();
+    let sel_color = selection_color(app);
     for o in ov {
         match o {
             Overlay::Marquee(r) => {
@@ -1279,6 +1280,17 @@ fn draw_tool_overlays(app: &mut DesignApp, painter: &egui::Painter, xf: &Xf) {
                 if let Some(doc) = &doc {
                     draw_content_ghost(painter, xf, doc, &layout, id);
                 }
+            }
+            Overlay::LiveCornerWidget(p) => {
+                let r = Rect::from_center_size(xf.to_screen(p), vec2(6.0, 6.0));
+                painter.rect_filled(r, 0.0, tok.live_corner);
+                painter.rect_stroke(r, 0.0, Stroke::new(1.0, sel_color), StrokeKind::Inside);
+            }
+            Overlay::LiveCornerDiamond(p) => {
+                let c = xf.to_screen(p);
+                let h = 4.5;
+                let pts = vec![c + vec2(0.0, -h), c + vec2(h, 0.0), c + vec2(0.0, h), c + vec2(-h, 0.0)];
+                painter.add(egui::Shape::convex_polygon(pts, tok.live_corner, Stroke::new(1.0, sel_color)));
             }
         }
     }
@@ -2301,6 +2313,56 @@ mod tests {
             right_click(&mut h, p);
             assert!(h.query_by_label("   Points").is_none());
         }
+    }
+
+    /// The live-corner widget draws on a selected rectangle frame; clicking it draws the diamonds.
+    #[test]
+    fn live_corner_widget_and_diamonds_draw() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({})).unwrap();
+        app.run("frame.create", json!({"rect": [100, 100, 300, 250], "content": "graphic"})).unwrap();
+        let id = app.session.doc().unwrap().doc.spreads[0].items[0].id;
+        app.run("selection.set", json!({"ids": [id.0]})).unwrap();
+        let mut h = Harness::builder().with_size(vec2(1440.0, 900.0)).with_pixels_per_point(1.0).wgpu().build_ui_state(
+            |ui, app: &mut DesignApp| {
+                let ctx = ui.ctx().clone();
+                app.logic(&ctx);
+                app.ui(ui);
+            },
+            app,
+        );
+        h.run_steps(4);
+        let screen = |h: &Harness<'_, DesignApp>, x: f64, y: f64| {
+            let app = h.state();
+            let layout = CanvasLayout::new(&app.session.doc().unwrap().doc, false);
+            let xf = Xf::new(app.canvas_rect.unwrap(), app.view().unwrap());
+            xf.to_screen(layout.to_canvas(SpreadRef::Doc(0), Point::new(x, y)))
+        };
+        let widget = screen(&h, 300.0, 100.0) + vec2(0.0, 11.5);
+        let diamond = screen(&h, 100.0, 100.0) + vec2(12.0, 0.0);
+        let yellow = |h: &mut Harness<'_, DesignApp>, p: Pos2| -> Option<bool> {
+            let img = match h.render() {
+                Ok(img) => img,
+                Err(e) => {
+                    eprintln!("skipped: no offscreen renderer ({e})");
+                    return None;
+                }
+            };
+            let px = img.get_pixel(p.x.round() as u32, p.y.round() as u32).0;
+            Some(px[0] > 200 && px[1] > 180 && px[2] < 100)
+        };
+        let Some(w) = yellow(&mut h, widget) else { return };
+        assert!(w, "no widget at {widget:?}");
+        assert_eq!(yellow(&mut h, diamond), Some(false));
+        h.hover_at(widget);
+        h.step();
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton { pos: widget, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() });
+            h.step();
+        }
+        h.run_steps(3);
+        assert_eq!(yellow(&mut h, diamond), Some(true), "no diamond at {diamond:?}");
+        assert_eq!(yellow(&mut h, widget), Some(false));
     }
 
     /// A harness whose frames are 1 ms apart, so two clicks make a double-click.

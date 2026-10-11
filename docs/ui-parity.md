@@ -1,6 +1,6 @@
 # UI and interaction parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** minor (stage re-normalized to pre-alpha by the core-workflow gate; earlier today: major, first version) · **Target:** Adobe InDesign 2026 (21.6, Medium Dark, macOS)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (live corners work) · **Target:** Adobe InDesign 2026 (21.6, Medium Dark, macOS)
 
 Tools, handles, snapping, nudging, modifiers, shortcuts, panels, menus, context menus and feel,
 against InDesign 2026. The look was measured from the running app
@@ -30,7 +30,7 @@ basics of editing fail for too many users on Windows and Linux.
 | Properties panel and Contextual Task Bar | per selection | ✓, task bar movable (#143) | ✓ | |
 | Selection tool: click, marquee, move, Alt-duplicate, resize handles, rotate from corners | ✓ | ✓ | ✓ | |
 | Direct Selection, Pen family, Pencil, Scissors | ✓ | ✓ | ~ | moving reference point "0" fails (#337) |
-| Live corners (yellow handle) | ✓ | ✓ | ~ | not working for some users (#186) |
+| Live corners (yellow handle) | ✓ | ✓ widget on a selected rectangle frame; diamonds drag the corner size (Shift: one corner), Alt-click steps the shape (Shift+Alt: all) | ✓ | #186 |
 | Content grabber, frame fitting by double-click | ✓ | ✓ | ✓ | |
 | Smart guides, snapping to guides/grid/baseline | ✓ | ✓ (2,049-line `snap.rs`) | ~ | vertical smart spacing between two rectangles (#188) |
 | Nudging with arrows, Shift ×10 | ✓ | ✓ | ✓ | |
@@ -65,7 +65,7 @@ context menus, typing at a caret) are things a layout artist does every minute, 
 | Copy/paste, context menus, threading clicks, caret formatting on every platform, with control-channel regression tests | 30–50 |
 | Canvas IME (port from VectorCraft) | 10–20 |
 | Missing menu items (~150) and panels (Tabs, Navigator, Trap Presets) | 40–70 |
-| Handle/tool feel fixes (#186, #188, #337), font search focus | 10–20 |
+| Handle/tool feel fixes (#188, #337), font search focus | 10–20 |
 | Dialog depth pass against 07-dialogs.md | 30–40 |
 | **Total** | **120–180** (overlaps gaps 1, 8, 16) |
 
@@ -73,5 +73,6 @@ context menus, typing at a caret) are things a layout artist does every minute, 
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | Live corners row to ✓: widget, diamonds, drag, Shift-drag, Alt-click shape cycling (#186) |
 | 2026-10-10 | minor | Threading row corrected to ✗ after checking the code (no out-port interaction, no thread command) |
 | 2026-10-10 | major | Created: measured menu coverage, 27-row interaction checklist from the code and issues |

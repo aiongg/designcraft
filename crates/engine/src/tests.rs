@@ -1003,3 +1003,42 @@ fn preflight_notes_an_assumed_mojikumi_base_set_without_calling_the_table_unappl
     assert!(messages.iter().any(|m| m.contains("Baseless") && m.contains("no base set")), "{messages:?}");
     assert!(!messages.iter().any(|m| m.contains("not applied")), "{messages:?}");
 }
+
+#[test]
+fn live_corner_gestures_are_one_undo_step_each() {
+    use designcraft_geom::corners::CornerShape;
+    use designcraft_tools::{Mods, PointerEvent, PointerKind};
+    let mut s = session();
+    s.execute("frame.create", &json!({"rect": [100, 100, 300, 250], "content": "graphic"})).unwrap();
+    let id = s.doc().unwrap().doc.spreads[0].items[0].id;
+    s.execute("selection.set", &json!({"ids": [id.0]})).unwrap();
+    s.set_tool("selection");
+    let v = ViewInfo::at_zoom(1.0);
+    let undo = |s: &Session| s.doc().unwrap().history.undo.len();
+    let corners = |s: &Session| s.doc().unwrap().doc.item(id).unwrap().corners.corners;
+    let before = undo(&s);
+    // Click the widget, then drag the top-left diamond 20 pt toward the centre.
+    s.pointer(&PointerEvent::new(PointerKind::Down, 300.0, 111.5), v).unwrap();
+    s.pointer(&PointerEvent::new(PointerKind::Up, 300.0, 111.5), v).unwrap();
+    s.pointer(&PointerEvent::new(PointerKind::Down, 112.0, 100.0), v).unwrap();
+    for x in [116.0, 124.0, 132.0] {
+        s.pointer(&PointerEvent::new(PointerKind::Drag, x, 100.0), v).unwrap();
+    }
+    s.pointer(&PointerEvent::new(PointerKind::Up, 132.0, 100.0), v).unwrap();
+    assert_eq!(undo(&s), before + 1);
+    assert!(corners(&s).iter().all(|c| c.shape == CornerShape::Rounded && (c.size - 20.0).abs() < 1e-9), "{:?}", corners(&s));
+    // Alt-click the top-left diamond, now 20 pt along the edge.
+    let alt = Mods { alt: true, ..Default::default() };
+    s.pointer(&PointerEvent::new(PointerKind::Down, 120.0, 100.0).with_mods(alt), v).unwrap();
+    s.pointer(&PointerEvent::new(PointerKind::Up, 120.0, 100.0).with_mods(alt), v).unwrap();
+    assert_eq!(undo(&s), before + 2);
+    assert_eq!(corners(&s)[0].shape, CornerShape::InverseRounded);
+    assert_eq!(corners(&s)[1].shape, CornerShape::Rounded);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(corners(&s)[0].shape, CornerShape::Rounded);
+    // Malformed per-corner parameters are errors, not silent defaults.
+    let c = json!({"shape": "rounded", "size": 5});
+    assert!(s.execute("object.cornerOptions", &json!({"corners": [c, c, c]})).is_err());
+    assert!(s.execute("object.cornerOptions", &json!({"corners": [c, c, c, {"shape": "rounded", "size": -1}]})).is_err());
+    assert!(s.execute("object.cornerOptions", &json!({"corners": "rounded"})).is_err());
+}

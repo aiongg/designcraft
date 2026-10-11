@@ -11,6 +11,7 @@
 
 mod anchors;
 pub mod catalog;
+mod corners;
 mod frame;
 mod gradient;
 pub mod layout;
@@ -118,6 +119,8 @@ pub enum Action {
     SwitchTool(String),
     /// Ask the UI to pan/zoom: `{"pan":[dx,dy]}` (screen px) or `{"zoomAt":[x,y], "factor":f}` (canvas).
     View(Value),
+    /// The tool used the event for its own state; the engine has nothing to do.
+    Handled,
 }
 
 /// Which snap categories are on, and the snap zone in screen pixels.
@@ -325,6 +328,10 @@ pub enum Overlay {
     /// The whole content of this frame drawn faintly, the part outside the frame included (while
     /// the content moves inside it).
     ContentGhost(ItemId),
+    /// The live-corner widget (yellow square): clicking it starts corner editing.
+    LiveCornerWidget(Point),
+    /// A live-corner diamond: dragging it sets the corner size.
+    LiveCornerDiamond(Point),
 }
 
 /// Correction from a snap, in spread coordinates for `delta`.

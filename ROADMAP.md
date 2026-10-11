@@ -2,7 +2,7 @@
 
 **Stage: pre-alpha** · next: alpha, ~0% and ~15–25 h away; beta ~28 points and ~420–750 h beyond that (the core-workflow gate, not the percentage: ready for real work is already ~47%)
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (Optical kerning from outlines (#181); macOS lists fonts that font services and managers activate) · **Target:** Adobe InDesign 2026
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (Live corners (#186); Optical kerning from outlines (#181); macOS lists fonts that font services and managers activate) · **Target:** Adobe InDesign 2026
 
 DesignCraft aims at full Adobe InDesign parity, and to be better: faster, open (documented JSON
 format + IDML), scriptable by agents (MCP), and available on the web.
@@ -129,6 +129,8 @@ list) · [roadmap.md](docs/roadmap.md) (milestones, plan) · [parity-checklist.m
 
 Newest first.
 
+- **2026-10-11** · Live corners: the yellow widget on a selected rectangle frame shows corner
+  diamonds; dragging one rounds the corners, Alt-click steps the corner shape (#186).
 - **2026-10-11** · Optical kerning (#181): pairs are spaced from their outlines (ink gap per band,
   pulled towards the font's stem gap, bounded) instead of silently using the font's kern pairs.
 - **2026-10-11** · New Document laid out like InDesign's (#325): Recent, Saved, Print, Web and
