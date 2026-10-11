@@ -2116,10 +2116,9 @@ struct Tops {
     em: f64,
 }
 
-/// The em box top above the baseline at `size`: the font's `BASE` em box, else the default
-/// ideographic em box, 0.88 em above the baseline.
+/// The em box top above the baseline at `size` ([`designcraft_fonts::FontFace::em_box`]).
 fn em_box_top(face: &designcraft_fonts::FontFace, size: f64) -> f64 {
-    let em = face.declared_em_box().filter(|_| face.upem > 0.0).map_or(0.88, |(top, _)| top / face.upem);
+    let em = Some(face.em_box().0 / face.upem).filter(|e| e.is_finite()).unwrap_or(0.88);
     em * size
 }
 

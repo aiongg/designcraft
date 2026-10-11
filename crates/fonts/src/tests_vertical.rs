@@ -111,14 +111,24 @@ fn fonts_without_vmtx_use_the_em_box() {
     assert_eq!(face.em_box(), (830.0, -170.0));
     assert_eq!(face.v_advance(gid), face.upem);
     assert_eq!(face.v_origin(gid), 830.0);
-    // Without BASE either: the OS/2 typo ascender and descender (1000, -326), centred on one em.
+    // Without BASE either: the typo ascender and descender (1000, -326) span more than one em, so
+    // the em box is centred on half the OS/2 cap height (660).
     let face = face_of(with_table_len(font_with("No Base", &['一']).unwrap(), b"BASE", 0).unwrap());
-    assert_eq!(face.em_box(), (837.0, -163.0));
-    // Without OS/2: the ascender and descender, the same way.
-    let face = face_of(with_table_len(with_table_len(font_with("No OS2", &['一']).unwrap(), b"BASE", 0).unwrap(), b"OS/2", 0).unwrap());
-    let (top, bottom) = face.em_box();
-    assert_eq!(top - bottom, face.upem);
-    assert!((top + bottom - (face.ascent - face.descent)).abs() < 1e-9, "{top} {bottom}");
+    assert_eq!(face.em_box(), (830.0, -170.0));
+    assert_eq!(face.declared_em_box(), Some((830.0, -170.0)));
+    // Typo ascender and descender one em apart: the typo ascender is the top.
+    let typo = with_table_u16(font_with("Typo Em", &['一']).unwrap(), b"OS/2", 68, 860).unwrap();
+    let typo = with_table_u16(typo, b"OS/2", 70, u16::from_be_bytes((-140i16).to_be_bytes())).unwrap();
+    let face = face_of(with_table_len(typo, b"BASE", 0).unwrap());
+    assert_eq!(face.em_box(), (860.0, -140.0));
+    // Without OS/2: centred on half the H glyph's height (656).
+    let no_os2 = |font: Vec<u8>| face_of(with_table_len(with_table_len(font, b"BASE", 0).unwrap(), b"OS/2", 0).unwrap());
+    let face = no_os2(font_mapping("No OS2", &[('一', 'X'), ('H', 'H')]).unwrap());
+    assert_eq!(face.em_box(), (828.0, -172.0));
+    // Without an H either: 0.88 em above the baseline, which the font doesn't declare.
+    let face = no_os2(font_with("No OS2 No H", &['一']).unwrap());
+    assert_eq!(face.em_box(), (880.0, -120.0));
+    assert_eq!(face.declared_em_box(), None);
 }
 
 #[test]

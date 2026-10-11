@@ -263,13 +263,14 @@ impl FontFace {
     pub fn v_origin(&self, gid: u32) -> f64 {
         crate::vertical::VMetrics::new(self).origin(GlyphId::new(gid))
     }
-    /// The ideographic em box (top, bottom) in font units, y up (Japanese fonts: typically 880,
-    /// -120): `BASE` `idtp`/`ideo`, else the OS/2 typo ascender/descender, else the ascender and
-    /// descender, the last two centred on one em.
+    /// The ideographic em box (top, bottom) in font units, y up, one em tall (Japanese fonts:
+    /// typically 880, -120): `BASE` `idtp`/`ideo`; else from the OS/2 typo ascender when the typo
+    /// ascender and descender span one em; else centred on half the cap height (OS/2, else the
+    /// `H` glyph's top); else 0.88 em above the baseline.
     pub fn em_box(&self) -> (f64, f64) {
         self.em.get_or_init(|| crate::vertical::em_box(self)).0
     }
-    /// The em box (top, bottom) in font units, y up, when the font declares one in `BASE`.
+    /// [`Self::em_box`] when the font's tables give it, `None` for the 0.88 em fallback.
     pub fn declared_em_box(&self) -> Option<(f64, f64)> {
         let (b, declared) = *self.em.get_or_init(|| crate::vertical::em_box(self));
         declared.then_some(b)
@@ -712,10 +713,10 @@ fn make_face(bytes: FontBytes, source: FontSource, index: u32, family: String, s
         // flat-topped letters before falling back to a share of the ascent, which can be far off
         // (drop caps are sized from the cap height).
         cap_height: plausible(m.cap_height.map(f64::from), upem)
-            .or_else(|| measured_top(&f, &location, &['H', 'I', 'E', 'T'], upem))
+            .or_else(|| measured_top(&f, (&location).into(), &['H', 'I', 'E', 'T'], upem))
             .unwrap_or(m.ascent as f64 * 0.72),
         x_height: plausible(m.x_height.map(f64::from), upem)
-            .or_else(|| measured_top(&f, &location, &['x', 'z', 'v'], upem))
+            .or_else(|| measured_top(&f, (&location).into(), &['x', 'z', 'v'], upem))
             .unwrap_or(m.ascent as f64 * 0.5),
         shaper,
         coords,
@@ -731,14 +732,14 @@ fn make_face(bytes: FontBytes, source: FontSource, index: u32, family: String, s
 }
 
 /// A font's height above the baseline (font units) if it is plausible: above 0 and at most 4 em.
-fn plausible(v: Option<f64>, upem: f64) -> Option<f64> {
+pub(crate) fn plausible(v: Option<f64>, upem: f64) -> Option<f64> {
     v.filter(|v| *v > 0.0 && *v <= 4.0 * upem)
 }
 
 /// The top of the first of `chars` the font has a non-empty outline for, in font units: the
 /// highest point of its unhinted outline at `location`, if [`plausible`]. For flat-topped letters
 /// that is the cap height (`H`) or x-height (`x`).
-fn measured_top(f: &skrifa::FontRef<'_>, location: &Location, chars: &[char], upem: f64) -> Option<f64> {
+pub(crate) fn measured_top(f: &skrifa::FontRef<'_>, location: LocationRef<'_>, chars: &[char], upem: f64) -> Option<f64> {
     struct Top(f32);
     impl OutlinePen for Top {
         fn move_to(&mut self, _x: f32, y: f32) {

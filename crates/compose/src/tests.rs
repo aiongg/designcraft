@@ -1591,6 +1591,7 @@ fn only_english_text_gets_english_hyphenation() {
 
 /// OS/2 field offsets: sTypoAscender, sxHeight, sCapHeight.
 const TYPO_ASCENDER: usize = 68;
+const TYPO_DESCENDER: usize = 70;
 const X_HEIGHT: usize = 86;
 const CAP_HEIGHT: usize = 88;
 
@@ -1696,19 +1697,30 @@ fn ascent_first_baseline_uses_the_typographic_ascender() {
 }
 
 #[test]
-fn em_box_first_baseline_uses_the_base_em_box_else_0_88_em() {
+fn em_box_first_baseline_follows_base_then_the_typo_box_or_the_cap_height() {
     use designcraft_doc::FirstBaseline;
     let db = designcraft_fonts::FontDb::global();
-    // The test font's `BASE` table puts the em box bottom (`ideo`) at -170 units: its top is 0.83 em.
-    let mut no_base = typo_test_font("EmBoxTop 0700", Some(700));
-    let tables = u16::from_be_bytes([no_base[4], no_base[5]]) as usize;
-    let rec = (0..tables).map(|t| 12 + 16 * t).find(|&r| &no_base[r..r + 4] == b"BASE").unwrap();
-    // Still sorted between its neighbours, so the table directory stays valid.
-    no_base[rec..rec + 4].copy_from_slice(b"BASX");
-    db.add_font(no_base);
-    db.add_font(typo_test_font("EmBoxBase 700", Some(700)));
-    assert_eq!(db.face("EmBoxTop 0700", "Regular").declared_em_box(), None);
-    assert_eq!(db.face("EmBoxBase 700", "Regular").declared_em_box(), Some((830.0, -170.0)));
+    // [`test_font`] (typo descender -326, cap height 660), with or without its `BASE` table, whose
+    // em box bottom (`ideo`) is at -170 units.
+    let add = |family: &str, base: bool, fields: &[(usize, i16)]| {
+        let mut b = test_font(family, Some(fields));
+        if !base {
+            let tables = u16::from_be_bytes([b[4], b[5]]) as usize;
+            let rec = (0..tables).map(|t| 12 + 16 * t).find(|&r| &b[r..r + 4] == b"BASE").unwrap();
+            // Still sorted between its neighbours, so the table directory stays valid.
+            b[rec..rec + 4].copy_from_slice(b"BASX");
+        }
+        db.add_font(b);
+        db.face(family, "Regular").declared_em_box()
+    };
+    // Typo ascender − descender = 1 em: the typo ascender is the top.
+    assert_eq!(add("EmBoxTypo 850", false, &[(TYPO_ASCENDER, 850), (TYPO_DESCENDER, -150)]), Some((850.0, -150.0)));
+    // Otherwise the em box is centred on half the cap height: 0.5 em + 600 / 2.
+    assert_eq!(add("EmBoxCapH 600", false, &[(TYPO_ASCENDER, 700), (CAP_HEIGHT, 600)]), Some((800.0, -200.0)));
+    // No OS/2 cap height: the H glyph's top, 656.
+    assert_eq!(add("EmBoxGlyphH 0", false, &[(TYPO_ASCENDER, 700), (CAP_HEIGHT, 0)]), Some((828.0, -172.0)));
+    // A `BASE` em box comes first.
+    assert_eq!(add("EmBoxBase 850", true, &[(TYPO_ASCENDER, 850), (TYPO_DESCENDER, -150)]), Some((830.0, -170.0)));
     let (mut d, sid, fid) = doc_with("Hxg Hxg", Rect::new(36.0, 36.0, 300.0, 300.0), ParaAttrs::default());
     let mut first = |family: &str, sizes: [f64; 2], kind: FirstBaseline| {
         let st = d.story_mut(sid).unwrap();
@@ -1723,17 +1735,15 @@ fn em_box_first_baseline_uses_the_base_em_box_else_0_88_em() {
         compose_story(&d, sid, &ComposeOptions::default()).frames[0].lines[0].baseline - 36.0
     };
     let close = |a: f64, b: f64| (a - b).abs() < 0.01;
-    // Ascent: the 0.7 em typographic ascender; Em Box Height: the 0.88 em default em box top.
-    let asc = first("EmBoxTop 0700", [10.0; 2], FirstBaseline::Ascent);
+    let asc = first("EmBoxCapH 600", [10.0; 2], FirstBaseline::Ascent);
     assert!(close(asc, 7.0), "{asc}");
-    let emb = first("EmBoxTop 0700", [10.0; 2], FirstBaseline::EmboxHeight);
-    assert!(close(emb, 8.8), "{emb}");
+    for (family, top) in [("EmBoxTypo 850", 8.5), ("EmBoxCapH 600", 8.0), ("EmBoxGlyphH 0", 8.28), ("EmBoxBase 850", 8.3)] {
+        let emb = first(family, [10.0; 2], FirstBaseline::EmboxHeight);
+        assert!(close(emb, top), "{family}: {emb}");
+    }
     // A mixed first line takes its largest size.
-    let emb = first("EmBoxTop 0700", [10.0, 20.0], FirstBaseline::EmboxHeight);
-    assert!(close(emb, 17.6), "{emb}");
-    // A font's `BASE` em box wins over the default.
-    let emb = first("EmBoxBase 700", [10.0; 2], FirstBaseline::EmboxHeight);
-    assert!(close(emb, 8.3), "{emb}");
+    let emb = first("EmBoxCapH 600", [10.0, 20.0], FirstBaseline::EmboxHeight);
+    assert!(close(emb, 16.0), "{emb}");
 }
 
 #[test]
