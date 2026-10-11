@@ -1,6 +1,6 @@
 # Where DesignCraft falls short of InDesign
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** minor (stage re-normalized to pre-alpha by the core-workflow gate; earlier today: major, first version: gaps from the full re-measure and the issue tracker) · **Target:** Adobe InDesign 2026 (21.6)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (gap 6: macOS lists fonts that font services and managers activate) · **Target:** Adobe InDesign 2026 (21.6)
 
 Every known shortfall against InDesign 2026, one entry each, ranked by how much it stops an
 InDesign professional from doing real work. This is the work list: agents pick from the top.
@@ -92,8 +92,11 @@ Kind: **F** feature · **U** UI/UX · **T** typography · **FF** file format · 
 - **Doc:** [hardware-parity.md](hardware-parity.md)
 
 ### 6. Installed fonts not always found (F)
-- **Missing:** fonts in user font folders used for text (#161, #110, #107), fonts activated by
-  font managers and Adobe Fonts (#327, #261), reload when fonts change on disk (#328).
+- **Missing:** fonts in user font folders used for text (#161, #110, #107), fonts that font
+  services and managers activate on Windows, reload when fonts change on disk (#328).
+- **Evidence:** on macOS the scan reads the font files CoreText has available, so fonts that
+  Adobe Fonts and font managers activate are listed (#261, #327, 2026-10-11); not yet confirmed
+  by the reporters.
 - **Impact:** documents set in the client's fonts render in Source Sans 3: wrong everywhere.
 - **Estimate:** 10–20 h (VectorCraft has a port, #261).
 - **Doc:** [typography-parity.md](typography-parity.md)

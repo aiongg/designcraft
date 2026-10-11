@@ -1,6 +1,6 @@
 # Typography and composition parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** major (first version, from the full re-measure) · **Target:** Adobe InDesign 2026 (21.6)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (macOS lists fonts that font services and managers activate) · **Target:** Adobe InDesign 2026 (21.6)
 
 Typesetting is what InDesign is bought for. A feature can exist and still set text differently
 from InDesign: different line breaks, different page count, overset where InDesign fits. This
@@ -64,7 +64,7 @@ Fidelity: **unmeasured** unless stated.
 | CJK composition | mojikumi, kinsoku, aki, tsume, ruby, kenten, warichu, frame grid | most; mojikumi tables kept but not applied; ruby group-only; no frame grid | ~ | cjk.md, cjk-typography.md |
 | Arabic / Hebrew | kashida, digits, diacritic positioning, RTL stories and tables | ✓ | ~ | vendor justification presets unsupported; list bullets and multi-column RTL (#100) |
 | Missing glyphs and fonts | pink highlight, substitution | ✓ | ✓ | |
-| Installed fonts | every activated font | system font folders; user folders, font managers and Adobe Fonts not always found | ~ | #161, #110, #107, #327, #261 |
+| Installed fonts | every activated font | system font folders; on macOS also fonts that font managers and Adobe Fonts activate; user folders not always found | ~ | #161, #110, #107, #327, #261 |
 | Composition highlights | H&J, keeps, custom tracking/kerning, substituted fonts | ✓ | ✓ | |
 
 Measured from the table above (2026-10-10): 34 rows, 18 ✓, 16 ~, 0 ✗, scoring ✓ = 1 and ~ = 0.5:

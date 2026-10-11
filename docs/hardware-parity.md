@@ -1,6 +1,6 @@
 # Hardware and platform parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** major (first version) · **Target:** Adobe InDesign 2026 (21.6)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (font managers on macOS) · **Target:** Adobe InDesign 2026 (21.6)
 
 What InDesign does with hardware, per platform, against DesignCraft. Layout is not a
 GPU-hungry workload, so this dimension carries little weight, but a start that fails on a
@@ -29,7 +29,7 @@ graphics driver loses the user entirely. Overall numbers: [target-app-parity.md]
 
 | Platform | InDesign 2026 | DesignCraft | Evidence |
 |---|---|---|---|
-| macOS (Apple silicon, Intel) | ✓ | ✓ primary development platform | Intel GPU start failure (#334); window controls misaligned (#333); font managers (#327) |
+| macOS (Apple silicon, Intel) | ✓ | ✓ primary development platform | Intel GPU start failure (#334); window controls misaligned (#333) |
 | Windows x64 | ✓ | ~ builds and installers ship | copy/paste and context menus (#351, #312), installer confusion (#64), launch failures (#273, #167) |
 | Windows ARM64 | ✓ | ~ build (CI workflow) | not exercised at runtime |
 | Linux (x86_64, aarch64; riscv64 tar.gz) | ✗ | ~ deb, AppImage, Flatpak | clipboard (#164), panels don't scroll (#267), CJK UI font (#332) |
