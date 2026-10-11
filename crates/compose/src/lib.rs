@@ -19,6 +19,7 @@ pub mod hyphen;
 pub mod kenten;
 mod mojikumi;
 mod notes;
+pub mod optical;
 mod overlay;
 mod parabox;
 mod ruby;
