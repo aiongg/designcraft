@@ -37,6 +37,7 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Find/Change…", "Suchen/Ersetzen …"),
     ("Check Spelling…", "Rechtschreibprüfung …"),
     ("Preferences…", "Voreinstellungen …"),
+    ("Settings…", "Einstellungen …"),
     ("Keyboard Shortcuts…", "Tastaturbefehle …"),
     ("Interface Language", "Sprache der Oberfläche"),
     ("Pages", "Seiten"),
