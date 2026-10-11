@@ -42,6 +42,15 @@ pub fn app_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
         .frame(egui::Frame::NONE.fill(t.app_bar).inner_margin(egui::Margin { left, right: 10, top: 0, bottom: (APP_BAR_BAND - SEPARATOR) as i8 }))
         .show(ui, |ui| {
             let full = ui.max_rect();
+            if mac {
+                // The whole title-bar band, margins included; the controls drawn below take
+                // their own clicks.
+                let band = egui::Rect::from_min_max(
+                    egui::pos2(full.min.x - f32::from(left), full.min.y),
+                    egui::pos2(full.max.x + 10.0, full.min.y + MAC_APP_BAR),
+                );
+                crate::title_bar::empty_area(ui, band);
+            }
             let mut menus_end = full.min.x;
             let mut tools_start = full.max.x;
             // The right-hand controls' width, measured last frame: in a window too narrow for them
@@ -850,6 +859,86 @@ mod tests {
         for label in ["File", "Help", "Share"] {
             let r = rect(&h, label).translate(-bar);
             assert!((r.center().y - MAC_APP_BAR / 2.0).abs() <= 0.5 && r.max.y <= MAC_APP_BAR, "{label} at {r:?}");
+        }
+    }
+
+    fn press(h: &egui_kittest::Harness<'static, test_window::Window>, pos: egui::Pos2, pressed: bool) {
+        h.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+    }
+
+    /// The window commands the app sends over the next `steps` frames.
+    fn window_commands(h: &mut egui_kittest::Harness<'static, test_window::Window>, steps: usize) -> Vec<egui::ViewportCommand> {
+        let mut out = Vec::new();
+        for _ in 0..steps {
+            h.step();
+            if let Some(v) = h.output().viewport_output.get(&egui::ViewportId::ROOT) {
+                out.extend(v.commands.iter().cloned());
+            }
+        }
+        out
+    }
+
+    fn double_click(h: &mut egui_kittest::Harness<'static, test_window::Window>, pos: egui::Pos2) -> Vec<egui::ViewportCommand> {
+        h.hover_at(pos);
+        h.step();
+        // One frame: the harness gives each queued event a frame of its own, longer apart than a
+        // double-click allows.
+        for pressed in [true, false, true, false] {
+            h.input_mut().events.push(egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        window_commands(h, 3)
+    }
+
+    fn drag(h: &mut egui_kittest::Harness<'static, test_window::Window>, from: egui::Pos2) -> Vec<egui::ViewportCommand> {
+        h.hover_at(from);
+        h.step();
+        press(h, from, true);
+        let mut out = window_commands(h, 1);
+        for i in 1..=6 {
+            h.hover_at(from + vec2(8.0 * i as f32, 3.0));
+            out.extend(window_commands(h, 1));
+        }
+        press(h, from + vec2(48.0, 3.0), false);
+        out.extend(window_commands(h, 2));
+        out
+    }
+
+    #[test]
+    fn the_empty_mac_title_bar_zooms_and_moves_the_window() {
+        use super::{MAC_APP_BAR, MAC_CONTENT_LEFT};
+        use egui::ViewportCommand::{Maximized, Minimized, StartDrag};
+        let mut app = app();
+        app.integrated_titlebar = true;
+        let mut h = test_window::open(app, vec2(1400.0, 900.0));
+        let bar = test_window::panel_rect(&h, "app_bar");
+        // Under the centred title, and between the traffic lights and the Home button.
+        let empty = [pos2(bar.center().x, bar.min.y + MAC_APP_BAR / 2.0), pos2(bar.min.x + MAC_CONTENT_LEFT - 4.0, bar.min.y + 4.0)];
+        for at in empty {
+            // Tests read the setting as its default, zoom.
+            let cmds = double_click(&mut h, at);
+            assert_eq!(cmds, vec![Maximized(true)], "double-click at {at:?}");
+            let cmds = drag(&mut h, at);
+            assert_eq!(cmds, vec![StartDrag], "drag from {at:?}");
+        }
+        // The bar's controls keep their clicks and drags.
+        for label in ["Home", "Share", "File"] {
+            let at = rect(&h, label).center();
+            let cmds = double_click(&mut h, at);
+            assert!(!cmds.iter().any(|c| matches!(c, Maximized(_) | Minimized(_))), "double-click on {label}: {cmds:?}");
+            if label == "Home" {
+                assert_eq!(h.state().app.ui.status, "Home", "Home took its clicks");
+            }
+            h.key_press(egui::Key::Escape);
+            h.run_steps(2);
+            let cmds = drag(&mut h, at);
+            assert!(!cmds.contains(&StartDrag), "drag from {label}: {cmds:?}");
+            h.key_press(egui::Key::Escape);
+            h.run_steps(2);
         }
     }
 
