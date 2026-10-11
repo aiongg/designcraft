@@ -797,9 +797,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "craft-hyphen"
+name = "craft-text"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs?rev=ddef9ae40697df0aabeb685fac26fa0fa00fa987#ddef9ae40697df0aabeb685fac26fa0fa00fa987"
+source = "git+https://github.com/aiongg/craft-libs?rev=8c27194f9ee1b6fb289ca3b09ae63d33d7dbdff9#8c27194f9ee1b6fb289ca3b09ae63d33d7dbdff9"
 dependencies = [
  "hypher",
  "miniz_oxide 0.8.9",
@@ -935,7 +935,7 @@ dependencies = [
 name = "designcraft-compose"
 version = "0.6.0"
 dependencies = [
- "craft-hyphen",
+ "craft-text",
  "designcraft-color",
  "designcraft-doc",
  "designcraft-fonts",
