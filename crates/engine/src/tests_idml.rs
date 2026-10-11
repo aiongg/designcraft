@@ -357,3 +357,32 @@ fn idml_placed_pdf_cropped_to_its_media_box_gets_media_box_bounds() {
     let b = a.shown_box().unwrap_or([0.0, 0.0, 1.0, 1.0]);
     assert!(b.iter().zip([0.0, 0.0, 1.0, 1.0]).all(|(x, y)| (x - y).abs() < 1e-6), "{b:?}");
 }
+
+/// A Bounding Box crop needs the page rendered to find its box. IDML import leaves that until
+/// the graphic is drawn or exported (its `GraphicBounds` give its size), so opening a document
+/// doesn't render every placed PDF; drawing and PDF export find the same box placing it did.
+#[test]
+fn idml_bounding_box_crop_is_measured_when_drawn_not_on_import() {
+    let mut s = Session::new();
+    s.execute("file.new", &json!({})).unwrap();
+    s.execute("frame.create", &json!({"rect": [100, 200, 300, 260], "content": "unassigned"})).unwrap();
+    s.execute("object.fill", &json!({"swatch": "[Black]"})).unwrap();
+    let b64 = s.execute("file.exportPdf", &json!({})).unwrap()["base64"].as_str().unwrap().to_string();
+    let mut t = Session::new();
+    t.execute("file.new", &json!({})).unwrap();
+    t.execute("file.place", &json!({"base64": b64, "name": "a.pdf", "pdfCrop": "contentVisible", "width": 200, "x": 20, "y": 30})).unwrap();
+    let placed = t.doc().unwrap().doc.assets.values().next().unwrap().shown_box().expect("placing measures the box");
+    assert!(placed[0] > 0.1 && placed[2] < 0.6, "the drawn rectangle, not the page: {placed:?}");
+
+    let bytes = designcraft_idml::export_idml(&t.doc().unwrap().doc);
+    let back = crate::cmd::interchange::import(&bytes, None).unwrap();
+    let a = back.assets.values().next().unwrap();
+    assert_eq!(a.pdf_crop, designcraft_doc::PdfCrop::ContentVisible);
+    assert!(a.content_box_pending(), "import didn't render the page: {:?}", a.pdf_box);
+    let close = |b: [f64; 4]| b.iter().zip(placed).all(|(x, y)| (x - y).abs() < 1e-9);
+    let drawn = designcraft_render::shown_box(a).expect("drawing measures the box");
+    assert!(close(drawn), "{drawn:?} vs {placed:?}");
+    let boxed = crate::cmd::interchange::with_pdf_boxes(&back);
+    let exported = boxed.assets.values().next().unwrap().shown_box().expect("PDF export gets the box");
+    assert!(close(exported), "{exported:?} vs {placed:?}");
+}
