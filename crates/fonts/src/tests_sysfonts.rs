@@ -126,6 +126,38 @@ fn a_link_back_to_a_parent_folder_ends_the_scan() {
     assert_eq!(db.load_system_fonts(), 2);
 }
 
+/// The folder a font service keeps its fonts in, outside the font folders, and the font folder
+/// of [`fonts_the_platform_lists_outside_the_font_folders_are_cataloged_once`].
+fn service_dirs() -> (PathBuf, PathBuf) {
+    let tmp = std::env::temp_dir();
+    let id = std::process::id();
+    (tmp.join(format!("dc-sysfonts-{id}-service")), tmp.join(format!("dc-sysfonts-{id}-platform")))
+}
+
+/// The platform's list: a font service's file without an extension (twice, as for each face of a
+/// collection), a font folder's file by another path, a file gone since and a folder.
+fn service_files() -> Vec<PathBuf> {
+    let (service, folder) = service_dirs();
+    vec![service.join(".r/.12345"), folder.join("Sub/../Sysfont-Regular.ttf"), service.join(".r/.12345"), service.join("gone.otf"), service.clone()]
+}
+
+#[test]
+fn fonts_the_platform_lists_outside_the_font_folders_are_cataloged_once() {
+    let (service, folder) = service_dirs();
+    let dir = font_dir("platform");
+    assert_eq!(dir, folder);
+    let _ = std::fs::remove_dir_all(&service);
+    std::fs::create_dir_all(service.join(".r")).unwrap();
+    std::fs::write(service.join(".r/.12345"), renamed("SourceSans3-It.ttf")).unwrap();
+    let db = FontDb { font_files: service_files, ..FontDb::with_font_dirs(vec![dir]) };
+    assert_eq!(db.styles(FAMILY), ["Regular", "Bold", "Italic"]);
+    assert_eq!(db.load_system_fonts(), 3, "the font folder's Regular listed again isn't cataloged twice");
+    let italic = db.face(FAMILY, "Italic");
+    assert_eq!(italic.style, "Italic");
+    assert_eq!(italic.source.path(), Some(service.join(".r/.12345").as_path()));
+    let _ = std::fs::remove_dir_all(&service);
+}
+
 #[test]
 fn the_scan_reads_names_without_loading_the_font() {
     let dir = font_dir("names");

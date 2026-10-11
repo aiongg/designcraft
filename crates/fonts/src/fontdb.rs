@@ -52,7 +52,8 @@ pub enum FontSource {
     Bundled,
     /// Font data handed to [`FontDb::add_font`], with no file behind it.
     Memory,
-    /// An installed font file (the system's or the user's font folders).
+    /// An installed font file (the system's or the user's font folders, or one the platform
+    /// lists outside them).
     Installed(std::path::PathBuf),
     /// A font file in a document's `Document Fonts` folder ([`FontDb::load_document_fonts`]).
     Document(std::path::PathBuf),
@@ -334,6 +335,10 @@ pub struct FontDb {
     /// The folders the system font scan reads (the platform's font folders for [`FontDb::global`]).
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     font_dirs: Vec<std::path::PathBuf>,
+    /// Lists the font files outside `font_dirs` that the system font scan reads too, asked again by
+    /// each scan ([`platform_font_files`] for [`FontDb::global`]).
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    font_files: fn() -> Vec<std::path::PathBuf>,
     /// Set once the font folders have been scanned. Lookups by family name wait for the first
     /// scan, so what they find doesn't depend on what ran before them.
     #[cfg(not(target_arch = "wasm32"))]
@@ -617,6 +622,29 @@ pub fn system_font_dirs() -> Vec<std::path::PathBuf> {
     dirs
 }
 
+/// The font files outside the font folders that the platform has available, which
+/// [`FontDb::global`]'s scan reads too: on macOS, those CoreText's font manager lists, such as the
+/// fonts font services and font managers register from their own folders. None elsewhere.
+#[cfg(target_os = "macos")]
+use crate::mac_fonts::available_font_files as platform_font_files;
+#[cfg(not(target_os = "macos"))]
+fn platform_font_files() -> Vec<std::path::PathBuf> {
+    Vec::new()
+}
+
+/// The files in `listed` that aren't in `scanned` (canonical paths), each once and added to
+/// `scanned`; paths that don't lead to a file (gone, unreadable folder) are left out.
+#[cfg(not(target_arch = "wasm32"))]
+fn unscanned_font_files(listed: Vec<std::path::PathBuf>, scanned: &mut std::collections::HashSet<std::path::PathBuf>) -> Vec<std::path::PathBuf> {
+    listed
+        .into_iter()
+        .filter(|p| {
+            let Ok(canonical) = std::fs::canonicalize(p) else { return false };
+            canonical.is_file() && scanned.insert(canonical)
+        })
+        .collect()
+}
+
 /// One face found in a font file: index, family, style and (variable fonts) the named instance's
 /// axis settings.
 type Found = (u32, String, String, Vec<([u8; 4], f32)>);
@@ -780,6 +808,7 @@ impl FontDb {
             #[cfg(not(target_arch = "wasm32"))]
             catalog: RwLock::new(Vec::new()),
             font_dirs,
+            font_files: Vec::new,
             #[cfg(not(target_arch = "wasm32"))]
             cataloged: std::sync::OnceLock::new(),
             #[cfg(not(target_arch = "wasm32"))]
@@ -798,12 +827,13 @@ impl FontDb {
         let _ = on;
     }
 
-    /// Process-wide database: the bundled fonts, then the installed system fonts, cataloged the
+    /// Process-wide database: the bundled fonts, then the installed system fonts (the font
+    /// folders' and the platform's other font files, see [`platform_font_files`]), cataloged the
     /// first time a lookup by family name needs them (or ahead of time by
     /// [`FontDb::scan_in_background`]).
     pub fn global() -> &'static FontDb {
         static DB: std::sync::OnceLock<FontDb> = std::sync::OnceLock::new();
-        DB.get_or_init(|| FontDb::with_font_dirs(system_font_dirs()))
+        DB.get_or_init(|| FontDb { font_files: platform_font_files, ..FontDb::with_font_dirs(system_font_dirs()) })
     }
 
     fn read_faces(&self) -> std::sync::RwLockReadGuard<'_, Vec<Arc<FontFace>>> {
@@ -909,6 +939,8 @@ impl FontDb {
         let mut stack = self.font_dirs.clone();
         // Each folder once, however links lead back to it.
         let mut visited = std::collections::HashSet::new();
+        // The font files read, by canonical path, so the platform's list adds only the others.
+        let mut scanned = std::collections::HashSet::new();
         while let Some(d) = stack.pop() {
             if !visited.insert(std::fs::canonicalize(&d).unwrap_or_else(|_| d.clone())) {
                 continue;
@@ -924,9 +956,17 @@ impl FontDb {
                 if !matches!(ext.as_deref(), Some("ttf" | "otf" | "ttc" | "otc")) {
                     continue;
                 }
+                scanned.insert(std::fs::canonicalize(&p).unwrap_or_else(|_| p.clone()));
                 for f in file_face_names(&p) {
                     found.push(CatalogEntry { family: f.family, style: f.style, path: p.clone(), group: f.group, native: f.native });
                 }
+            }
+        }
+        // Font services name their files as they like (no extension, say): the face names read
+        // decide what is a font.
+        for p in unscanned_font_files((self.font_files)(), &mut scanned) {
+            for f in file_face_names(&p) {
+                found.push(CatalogEntry { family: f.family, style: f.style, path: p.clone(), group: f.group, native: f.native });
             }
         }
         let n = found.len();
