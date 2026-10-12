@@ -2764,7 +2764,10 @@ fn hyphenation_points(
                 let pts: &[usize] = match user {
                     // User dictionary exceptions win over the patterns and the built-in list.
                     Some(v) => v,
-                    None => cache.entry((lang, word.into())).or_insert_with(|| hyphen::hyphen_points_in(word, &lim, lang).into_boxed_slice()),
+                    // The patterns give byte offsets into the word; exceptions and the loop below use char indices.
+                    None => cache.entry((lang, word.into())).or_insert_with(|| {
+                        hyphen::hyphen_points_in(word, &lim, lang).into_iter().filter_map(|b| word.get(..b).map(|s| s.chars().count())).collect()
+                    }),
                 };
                 for &p in pts.iter() {
                     // char index p → byte → glyph whose cluster ends at that byte.

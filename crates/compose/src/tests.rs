@@ -1367,8 +1367,29 @@ fn spanish_text_gets_spanish_hyphenation() {
         let whole = text[text.find(l).unwrap() + l.len() - last.len()..].split(|c: char| !c.is_alphabetic()).next().unwrap();
         let es = hyphen::Lang::for_language("Spanish").unwrap();
         let pts = hyphen::hyphen_points_in(whole, &hyphen::Limits::default(), es);
-        assert!(pts.contains(&last.chars().count()), "break {last}- in {whole} is a Bezos point");
+        assert!(pts.contains(&last.len()), "break {last}- in {whole} is a pattern point");
     }
+}
+
+#[test]
+fn hyphens_after_accented_letters_fall_at_pattern_points() {
+    // craft-text gives byte offsets; a char-index mix-up moves breaks after "á" one letter on.
+    let word = "democrática";
+    let es = hyphen::Lang::for_language("Spanish").unwrap();
+    let pts = hyphen::hyphen_points_in(word, &hyphen::Limits::default(), es);
+    let mut after_accent = false;
+    for w in (20..90).step_by(4) {
+        let (mut d, sid, _) = doc_with(word, Rect::new(0.0, 0.0, w as f64, 700.0), ParaAttrs::default());
+        let st = d.story_mut(sid).unwrap();
+        let n = st.len();
+        st.format_chars(0..n, |f| f.over.language = Some("Spanish".into()));
+        let cs = compose_story(&d, sid, &ComposeOptions::default());
+        for l in all_lines(&cs).iter().filter(|l| l.hyphenated) {
+            assert!(pts.contains(&l.range.end), "{}- at width {w} is a pattern point", &word[..l.range.end]);
+            after_accent |= l.range.end > word.find('á').unwrap();
+        }
+    }
+    assert!(after_accent, "some width breaks after the accented letter");
 }
 
 #[test]
