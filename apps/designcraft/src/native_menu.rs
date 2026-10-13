@@ -2,7 +2,8 @@
 //! Mac way (app menu, Window, Help) and drives AppKit. A clicked item runs through the same command
 //! path as the in-window menus. Key equivalents come back to egui as the keys pressed, so
 //! DesignCraft's own shortcut handling runs them, as on the other platforms; ⌘C, ⌘X and ⌘V arrive
-//! as egui's copy, cut and paste events. Enabled and checked states follow the app after each
+//! as egui's copy, cut and paste events. While a text field has the keys, other key equivalents
+//! run as clicks. Enabled and checked states follow the app after each
 //! input and a few times per second.
 
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -50,6 +51,9 @@ impl NativeMenu {
 
     /// After the frame's UI: bring the menus up to date with the app.
     pub fn sync(&mut self, app: &DesignApp, ctx: &egui::Context) {
+        // A focused text field keeps the editing keys (⌘C, ⌘V, ⌘Z, …); DesignCraft's shortcut
+        // handling leaves every other key to it, so the menu runs those shortcuts as clicks.
+        self.menu.set_text_editing(ctx.text_edit_focused());
         for c in self.menu.sync_with(state_hash(app, ctx), || layout(app, ctx)) {
             log::info!("menu: {} is {} on macOS and {} in {APP}; {}", c.shortcut, c.system, c.command, c.resolution);
         }
