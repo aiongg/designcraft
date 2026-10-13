@@ -80,6 +80,8 @@ craft-cms = { version = "0.1.0", git = "https://github.com/storytold/craft-libs"
 # ui
 # Shared frontend components; keep this dependency above the engine boundary.
 craft-ui = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "5c874d51eeb3de70e735c8ce87a59a7dedd47675", features = ["serde"] }
+# The macOS menu bar: the Mac layout, AppKit menus, key equivalents fed back to egui (craft-libs).
+craft-menu = { version = "0.1.0", git = "https://github.com/aiongg/craft-libs", rev = "d1bba41c16bb47a83c75746b204d4a5637445838" }
 egui = "0.36"
 egui_extras = { version = "0.36", default-features = false, features = ["svg"] }
 eframe = { version = "0.36", default-features = false }

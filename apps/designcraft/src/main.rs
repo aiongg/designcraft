@@ -67,11 +67,8 @@ impl eframe::App for App {
         }
         #[cfg(target_os = "macos")]
         {
-            if self.menu.is_none() && std::env::var_os("DESIGNCRAFT_NO_NATIVE_MENU").is_none() {
-                self.menu = Some(native_menu::NativeMenu::install(&mut self.app, ctx));
-            }
             if let Some(m) = &mut self.menu {
-                m.poll(&mut self.app, ctx);
+                m.run_clicks(&mut self.app, ctx);
             }
             // Noted for a start again after a graphics failure, which reopens them (`gpu::restart`).
             self.startup.opening(apple_events::poll(&self.apple_events, &mut self.app, ctx));
@@ -80,6 +77,10 @@ impl eframe::App for App {
         self.startup.leave();
     }
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
+        #[cfg(target_os = "macos")]
+        if let Some(m) = &mut self.menu {
+            m.raw_input(raw);
+        }
         self.app.raw_input_hook(raw);
     }
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -91,6 +92,10 @@ impl eframe::App for App {
         }
         #[cfg(target_os = "macos")]
         mac_window::sync_movable(ui.ctx(), &mut self.movable);
+        #[cfg(target_os = "macos")]
+        if let Some(m) = &mut self.menu {
+            m.sync(&self.app, ui.ctx());
+        }
         self.startup.leave();
     }
     fn on_exit(&mut self) {
@@ -507,12 +512,15 @@ fn main() -> std::process::ExitCode {
                         log::warn!("{f}: {e}");
                     }
                 }
+                // In the creator, so winit's default menu bar doesn't stay up.
+                #[cfg(target_os = "macos")]
+                let menu = native_menu::NativeMenu::install(&mut app, &cc.egui_ctx);
                 // The first frame is due from now (`gpu::watch_first_frame`).
                 created.ready();
                 Ok(Box::new(App {
                     app,
                     #[cfg(target_os = "macos")]
-                    menu: None,
+                    menu,
                     startup: created,
                     #[cfg(target_os = "macos")]
                     apple_events: events.connect(&cc.egui_ctx),

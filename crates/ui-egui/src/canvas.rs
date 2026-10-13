@@ -2105,8 +2105,8 @@ fn handle_input(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, r
                 let id = if matches!(e, egui::Event::Cut) { "edit.cut" } else { "edit.copy" };
                 let _ = app.run(id, json!({}));
             }
-            // Without a native menu bar the copy and paste keys arrive only as these events.
-            egui::Event::Copy | egui::Event::Cut | egui::Event::Paste(_) if !app.native_menu => {
+            // The copy and paste keys arrive as these events (also through the macOS menu bar).
+            egui::Event::Copy | egui::Event::Cut | egui::Event::Paste(_) => {
                 let (id, params) = match e {
                     egui::Event::Copy => ("edit.copy", serde_json::Value::Null),
                     egui::Event::Cut => ("edit.cut", serde_json::Value::Null),

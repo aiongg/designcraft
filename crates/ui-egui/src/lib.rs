@@ -551,8 +551,6 @@ pub struct DesignApp {
     pub integrated_titlebar: bool,
     /// The host installed a native menu bar (macOS): don't draw menus in the window.
     pub native_menu: bool,
-    /// Shortcuts the native menu handles (skip them in the egui shortcut handler).
-    pub native_shortcuts: std::collections::HashSet<String>,
     last_time: f64,
     /// When recovery data was last written (seconds, egui time).
     pub last_recovery: f64,
@@ -623,7 +621,6 @@ impl DesignApp {
             os_documents: Vec::new(),
             integrated_titlebar: false,
             native_menu: false,
-            native_shortcuts: Default::default(),
             last_time: 0.0,
             last_recovery: 0.0,
             egui_ctx: None,
@@ -738,13 +735,9 @@ impl DesignApp {
                         self.object_clip_text = None;
                         Some(t.to_string())
                     }
-                    None if !self.native_menu => {
+                    None => {
                         self.object_clip_text = Some(self.copied_objects_text());
                         self.object_clip_text.clone()
-                    }
-                    None => {
-                        self.object_clip_text = self.services.clipboard_text.as_mut().and_then(|f| f());
-                        None
                     }
                 };
                 if let (Some(t), Some(ctx)) = (text, &self.egui_ctx) {

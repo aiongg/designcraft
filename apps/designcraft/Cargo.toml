@@ -38,9 +38,10 @@ winit = { version = "0.30", default-features = false, features = ["x11"] }
 winsafe = { version = "0.0.29", default-features = false, features = ["user"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-muda = { version = "0.21", default-features = false }
+# The menu bar (see `native_menu`).
+craft-menu = { workspace = true }
 # The input context, to drop the IME's marked text when the Type tool ends a composition; the
-# window's `movable` flag (see `mac_window`). The versions muda uses, through safe methods.
+# window's `movable` flag (see `mac_window`). The versions eframe uses, through safe methods.
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSTextInputContext", "NSWindow"] }
 # Finder double-clicks, Open With, Dock drops and `open -a DesignCraft brochure.idml` arrive as a

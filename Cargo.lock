@@ -825,11 +825,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-menu"
+version = "0.1.0"
+source = "git+https://github.com/aiongg/craft-libs?rev=d1bba41c16bb47a83c75746b204d4a5637445838#d1bba41c16bb47a83c75746b204d4a5637445838"
+dependencies = [
+ "craft-quit",
+ "egui",
+ "muda",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+]
+
+[[package]]
 name = "craft-print"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=d991bf6792f8ade99c51358bf3c1d902c8cd96b5#d991bf6792f8ade99c51358bf3c1d902c8cd96b5"
 dependencies = [
  "tempfile",
+]
+
+[[package]]
+name = "craft-quit"
+version = "0.1.0"
+source = "git+https://github.com/aiongg/craft-libs?rev=d1bba41c16bb47a83c75746b204d4a5637445838#d1bba41c16bb47a83c75746b204d4a5637445838"
+dependencies = [
+ "dispatch2",
+ "egui",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
 ]
 
 [[package]]
@@ -918,13 +941,13 @@ name = "designcraft"
 version = "0.7.1"
 dependencies = [
  "arboard",
+ "craft-menu",
  "designcraft-engine",
  "designcraft-ui-egui",
  "eframe",
  "egui",
  "fmv-macos-events",
  "log",
- "muda",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
  "rfd",
@@ -2718,9 +2741,9 @@ dependencies = [
 
 [[package]]
 name = "muda"
-version = "0.21.0"
+version = "0.21.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6744ab645ebe79f9c428455c7cb9dfa4275fa3b50a25408e08f927da8dc618c"
+checksum = "4340e89c178916e62879c5c36b7f699019369be413e496178a6983ce91b8bc03"
 dependencies = [
  "crossbeam-channel",
  "dpi 0.1.2",
@@ -2729,10 +2752,9 @@ dependencies = [
  "objc2-app-kit 0.3.2",
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
- "once_cell",
  "png",
  "thiserror 2.0.21",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]

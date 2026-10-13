@@ -2218,9 +2218,9 @@ pub fn activate(app: &mut DesignApp, id: &str, params: &Value) {
     let _ = app.run(id, p);
 }
 
-/// A native menu bar item was chosen (macOS): like [`activate`], except that the menu bar takes
-/// ⌘A, ⌘C, ⌘X, ⌘V, ⌘Z and ⇧⌘Z before the window sees them, so while a text field has keyboard
-/// focus, Select All, Copy, Cut, Paste, Undo and Redo act on that field, as in any Mac app.
+/// A native menu bar item was clicked (macOS): like [`activate`], except that while a text field
+/// has keyboard focus, Select All, Copy, Cut, Paste, Undo and Redo act on that field, as in any
+/// Mac app. Their key equivalents reach egui as the keys themselves.
 pub fn activate_native(app: &mut DesignApp, ctx: &egui::Context, id: &str, params: &Value) {
     if !(ctx.text_edit_focused() && params.is_null() && forward_to_text_field(app, ctx, id)) {
         activate(app, id, params);
@@ -2663,9 +2663,6 @@ pub fn shortcuts(app: &mut DesignApp, ctx: &egui::Context) {
             }
         }
         if let Some(id) = fired {
-            if app.native_shortcuts.contains(&id) && !app.ui.shortcuts.contains_key(&id) {
-                continue; // The native menu handles it.
-            }
             // The key press belongs to the shortcut: what it opens (Quick Apply's list, a dialog's
             // default button) must not see the same press as Enter or Space this frame.
             ctx.input_mut(|i| i.consume_key(modifiers, key));
@@ -3876,7 +3873,13 @@ mod tests {
         // Objects copied since that text was copied paste as objects.
         let id = app.session.execute("frame.create", &json!({"rect": [72, 72, 200, 160]})).unwrap()["id"].clone();
         app.session.execute("selection.set", &json!({"ids": [id]})).unwrap();
-        native_frame(&mut app, &ctx, vec![], Some("edit.copy"));
+        // Copying objects puts their text on the system clipboard.
+        let copied = native_frame(&mut app, &ctx, vec![], Some("edit.copy")).platform_output.commands.into_iter().find_map(|c| match c {
+            egui::OutputCommand::CopyText(t) => Some(t),
+            _ => None,
+        });
+        assert!(copied.is_some(), "copying objects puts text on the system clipboard");
+        *clip.borrow_mut() = copied;
         native_frame(&mut app, &ctx, vec![], Some("edit.paste"));
         assert_eq!(document_items(&app), (3, 1));
         assert_eq!(selected_text(&app), None, "the copied rectangle, not a text frame");
