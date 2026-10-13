@@ -799,7 +799,7 @@ dependencies = [
 [[package]]
 name = "craft-text"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs?rev=3bf1400b867369f05e5a475549fa65c9afe19722#3bf1400b867369f05e5a475549fa65c9afe19722"
+source = "git+https://github.com/aiongg/craft-libs?rev=70758c43b24429414af2c67b27420bb547150be6#70758c43b24429414af2c67b27420bb547150be6"
 dependencies = [
  "hypher",
  "miniz_oxide 0.8.9",
