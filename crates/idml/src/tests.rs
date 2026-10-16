@@ -4269,6 +4269,7 @@ fn custom_column_positions_import_and_round_trip() {
     assert_eq!(rects(&back), rects(&d));
     // A page nobody dragged still exports the even split, not a frozen copy of it.
     assert_eq!(import_idml(&export_idml(&even)).unwrap().spreads[0].pages[0].columns.positions, None);
+}
 
 /// #1096: a ruler guide inside the gutter of a two-column page, written the way InDesign writes
 /// it (a `<Page>` child after its `MarginPreference`, with `Properties`/`GuideColor`, `PageIndex`
