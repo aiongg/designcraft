@@ -1696,10 +1696,12 @@ mod adjust_tests {
         assert_eq!(pg.columns.positions, None);
         assert!((pg.column_rects()[1].x0 - pg.column_rects()[0].x1 - 24.0).abs() < 1e-6);
 
-        // Margins alone leave them alone: the offsets are relative to the margin box.
+        // Margins that keep the margin box's width leave them alone; a new width resets them.
         drag(&mut s);
-        s.execute("layout.marginsAndColumns", &json!({"margins": 72})).unwrap();
+        s.execute("layout.marginsAndColumns", &json!({"margins": {"top": 72, "bottom": 72, "inside": 36, "outside": 36}})).unwrap();
         assert_eq!(s.doc().unwrap().doc.page(0).unwrap().columns.positions, Some(vec![0.0, 100.0, 130.0, 540.0]));
+        s.execute("layout.marginsAndColumns", &json!({"margins": 72})).unwrap();
+        assert_eq!(s.doc().unwrap().doc.page(0).unwrap().columns.positions, None);
     }
 
     /// The params the Margins and Columns dialog sends on OK: every margin, the count and the
