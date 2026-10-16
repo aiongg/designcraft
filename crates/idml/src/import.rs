@@ -2524,7 +2524,10 @@ impl<'r> Importer<'r> {
                     (margins, fit_columns(columns, &margins, r.width()))
                 }
                 (None, Some(own)) => own.clone(),
-                (None, None) => self.default_margins.clone().unwrap_or((Margins::uniform(36.0), Columns::default())),
+                (None, None) => {
+                    let (margins, columns) = self.default_margins.clone().unwrap_or((Margins::uniform(36.0), Columns::default()));
+                    (margins, fit_columns(columns, &margins, r.width()))
+                }
             };
             let local_margins = from_parent.is_some_and(|(m, c)| m != margins || c != columns);
             out_pages.push(Page {
