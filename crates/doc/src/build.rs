@@ -648,7 +648,7 @@ impl Document {
                 if page.local_margins {
                     continue;
                 }
-                let Some(src) = self.parent_page(page).filter(|q| !q.same_margins(page)).map(|q| (q.margins, q.columns.clone())) else {
+                let Some(src) = self.parent_page(page).filter(|q| !q.same_margins(page)).map(|q| (q.margins, page.columns_from(q))) else {
                     continue;
                 };
                 if let Some(page) = Arc::make_mut(&mut self.spreads[si]).pages.get_mut(pi) {
