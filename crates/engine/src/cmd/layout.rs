@@ -97,17 +97,29 @@ fn set_margins_columns(pg: &mut designcraft_doc::Page, p: &Value) {
         }
         _ => {}
     }
-    // Setting a count or a gutter re-divides the columns evenly, as InDesign's Margins and
-    // Columns does: dragged column positions are what the new value replaces.
+    // A new count or gutter re-divides the columns evenly: dragged column positions are what
+    // the new value replaces. The dialog always sends both, so an unchanged value keeps them.
+    // Margins leave the positions stored; `Columns::valid_positions` decides whether they fit.
     if let Some(c) = p.get("columns").and_then(Value::as_u64) {
-        pg.columns.count = (c as u32).clamp(1, 216);
-        pg.columns.positions = None;
+        let c = u32::try_from(c).unwrap_or(u32::MAX).clamp(1, 216);
+        if c != pg.columns.count {
+            pg.columns.count = c;
+            pg.columns.positions = None;
+        }
     }
-    if let Some(g) = p.get("gutter").and_then(Value::as_f64) {
-        pg.columns.gutter = g.max(0.0);
-        pg.columns.positions = None;
+    if let Some(g) = p.get("gutter").and_then(Value::as_f64).filter(|g| g.is_finite()) {
+        let g = g.max(0.0);
+        if (g - pg.columns.gutter).abs() > GUTTER_TOLERANCE {
+            pg.columns.gutter = g;
+            pg.columns.positions = None;
+        }
     }
 }
+
+/// How far a gutter may differ from the page's and still count as unchanged, in points. The
+/// dialog shows the gutter in the ruler unit, rounded (inches to four decimals: up to 0.0036 pt
+/// off), so an OK that leaves the field alone sends back a slightly different number.
+const GUTTER_TOLERANCE: f64 = 0.01;
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -1672,6 +1684,98 @@ mod adjust_tests {
         drag(&mut s);
         s.execute("layout.marginsAndColumns", &json!({"margins": 72})).unwrap();
         assert_eq!(s.doc().unwrap().doc.page(0).unwrap().columns.positions, Some(vec![0.0, 100.0, 130.0, 540.0]));
+    }
+
+    /// The params the Margins and Columns dialog sends on OK: every margin, the count and the
+    /// gutter, whether or not the user changed them.
+    fn dialog_params(margin: f64, columns: u32, gutter: f64) -> serde_json::Value {
+        json!({"margins": {"top": margin, "bottom": margin, "inside": margin, "outside": margin},
+            "columns": columns, "gutter": gutter, "adjustLayout": false})
+    }
+
+    const DRAGGED: [f64; 4] = [0.0, 100.0, 130.0, 540.0];
+
+    fn dragged() -> designcraft_doc::Columns {
+        designcraft_doc::Columns { count: 2, gutter: 12.0, positions: Some(DRAGGED.to_vec()) }
+    }
+
+    /// An OK in the dialog keeps dragged columns unless the count or gutter it sends differs.
+    #[test]
+    fn the_dialog_keeps_dragged_columns_unless_the_count_or_gutter_changes() {
+        let mut s = Session::new();
+        s.execute("file.new", &json!({"pages": 1, "facingPages": false})).unwrap();
+        let drag = |s: &mut Session| {
+            s.edit(|d, _| {
+                std::sync::Arc::make_mut(&mut d.spreads[0]).pages[0].columns = dragged();
+                Ok(())
+            })
+            .unwrap();
+        };
+        let positions = |s: &Session| s.doc().unwrap().doc.page(0).unwrap().columns.positions.clone();
+
+        // The same count and gutter (the gutter as an inch field rounds it) keep them in use.
+        drag(&mut s);
+        s.execute("layout.marginsAndColumns", &dialog_params(36.0, 2, 12.0)).unwrap();
+        assert_eq!(positions(&s), Some(DRAGGED.to_vec()));
+        s.execute("layout.marginsAndColumns", &dialog_params(36.0, 2, 0.1667 * 72.0)).unwrap();
+        assert_eq!(positions(&s), Some(DRAGGED.to_vec()));
+        let rects = s.doc().unwrap().doc.page(0).unwrap().column_rects();
+        assert!((rects[0].x1 - rects[0].x0 - 100.0).abs() < 1e-6, "the dragged columns are in use: {rects:?}");
+
+        // A margin-only change keeps them stored; the page's validator decides whether they fit.
+        s.execute("layout.marginsAndColumns", &dialog_params(72.0, 2, 12.0)).unwrap();
+        assert_eq!(positions(&s), Some(DRAGGED.to_vec()));
+
+        // A new count resets them.
+        drag(&mut s);
+        s.execute("layout.marginsAndColumns", &dialog_params(36.0, 3, 12.0)).unwrap();
+        let pg = s.doc().unwrap().doc.page(0).unwrap().clone();
+        assert_eq!((pg.columns.count, pg.columns.positions), (3, None));
+
+        // So does a new gutter.
+        drag(&mut s);
+        s.execute("layout.marginsAndColumns", &dialog_params(36.0, 2, 18.0)).unwrap();
+        let pg = s.doc().unwrap().doc.page(0).unwrap().clone();
+        assert_eq!((pg.columns.gutter, pg.columns.positions), (18.0, None));
+    }
+
+    /// Parent pages follow the same rule, and the document pages that follow them see it.
+    #[test]
+    fn the_dialog_keeps_a_parents_dragged_columns_unless_the_count_or_gutter_changes() {
+        let mut s = Session::new();
+        s.execute("file.new", &json!({"pages": 1, "facingPages": false})).unwrap();
+        let drag = |s: &mut Session| {
+            s.edit(|d, _| {
+                std::sync::Arc::make_mut(&mut d.parents[0]).pages[0].columns = dragged();
+                d.sync_parent_margins();
+                Ok(())
+            })
+            .unwrap();
+        };
+        let positions = |s: &Session| {
+            let d = &s.doc().unwrap().doc;
+            (d.parents[0].pages[0].columns.positions.clone(), d.page(0).unwrap().columns.positions.clone())
+        };
+        let on_parent = |m: f64, c: u32, g: f64| {
+            let mut p = dialog_params(m, c, g);
+            p["parent"] = json!(0);
+            p
+        };
+
+        drag(&mut s);
+        assert_eq!(positions(&s), (Some(DRAGGED.to_vec()), Some(DRAGGED.to_vec())));
+        s.execute("layout.marginsAndColumns", &on_parent(36.0, 2, 12.0)).unwrap();
+        assert_eq!(positions(&s), (Some(DRAGGED.to_vec()), Some(DRAGGED.to_vec())));
+        s.execute("layout.marginsAndColumns", &on_parent(48.0, 2, 12.0)).unwrap();
+        assert_eq!(positions(&s), (Some(DRAGGED.to_vec()), Some(DRAGGED.to_vec())));
+
+        drag(&mut s);
+        s.execute("layout.marginsAndColumns", &on_parent(36.0, 3, 12.0)).unwrap();
+        assert_eq!(positions(&s), (None, None));
+
+        drag(&mut s);
+        s.execute("layout.marginsAndColumns", &on_parent(36.0, 2, 24.0)).unwrap();
+        assert_eq!(positions(&s), (None, None));
     }
 }
 
