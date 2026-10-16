@@ -1813,7 +1813,10 @@ mod adjust_tests {
         s.execute("file.new", &json!({"pages": 1, "facingPages": false})).unwrap();
         let drag = |s: &mut Session| {
             s.edit(|d, _| {
-                std::sync::Arc::make_mut(&mut d.spreads[0]).pages[0].columns = dragged();
+                // A dragged page's columns are its own (`local_margins`), as the drag will make them.
+                let pg = &mut std::sync::Arc::make_mut(&mut d.spreads[0]).pages[0];
+                pg.columns = dragged();
+                pg.local_margins = true;
                 Ok(())
             })
             .unwrap();
