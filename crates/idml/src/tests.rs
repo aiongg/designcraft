@@ -4232,11 +4232,23 @@ fn custom_column_positions_import_and_round_trip() {
     // Including when InDesign's own arithmetic leaves the last bits different.
     assert_eq!(with(r#"ColumnsPositions="0 215.00000000000003 234.99999999999997 450""#).spreads[0].pages[0].columns.positions, None);
 
-    // Malformed sets are ignored rather than half-read: an odd count, a descending pair, a NaN.
-    for bad in
-        [r#"ColumnsPositions="0 150 170""#, r#"ColumnsPositions="0 150 90 450""#, r#"ColumnsPositions="0 x 170 450""#, r#"ColumnsPositions="""#]
-    {
-        assert_eq!(with(bad).spreads[0].pages[0].columns.positions, None, "{bad}");
+    // Malformed sets are ignored rather than half-read: an odd count, three columns' worth for a
+    // count of two, a descending pair, a NaN, a set that stops short of the page's margin box, and
+    // a list far longer than any count allows. Each page keeps the even split.
+    let huge = format!(r#"ColumnsPositions="{}""#, (0..10_000).map(|i| i.to_string()).collect::<Vec<_>>().join(" "));
+    for bad in [
+        r#"ColumnsPositions="0 150 170""#,
+        r#"ColumnsPositions="0 100 120 200 220 450""#,
+        r#"ColumnsPositions="0 150 90 450""#,
+        r#"ColumnsPositions="0 x 170 450""#,
+        r#"ColumnsPositions="0 NaN 170 450""#,
+        r#"ColumnsPositions="0 150 170 400""#,
+        r#"ColumnsPositions="""#,
+        huge.as_str(),
+    ] {
+        let d = with(bad);
+        assert_eq!(d.spreads[0].pages[0].columns.positions, None, "{}", bad.get(..bad.len().min(60)).unwrap_or(""));
+        assert_eq!(rects(&d), rects(&even));
     }
 
     // And they come back from an export, so the round trip keeps the dragged gutter.
