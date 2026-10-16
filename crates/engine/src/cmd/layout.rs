@@ -88,6 +88,7 @@ fn dist(r: designcraft_geom::Rect, x: f64) -> f64 {
 
 /// Apply the `margins`, `columns` and `gutter` params of `layout.marginsAndColumns` to one page.
 fn set_margins_columns(pg: &mut designcraft_doc::Page, p: &Value) {
+    let width_before = pg.margin_rect().width();
     match p.get("margins") {
         Some(Value::Number(n)) => pg.margins = Margins::uniform(n.as_f64().unwrap_or(36.0)),
         Some(v @ Value::Object(_)) => {
@@ -97,9 +98,14 @@ fn set_margins_columns(pg: &mut designcraft_doc::Page, p: &Value) {
         }
         _ => {}
     }
+    // Dragged positions are measured across the margin box, so a box of another width no longer
+    // fits them: the columns go back to the even split, and nothing hidden stays stored to
+    // reappear when the width comes back.
+    if (pg.margin_rect().width() - width_before).abs() > GUTTER_TOLERANCE {
+        pg.columns.positions = None;
+    }
     // A new count or gutter re-divides the columns evenly: dragged column positions are what
     // the new value replaces. The dialog always sends both, so an unchanged value keeps them.
-    // Margins leave the positions stored; `Columns::valid_positions` decides whether they fit.
     if let Some(c) = p.get("columns").and_then(Value::as_u64) {
         let c = u32::try_from(c).unwrap_or(u32::MAX).clamp(1, 216);
         if c != pg.columns.count {
@@ -113,6 +119,14 @@ fn set_margins_columns(pg: &mut designcraft_doc::Page, p: &Value) {
             pg.columns.gutter = g;
             pg.columns.positions = None;
         }
+    }
+}
+
+/// A page about to take width `width` drops its dragged column positions when the width changes:
+/// they are measured across the margin box, so they would no longer fit it.
+fn forget_columns_on_new_width(pg: &mut designcraft_doc::Page, width: f64) {
+    if (width - pg.width).abs() > GUTTER_TOLERANCE {
+        pg.columns.positions = None;
     }
 }
 
@@ -472,6 +486,7 @@ pub fn specs() -> Vec<CommandSpec> {
                         for sp in d.spreads.iter_mut().chain(d.parents.iter_mut()) {
                             let sp = std::sync::Arc::make_mut(sp);
                             for pg in &mut sp.pages {
+                                forget_columns_on_new_width(pg, d.settings.page_width);
                                 pg.width = d.settings.page_width;
                                 pg.height = d.settings.page_height;
                             }
@@ -952,6 +967,7 @@ pub(crate) fn resize_pages_from(d: &mut designcraft_doc::Document, pages: &[usiz
             let dw = w.map_or(0.0, |w| w.max(1.0) - pg.width);
             let dh = h.map_or(0.0, |h| h.max(1.0) - pg.height);
             if let Some(w) = w {
+                forget_columns_on_new_width(pg, w.max(1.0));
                 pg.width = w.max(1.0);
             }
             if let Some(h) = h {
@@ -1722,9 +1738,20 @@ mod adjust_tests {
         let rects = s.doc().unwrap().doc.page(0).unwrap().column_rects();
         assert!((rects[0].x1 - rects[0].x0 - 100.0).abs() < 1e-6, "the dragged columns are in use: {rects:?}");
 
-        // A margin-only change keeps them stored; the page's validator decides whether they fit.
-        s.execute("layout.marginsAndColumns", &dialog_params(72.0, 2, 12.0)).unwrap();
+        // Top and bottom margins leave the margin box's width alone, and the columns with it.
+        let mut taller = dialog_params(36.0, 2, 12.0);
+        taller["margins"]["top"] = json!(72.0);
+        taller["margins"]["bottom"] = json!(72.0);
+        s.execute("layout.marginsAndColumns", &taller).unwrap();
         assert_eq!(positions(&s), Some(DRAGGED.to_vec()));
+
+        // A new width goes back to the even split, and the old width doesn't bring them back.
+        s.execute("layout.marginsAndColumns", &dialog_params(72.0, 2, 12.0)).unwrap();
+        assert_eq!(positions(&s), None);
+        s.execute("layout.marginsAndColumns", &dialog_params(36.0, 2, 12.0)).unwrap();
+        assert_eq!(positions(&s), None);
+        let rects = s.doc().unwrap().doc.page(0).unwrap().column_rects();
+        assert!((rects[0].x1 - rects[0].x0 - 264.0).abs() < 1e-6, "the even split: {rects:?}");
 
         // A new count resets them.
         drag(&mut s);
@@ -1737,6 +1764,34 @@ mod adjust_tests {
         s.execute("layout.marginsAndColumns", &dialog_params(36.0, 2, 18.0)).unwrap();
         let pg = s.doc().unwrap().doc.page(0).unwrap().clone();
         assert_eq!((pg.columns.gutter, pg.columns.positions), (18.0, None));
+    }
+
+    /// A page of another width (Page Size, Document Setup) goes back to the even split, and the
+    /// old width doesn't bring the dragged columns back.
+    #[test]
+    fn a_new_page_width_resets_dragged_columns() {
+        let mut s = Session::new();
+        s.execute("file.new", &json!({"pages": 1, "facingPages": false})).unwrap();
+        let drag = |s: &mut Session| {
+            s.edit(|d, _| {
+                std::sync::Arc::make_mut(&mut d.spreads[0]).pages[0].columns = dragged();
+                Ok(())
+            })
+            .unwrap();
+        };
+        let positions = |s: &Session| s.doc().unwrap().doc.page(0).unwrap().columns.positions.clone();
+
+        drag(&mut s);
+        s.execute("layout.pageSize", &json!({"pages": [1], "height": 900})).unwrap();
+        assert_eq!(positions(&s), Some(DRAGGED.to_vec()), "a new height keeps them");
+        s.execute("layout.pageSize", &json!({"pages": [1], "width": 700})).unwrap();
+        assert_eq!(positions(&s), None);
+        s.execute("layout.pageSize", &json!({"pages": [1], "width": 612})).unwrap();
+        assert_eq!(positions(&s), None);
+
+        drag(&mut s);
+        s.execute("layout.documentSetup", &json!({"width": 700})).unwrap();
+        assert_eq!(positions(&s), None);
     }
 
     /// Parent pages follow the same rule, and the document pages that follow them see it.
@@ -1767,7 +1822,7 @@ mod adjust_tests {
         s.execute("layout.marginsAndColumns", &on_parent(36.0, 2, 12.0)).unwrap();
         assert_eq!(positions(&s), (Some(DRAGGED.to_vec()), Some(DRAGGED.to_vec())));
         s.execute("layout.marginsAndColumns", &on_parent(48.0, 2, 12.0)).unwrap();
-        assert_eq!(positions(&s), (Some(DRAGGED.to_vec()), Some(DRAGGED.to_vec())));
+        assert_eq!(positions(&s), (None, None), "a new margin width resets the parent and its followers");
 
         drag(&mut s);
         s.execute("layout.marginsAndColumns", &on_parent(36.0, 3, 12.0)).unwrap();
