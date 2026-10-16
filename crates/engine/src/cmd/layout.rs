@@ -2328,6 +2328,20 @@ mod parent_tests {
         assert_eq!(columns_of(&s, 0).0.unwrap()[1], 50.0);
     }
 
+    /// A drag's preview in one document is put back there when another document became active.
+    #[test]
+    fn a_column_guide_preview_is_cancelled_in_its_own_document() {
+        let mut s = three_columns(1);
+        let uid = s.doc().unwrap().uid;
+        s.begin_interaction("Move Column Guide").unwrap();
+        s.preview("layout.moveColumnGuide", json!({"page": 0, "gutter": 0, "position": 236})).unwrap();
+        s.execute("file.new", &json!({})).unwrap();
+        s.cancel_interaction_of(uid);
+        s.set_active(0);
+        assert!(s.doc().unwrap().interaction.is_none());
+        assert_eq!(columns_of(&s, 0), (None, false));
+    }
+
     #[test]
     fn move_column_guide_refuses_while_locked_and_hostile_params() {
         let mut s = three_columns(1);

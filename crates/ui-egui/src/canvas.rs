@@ -603,7 +603,10 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
         // A column guide that a press would drag, or one being dragged: a resize cursor across it.
         let dragging = ui.data(|d| d.get_temp::<ColumnDrag>(egui::Id::new((COLUMN_DRAG, app.pane)))).map(|g| g.spread);
         let column = dragging.or_else(|| {
-            (!space && !zoom && !middle && !alt_hand && !tool_drag && xf.rot == 0).then(|| column_guide_at(app, &xf, p).map(|h| h.0)).flatten()
+            let menu_open = context_menu_open(ui.ctx());
+            (!space && !zoom && !middle && !alt_hand && !tool_drag && !menu_open && xf.rot == 0)
+                .then(|| column_guide_at(app, &xf, p).map(|h| h.0))
+                .flatten()
         });
         let c = match column {
             Some(r) if spread_x_across(app, r) => Cursor::ResizeH,
@@ -2337,6 +2340,11 @@ fn handle_input(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, r
     // Space-drag = hand (unless a tool drag is under way: then Space is a modifier, e.g. Live
     // Distribute while resizing). Middle-drag pans too, with any tool; tools only
     // see the primary button.
+    // A column guide drag keeps the pointer until the button is up, whatever Space or a menu does
+    // meanwhile.
+    if ui.data(|d| d.get_temp::<ColumnDrag>(egui::Id::new((COLUMN_DRAG, app.pane)))).is_some() && column_guide_drag(app, ui, resp, rect, &xf) {
+        return;
+    }
     let tool_drag: bool = ui.data(|d| d.get_temp(egui::Id::new(("canvas_pointer_down", app.pane)))).unwrap_or(false);
     let hand = space && !ui.input(|i| i.modifiers.command);
     if !tool_drag && ((hand && resp.dragged()) || resp.dragged_by(egui::PointerButton::Middle)) {
@@ -2948,16 +2956,24 @@ fn guide_drag(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, rec
     true
 }
 
-/// An object of a document spread is under screen point `p` (within 3 px): it takes the press
-/// before the guides behind it.
+/// An object is under screen point `p` where the Selection tool would pick it (a document
+/// spread's, or a parent spread's while editing parents): it takes the press before the guides
+/// behind it.
 fn over_item(app: &DesignApp, xf: &Xf, p: Pos2) -> bool {
-    app.session.active().is_some_and(|st| {
-        let layout = CanvasLayout::new(&st.doc, st.editing_parents);
-        layout.spread_at(xf.to_canvas(p)).is_some_and(|(sr, p)| match sr {
-            designcraft_doc::SpreadRef::Doc(si) => st.doc.hit_item(si, p, 3.0 / xf.zoom).is_some(),
-            _ => false,
-        })
-    })
+    let Some(st) = app.session.active() else { return false };
+    let layout = CanvasLayout::new(&st.doc, st.editing_parents);
+    let cx = designcraft_tools::ToolContext {
+        doc: &st.doc,
+        selection: &st.selection,
+        cache: &app.session.cache,
+        layout: &layout,
+        zoom: xf.zoom.max(1e-6),
+        layer: st.active_layer,
+        snap: app.ui.snap_view(),
+        unit: app.ui.units,
+        stroke_in_front: false,
+    };
+    cx.hit(xf.to_canvas(p)).is_some()
 }
 
 const COLUMN_DRAG: &str = "canvas_column_drag";
@@ -2965,6 +2981,8 @@ const COLUMN_DRAG: &str = "canvas_column_drag";
 /// A column guide being dragged with a Selection tool: its gutter follows the pointer.
 #[derive(Clone, Debug)]
 struct ColumnDrag {
+    /// The document the drag's interaction belongs to.
+    doc: u64,
     spread: SpreadRef,
     page: usize,
     gutter: usize,
@@ -2976,10 +2994,12 @@ struct ColumnDrag {
 }
 
 /// The interior column guide under screen point `p` (within 3 px) that a press there would drag,
-/// as (spread, page, gutter, the gutter's left edge in spread x): a Selection tool, guides shown,
-/// column guides unlocked, and no object under the pointer.
+/// as (spread, page, gutter, the gutter's left edge in spread x): a Selection tool, guides shown
+/// (not in Preview or Presentation), column guides unlocked, and no object or ruler guide that
+/// takes the press there.
 fn column_guide_at(app: &DesignApp, xf: &Xf, p: Pos2) -> Option<(SpreadRef, usize, usize, f64)> {
-    if !app.ui.guides || !matches!(app.session.tool_id(), "selection" | "directSelection") {
+    let preview = matches!(app.ui.screen_mode, ScreenMode::Preview | ScreenMode::Presentation);
+    if !app.ui.guides || preview || !matches!(app.session.tool_id(), "selection" | "directSelection") {
         return None;
     }
     let st = app.session.active()?;
@@ -2995,11 +3015,19 @@ fn column_guide_at(app: &DesignApp, xf: &Xf, p: Pos2) -> Option<(SpreadRef, usiz
             return None;
         }
         pg.column_rects().windows(2).enumerate().find_map(|(gi, w)| match w {
-            [a, b] if (sp.x - a.x1).abs() <= tol || (sp.x - b.x0).abs() <= tol => Some((r, pi, gi, a.x1)),
+            // Columns that cannot move (gutters wider than the margin box) offer no guide.
+            [a, b]
+                if ((sp.x - a.x1).abs() <= tol || (sp.x - b.x0).abs() <= tol)
+                    && pg.columns.with_gutter_moved(m.width(), gi, a.x1 - m.x0).is_some() =>
+            {
+                Some((r, pi, gi, a.x1))
+            }
             _ => None,
         })
     })?;
-    (!over_item(app, xf, p)).then_some(hit)
+    // A ruler guide there takes the press first (see `guide_drag`).
+    let ruler_guide = !app.ui.guides_locked && guide_at(app, xf, p).is_some();
+    (!ruler_guide && !over_item(app, xf, p)).then_some(hit)
 }
 
 /// Whether spread `r`'s x axis runs across the screen (the spread view is not turned a quarter).
@@ -3082,7 +3110,8 @@ fn column_guide_drag(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Respon
     let (pressed, released, origin, latest, shift, escape) = ui.input(|i| {
         (
             i.pointer.primary_pressed(),
-            i.pointer.primary_released(),
+            // A release this frame, or one missed while something else had the pointer.
+            i.pointer.primary_released() || !i.pointer.primary_down(),
             i.pointer.press_origin(),
             i.pointer.latest_pos(),
             i.modifiers.shift,
@@ -3096,16 +3125,22 @@ fn column_guide_drag(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Respon
         && let Some(o) = origin.filter(|o| rect.contains(*o))
         && let Some((spread, page, gutter, left)) = column_guide_at(app, xf, o)
         // Another gesture or a dialog's preview owns the document until it ends.
-        && let Some(slot_x) = app
+        && let Some((doc, slot_x)) = app
             .session
             .active()
             .filter(|st| st.interaction.is_none())
-            .map(|st| CanvasLayout::new(&st.doc, st.editing_parents).to_spread(spread, xf.to_canvas(o)).x)
+            .map(|st| (st.uid, CanvasLayout::new(&st.doc, st.editing_parents).to_spread(spread, xf.to_canvas(o)).x))
         && app.session.begin_interaction("Move Column Guide").is_ok()
     {
-        drag = Some(ColumnDrag { spread, page, gutter, grab: slot_x - left, last: None });
+        drag = Some(ColumnDrag { doc, spread, page, gutter, grab: slot_x - left, last: None });
     }
     let Some(mut g) = drag else { return false };
+    // Another document became active: the drag ends in its own, as it began.
+    if app.session.active().is_none_or(|st| st.uid != g.doc) {
+        app.session.cancel_interaction_of(g.doc);
+        ui.data_mut(|d| d.remove::<ColumnDrag>(id));
+        return false;
+    }
     if escape {
         app.session.cancel_interaction();
         ui.data_mut(|d| d.remove::<ColumnDrag>(id));
@@ -3350,6 +3385,78 @@ mod tests {
         h.run_steps(3);
         assert_eq!(page(&h).columns.positions, None);
         assert!(!page(&h).local_margins);
+
+        // Space pressed during the drag and the button released under it: the drag ends with the
+        // release and the gutter stops following the pointer.
+        let key = |pressed| egui::Event::Key { key: egui::Key::Space, physical_key: None, pressed, repeat: false, modifiers: Default::default() };
+        h.hover_at(at);
+        h.step();
+        h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
+        h.step();
+        h.hover_at(at + vec2(40.0, 0.0));
+        h.step();
+        h.event(key(true));
+        h.step();
+        h.event(egui::Event::PointerButton {
+            pos: at + vec2(40.0, 0.0),
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: Default::default(),
+        });
+        h.step();
+        h.event(key(false));
+        h.run_steps(2);
+        let moved = page(&h).columns.positions;
+        assert!(moved.is_some());
+        h.hover_at(at + vec2(120.0, 0.0));
+        h.run_steps(3);
+        assert_eq!(page(&h).columns.positions, moved, "the gutter stays where the drag ended");
+        assert!(h.state().session.active().unwrap().interaction.is_none());
+        h.state_mut().run("edit.undo", json!({})).unwrap();
+        assert_eq!(page(&h).columns.positions, None, "the drag was one undo step");
+    }
+
+    /// A column guide is not picked where the screen mode hides guides, where an object on the
+    /// parent being edited lies over it, or where its columns cannot move.
+    #[test]
+    fn column_guides_are_picked_only_where_a_drag_can_move_them() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"pages": 1})).unwrap();
+        app.run("layout.marginsAndColumns", json!({"parent": "A", "columns": 2, "gutter": 12})).unwrap();
+        app.run("view.lockColumnGuides", json!({"on": false})).unwrap();
+        let mut h = harness(app);
+        let hit = |h: &Harness<'_, DesignApp>, r: SpreadRef, x: f64| {
+            let app = h.state();
+            let xf = Xf::new(app.canvas_rect.unwrap(), app.view().unwrap());
+            let st = app.session.active().unwrap();
+            let layout = CanvasLayout::new(&st.doc, st.editing_parents);
+            let slot = layout.slots.iter().find(|s| s.spread == r).unwrap();
+            column_guide_at(app, &xf, xf.to_screen(slot.xf * Point::new(x, 400.0)))
+        };
+        assert!(hit(&h, SpreadRef::Doc(0), 300.0).is_some());
+        h.state_mut().ui.screen_mode = ScreenMode::Preview;
+        assert!(hit(&h, SpreadRef::Doc(0), 300.0).is_none(), "Preview hides the guides");
+        h.state_mut().ui.screen_mode = ScreenMode::Normal;
+
+        // Editing parent A: its right page (the one page 0 follows) and a frame over its gutter.
+        h.state_mut().run("layout.parents.edit", json!({"on": true, "parent": "A-Parent"})).unwrap();
+        h.run_steps(2);
+        let parent = SpreadRef::Parent(0);
+        let x = h.state().session.active().unwrap().doc.parents[0].pages[1].column_rects()[0].x1;
+        assert!(hit(&h, parent, x).is_some());
+        h.state_mut()
+            .run("frame.create", json!({"spread": {"kind": "parent", "index": 0}, "rect": [x - 20.0, 300.0, x + 20.0, 500.0], "content": "text"}))
+            .unwrap();
+        h.run_steps(2);
+        assert!(hit(&h, parent, x).is_none(), "the parent's frame takes the press");
+        h.state_mut().run("layout.parents.edit", json!({"on": false})).unwrap();
+        h.run_steps(2);
+
+        // Gutters wider than the margin box: the even split cannot be moved.
+        h.state_mut().run("layout.marginsAndColumns", json!({"pages": [0], "columns": 2, "gutter": 1000})).unwrap();
+        h.run_steps(2);
+        let x = h.state().session.active().unwrap().doc.spreads[0].pages[0].column_rects()[0].x1;
+        assert!(hit(&h, SpreadRef::Doc(0), x).is_none());
     }
 
     fn right_click(h: &mut Harness<'_, DesignApp>, p: Pos2) {
