@@ -106,6 +106,15 @@ impl Columns {
         *r = (at + width).min(hi);
         valid_column_positions(&pos, self.count, margin_width).then_some(pos)
     }
+
+    /// These columns reflected across a margin box `margin_width` wide, as on the facing page
+    /// across the spine: each custom position `p` becomes `margin_width - p`, in reverse order so
+    /// they stay ascending. Count and gutter stay; positions that are not valid (see
+    /// [`Columns::valid_positions`]) become `None`, the even split, which mirrors onto itself.
+    pub fn mirrored(&self, margin_width: f64) -> Columns {
+        let positions = self.valid_positions(margin_width).map(|p| p.iter().rev().map(|&v| inside(margin_width - v, margin_width)).collect());
+        Columns { count: self.count, gutter: self.gutter, positions }
+    }
 }
 
 /// `v` limited to `0..=w` without `clamp`, which panics when `w` is NaN.
@@ -313,6 +322,16 @@ impl Page {
         match self.side {
             PageSide::Left => (self.margins.outside, self.margins.inside),
             _ => (self.margins.inside, self.margins.outside),
+        }
+    }
+    /// `src`'s columns as they fall on this page: the same when both pages put their inside
+    /// margin on the same physical side, mirrored across `src`'s margin box when one is a left
+    /// page and the other is not, as InDesign mirrors dragged column guides across the spine.
+    pub fn columns_from(&self, src: &Page) -> Columns {
+        if (self.side == PageSide::Left) == (src.side == PageSide::Left) {
+            src.columns.clone()
+        } else {
+            src.columns.mirrored(src.margin_rect().width())
         }
     }
     /// The live area inside the margins.
@@ -590,6 +609,35 @@ mod tests {
         assert_eq!(c.with_gutter_moved(450.0, 0, f64::NAN), None);
         assert_eq!(Columns { count: 1, gutter: 12.0, positions: None }.with_gutter_moved(450.0, 0, 100.0), None);
         assert_eq!(c.with_gutter_moved(f64::NAN, 0, 100.0), None);
+    }
+
+    /// Mirroring reflects dragged columns across the margin box and keeps them ascending; an
+    /// invalid set becomes the even split.
+    #[test]
+    fn mirrored_columns_reflect_across_the_margin_box() {
+        let two = Columns { count: 2, gutter: 12.0, positions: Some(vec![0.0, 100.0, 130.0, 540.0]) };
+        assert_eq!(two.mirrored(540.0), Columns { positions: Some(vec![0.0, 410.0, 440.0, 540.0]), ..two.clone() });
+        assert_eq!(two.mirrored(540.0).mirrored(540.0), two);
+
+        let three = Columns { count: 3, gutter: 10.0, positions: Some(vec![0.0, 50.0, 60.0, 200.0, 210.0, 300.0]) };
+        let m = three.mirrored(300.0);
+        assert_eq!(m.positions, Some(vec![0.0, 90.0, 100.0, 240.0, 250.0, 300.0]));
+        assert!(m.valid_positions(300.0).is_some());
+
+        // Positions that do not fit the margin box, or none at all, mirror to the even split.
+        assert_eq!(two.mirrored(600.0).positions, None);
+        assert_eq!(two.mirrored(f64::NAN).positions, None);
+        let unsorted = Columns { positions: Some(vec![0.0, 130.0, 100.0, 540.0]), ..two.clone() };
+        assert_eq!(unsorted.mirrored(540.0).positions, None);
+        let even = Columns { positions: None, ..two.clone() };
+        assert_eq!(even.mirrored(540.0), even);
+
+        // A left page takes a right page's columns mirrored, a page on the same side as they are.
+        let mut r = page(PageSide::Right, 612.0);
+        r.columns = Columns { count: 2, gutter: 12.0, positions: Some(vec![0.0, 100.0, 130.0, 522.0]) };
+        let l = page(PageSide::Left, 0.0);
+        assert_eq!(l.columns_from(&r).positions, Some(vec![0.0, 392.0, 422.0, 522.0]));
+        assert_eq!(page(PageSide::Right, 0.0).columns_from(&r), r.columns);
     }
 
     #[test]
