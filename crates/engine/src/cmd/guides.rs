@@ -39,12 +39,12 @@ pub fn specs() -> Vec<CommandSpec> {
                 Ok(json!({"deleted": n}))
             })
         }),
-        cmd!(noundo
+        cmd!(
             "view.lockColumnGuides",
             "Lock Column Guides",
             ["View", "Grids & Guides"],
             None,
-            "{on?: bool (default: toggle)} → {locked} — locked column guides can't be dragged; saved with the document (IDML ColumnGuideLocked), on in new documents; not an undo step",
+            "{on?: bool (default: toggle)} → {locked} — locked column guides can't be dragged; saved with the document (IDML ColumnGuideLocked), on in new documents",
             has_doc,
             lock_column_guides
         ),
@@ -337,22 +337,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn lock_column_guides_toggles_and_sets_without_undo_steps() {
+    fn lock_column_guides_toggles_sets_and_undoes() {
         let mut s = Session::new();
         s.execute("file.new", &json!({})).unwrap();
         let locked = |s: &Session| s.doc().unwrap().doc.settings.column_guides_locked;
+        let undo_steps = |s: &Session| s.doc().unwrap().history.undo.len();
         assert!(locked(&s), "locked in new documents");
-        s.execute("frame.create", &json!({"rect": [36, 36, 136, 136]})).unwrap();
-        let undo_steps = s.doc().unwrap().history.undo.len();
+        let before = undo_steps(&s);
         assert_eq!(s.execute("view.lockColumnGuides", &json!({})).unwrap()["locked"], false);
         assert!(!locked(&s));
-        assert_eq!(s.doc().unwrap().history.undo.len(), undo_steps, "not an undo step");
-        // Undo takes back the frame and leaves the lock as it is.
+        assert_eq!(undo_steps(&s), before + 1, "one undo step per toggle");
         s.execute("edit.undo", &json!({})).unwrap();
-        assert!(!locked(&s));
+        assert!(locked(&s), "undo restores the lock");
         s.execute("edit.redo", &json!({})).unwrap();
-        assert!(!locked(&s));
+        assert!(!locked(&s), "redo unlocks again");
+        // Setting the current value changes nothing and adds no undo step.
+        let steps = undo_steps(&s);
         assert_eq!(s.execute("view.lockColumnGuides", &json!({"on": false})).unwrap()["locked"], false);
+        assert_eq!(undo_steps(&s), steps);
         assert_eq!(s.execute("view.lockColumnGuides", &json!({"on": true})).unwrap()["locked"], true);
         assert!(locked(&s));
         assert_eq!(s.execute("view.lockColumnGuides", &json!({})).unwrap()["locked"], false);
@@ -362,6 +364,7 @@ mod tests {
         let back: Document = serde_json::from_str(&json).unwrap();
         assert!(!back.settings.column_guides_locked);
         let old = json.replace("\"columnGuidesLocked\":false,", "").replace(",\"columnGuidesLocked\":false", "");
+        assert!(!old.contains("columnGuidesLocked"));
         let back: Document = serde_json::from_str(&old).unwrap();
         assert!(back.settings.column_guides_locked);
     }
