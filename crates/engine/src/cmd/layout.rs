@@ -246,8 +246,9 @@ pub fn specs() -> Vec<CommandSpec> {
                         let nsp = std::sync::Arc::make_mut(&mut d.spreads[nsi]);
                         let pg = &mut nsp.pages[npi];
                         let dx = pg.x - src.x;
-                        (pg.width, pg.height, pg.margins, pg.columns, pg.liquid) =
-                            (src.width, src.height, src.margins, src.columns.clone(), src.liquid);
+                        // A copy on the other side of the spine has its dragged columns mirrored.
+                        let columns = pg.columns_from(src);
+                        (pg.width, pg.height, pg.margins, pg.columns, pg.liquid) = (src.width, src.height, src.margins, columns, src.liquid);
                         pg.guides = src.guides.clone();
                         for g in pg.guides.iter_mut().filter(|g| g.orientation == designcraft_doc::Orientation::Vertical) {
                             g.position += dx;
@@ -301,14 +302,17 @@ pub fn specs() -> Vec<CommandSpec> {
             let name = str_param(p, "name").unwrap_or("Parent").to_string();
             s.edit(|d, _| {
                 let prefix = str_param(p, "prefix").map(str::to_string).unwrap_or_else(|| d.next_parent_prefix());
-                let src = d.page(0).map(|p| (p.columns.clone(), p.margins));
-                let (columns, margins) = src.unwrap_or_else(|| (designcraft_doc::Columns::default(), Margins::uniform(36.0)));
+                let src = d.page(0).cloned();
+                let (columns, margins) =
+                    src.as_ref().map_or_else(|| (designcraft_doc::Columns::default(), Margins::uniform(36.0)), |p| (p.columns.clone(), p.margins));
                 let id = d.add_parent(&prefix, &name, columns.count, columns.gutter, margins);
-                // Dragged column guides carry over to the parent pages they still fit.
-                if let Some(sp) = d.parents.iter_mut().find(|x| x.id == id) {
+                // Dragged column guides carry over to the parent pages they still fit, mirrored
+                // on the parent page across the spine from the first page.
+                if let (Some(src), Some(sp)) = (&src, d.parents.iter_mut().find(|x| x.id == id)) {
                     for pg in &mut std::sync::Arc::make_mut(sp).pages {
+                        let columns = pg.columns_from(src);
                         if columns.valid_positions(pg.margin_rect().width()).is_some() {
-                            pg.columns.positions = columns.positions.clone();
+                            pg.columns.positions = columns.positions;
                         }
                     }
                 }
@@ -2168,7 +2172,8 @@ mod parent_tests {
         assert!(!s.doc().unwrap().editing_parents);
     }
 
-    /// A new parent takes the first page's columns, dragged column guides included, and
+    /// A new parent takes the first page's columns, dragged column guides included: the right
+    /// parent page as the first (right) page has them, the left one mirrored across the spine.
     /// `document.inspect` reports where those columns are.
     #[test]
     fn a_new_parent_keeps_dragged_columns() {
@@ -2186,10 +2191,12 @@ mod parent_tests {
         let d = &s.doc().unwrap().doc;
         let parent = d.parents.iter().find(|p| p.id.0 == id).unwrap();
         assert_eq!(parent.pages.len(), 2);
-        for pg in &parent.pages {
-            assert_eq!(pg.columns, dragged);
-            assert_eq!(pg.column_rects().iter().map(|r| r.width()).collect::<Vec<_>>(), vec![100.0, 410.0]);
-        }
+        let side = |s: designcraft_doc::PageSide| parent.pages.iter().find(|p| p.side == s).unwrap();
+        let (left, right) = (side(designcraft_doc::PageSide::Left), side(designcraft_doc::PageSide::Right));
+        assert_eq!(right.columns, dragged);
+        assert_eq!(right.column_rects().iter().map(|r| r.width()).collect::<Vec<_>>(), vec![100.0, 410.0]);
+        assert_eq!(left.columns.positions, Some(vec![0.0, 410.0, 440.0, 540.0]));
+        assert_eq!(left.column_rects().iter().map(|r| r.width()).collect::<Vec<_>>(), vec![410.0, 100.0]);
 
         let inspect = s.execute("document.inspect", &json!({})).unwrap();
         let page = &inspect["spreads"][0]["pages"][0];
