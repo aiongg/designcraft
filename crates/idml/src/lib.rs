@@ -17,7 +17,8 @@
 //! ## Supported subset
 //! Swatches (process/spot CMYK, RGB and Lab colours, tints, linear/radial gradients), paragraph,
 //! character and object styles (with `BasedOn` and style groups), fonts, document preferences
-//! (page size, facing pages, bleed/slug, margins and columns, units, grids), layers, sections,
+//! (page size, facing pages, bleed/slug, margins and columns including dragged column positions,
+//! units, grids), ruler guides, layers, sections,
 //! parent (master) spreads and applied parents, spreads and pages, page items (`TextFrame`,
 //! `Rectangle`, `Oval`, `Polygon`, `GraphicLine`, `Group`) with fill/stroke, corner options, text
 //! frame options (with column rules), text wrap, transparency (opacity, blend mode, drop shadow,
@@ -27,7 +28,7 @@
 //! ## TODO (ignored on import / not written on export)
 //! - Tables, footnotes, anchored/inline objects, notes, tracked changes, hyperlinks, index and
 //!   cross-reference markers, text variables, conditions, XML structure (`XML/*` parts).
-//! - Guides, page-item overrides of parent items (only the page's `OverrideList` is read),
+//! - Page-item overrides of parent items (only the page's `OverrideList` is read),
 //!   parent-of-parent page mapping beyond `AppliedMaster`, alternate layouts, liquid layout.
 //! - Nested/GREP/line styles, bullets & numbering details (bullet glyph, number format), OpenType
 //!   feature flags, paragraph borders, grid alignment, custom dashed stroke styles; column rule
