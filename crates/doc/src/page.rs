@@ -313,9 +313,10 @@ impl Page {
     pub fn bounds(&self) -> Rect {
         Rect::new(self.x, 0.0, self.x + self.width, self.height)
     }
-    /// Same margins and columns as `other`.
+    /// Same margins and columns as `other`, with `other`'s columns as it would take them from this
+    /// page: mirrored when one is a left page and the other isn't.
     pub fn same_margins(&self, other: &Page) -> bool {
-        self.margins == other.margins && self.columns == other.columns
+        self.margins == other.margins && other.columns_from(self) == other.columns
     }
     /// Left and right margins resolved for the page side (inside is at the spine).
     pub fn left_right_margins(&self) -> (f64, f64) {
@@ -638,6 +639,14 @@ mod tests {
         let l = page(PageSide::Left, 0.0);
         assert_eq!(l.columns_from(&r).positions, Some(vec![0.0, 392.0, 422.0, 522.0]));
         assert_eq!(page(PageSide::Right, 0.0).columns_from(&r), r.columns);
+
+        // A left page holding them mirrored has the same margins as that right page (a one-page
+        // parent in a facing document); holding them unmirrored, it doesn't.
+        let mut l = page(PageSide::Left, 0.0);
+        l.columns = l.columns_from(&r);
+        assert!(r.same_margins(&l));
+        l.columns = r.columns.clone();
+        assert!(!r.same_margins(&l));
     }
 
     #[test]
