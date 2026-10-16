@@ -419,6 +419,8 @@ impl Document {
                 if let Some(t) = &template {
                     p.width = t.width;
                     p.height = t.height;
+                    // Dragged column guides too: the same width and margins keep them valid.
+                    p.columns.positions = t.columns.positions.clone();
                 }
                 ids.push(p.id);
                 p
@@ -830,6 +832,29 @@ mod tests {
         assert_eq!(d.page_count(), 2);
         assert_eq!(d.spreads.iter().map(|s| s.pages.len()).collect::<Vec<_>>(), vec![1, 1]);
         assert!(d.delete_pages(&[0, 1]).is_err());
+    }
+
+    /// Pages inserted after a page with dragged column guides keep them, as they keep its column
+    /// count and gutter; pages that follow a parent take the parent's.
+    #[test]
+    fn inserted_pages_keep_dragged_columns() {
+        let dragged = Columns { count: 2, gutter: 12.0, positions: Some(vec![0.0, 100.0, 130.0, 540.0]) };
+        let widths = |p: &Page| p.column_rects().iter().map(|r| r.width()).collect::<Vec<_>>();
+        let mut d = Document::new(&NewDocument { pages: 1, facing_pages: false, ..Default::default() });
+        let pg = &mut Arc::make_mut(&mut d.spreads[0]).pages[0];
+        (pg.columns, pg.local_margins) = (dragged.clone(), true);
+        d.insert_pages(Some(0), 2, None).unwrap();
+        for i in 1..3 {
+            let p = d.page(i).unwrap();
+            assert_eq!(p.columns, dragged, "page {i}");
+            assert_eq!(widths(p), vec![100.0, 410.0], "page {i}");
+        }
+
+        let mut d = Document::new(&NewDocument { pages: 1, facing_pages: false, ..Default::default() });
+        Arc::make_mut(&mut d.parents[0]).pages[0].columns = dragged.clone();
+        d.sync_parent_margins();
+        d.insert_pages(Some(0), 1, d.parents.first().map(|p| p.id)).unwrap();
+        assert_eq!(d.page(1).map(widths), Some(vec![100.0, 410.0]));
     }
 
     #[test]

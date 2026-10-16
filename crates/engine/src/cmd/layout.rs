@@ -268,8 +268,17 @@ pub fn specs() -> Vec<CommandSpec> {
             let name = str_param(p, "name").unwrap_or("Parent").to_string();
             s.edit(|d, _| {
                 let prefix = str_param(p, "prefix").map(str::to_string).unwrap_or_else(|| d.next_parent_prefix());
-                let m = d.page(0).map(|p| (p.columns.count, p.columns.gutter, p.margins)).unwrap_or((1, 12.0, Margins::uniform(36.0)));
-                let id = d.add_parent(&prefix, &name, m.0, m.1, m.2);
+                let src = d.page(0).map(|p| (p.columns.clone(), p.margins));
+                let (columns, margins) = src.unwrap_or_else(|| (designcraft_doc::Columns::default(), Margins::uniform(36.0)));
+                let id = d.add_parent(&prefix, &name, columns.count, columns.gutter, margins);
+                // Dragged column guides carry over to the parent pages they still fit.
+                if let Some(sp) = d.parents.iter_mut().find(|x| x.id == id) {
+                    for pg in &mut std::sync::Arc::make_mut(sp).pages {
+                        if columns.valid_positions(pg.margin_rect().width()).is_some() {
+                            pg.columns.positions = columns.positions.clone();
+                        }
+                    }
+                }
                 Ok(json!({"id": id.0, "prefix": prefix}))
             })
         }),
@@ -2074,6 +2083,35 @@ mod parent_tests {
         let r = s.execute("layout.parents.edit", &json!({"on": false})).unwrap();
         assert_eq!(r, json!({"on": false, "parent": null}));
         assert!(!s.doc().unwrap().editing_parents);
+    }
+
+    /// A new parent takes the first page's columns, dragged column guides included, and
+    /// `document.inspect` reports where those columns are.
+    #[test]
+    fn a_new_parent_keeps_dragged_columns() {
+        let mut s = crate::Session::new();
+        s.execute("file.new", &json!({"pages": 1})).unwrap();
+        let dragged = designcraft_doc::Columns { count: 2, gutter: 12.0, positions: Some(vec![0.0, 100.0, 130.0, 540.0]) };
+        // There is no command for dragging a column guide yet, so set what an import would leave.
+        s.edit(|d, _| {
+            let pg = &mut std::sync::Arc::make_mut(&mut d.spreads[0]).pages[0];
+            (pg.columns, pg.local_margins) = (dragged.clone(), true);
+            Ok(())
+        })
+        .unwrap();
+        let id = s.execute("layout.parents.new", &json!({"prefix": "B"})).unwrap()["id"].as_u64().unwrap();
+        let d = &s.doc().unwrap().doc;
+        let parent = d.parents.iter().find(|p| p.id.0 == id).unwrap();
+        assert_eq!(parent.pages.len(), 2);
+        for pg in &parent.pages {
+            assert_eq!(pg.columns, dragged);
+            assert_eq!(pg.column_rects().iter().map(|r| r.width()).collect::<Vec<_>>(), vec![100.0, 410.0]);
+        }
+
+        let inspect = s.execute("document.inspect", &json!({})).unwrap();
+        let page = &inspect["spreads"][0]["pages"][0];
+        assert_eq!((page["columns"].clone(), page["customColumns"].clone()), (json!(2), json!(true)), "{page}");
+        assert_eq!(page["columnRects"][0], json!([36.0, 36.0, 136.0, 756.0]), "{page}");
     }
 }
 
