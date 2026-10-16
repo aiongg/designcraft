@@ -74,13 +74,16 @@ fn lock(s: &mut Session, p: &Value) -> Result<Value> {
     })
 }
 
-/// Undo and redo swap whole documents; the zero point stays as it is now.
-pub(crate) fn keep_zero_point(now: &Document, to: &mut Arc<Document>) {
-    let (zp, locked) = (now.settings.zero_point, now.settings.zero_point_locked);
-    if to.settings.zero_point != zp || to.settings.zero_point_locked != locked {
+/// Undo and redo swap whole documents; the view settings that aren't undo steps (the zero point,
+/// Lock Zero Point, Lock Column Guides) stay as they are now.
+pub(crate) fn keep_view_settings(now: &Document, to: &mut Arc<Document>) {
+    let (zp, locked, columns) = (now.settings.zero_point, now.settings.zero_point_locked, now.settings.column_guides_locked);
+    let t = &to.settings;
+    if t.zero_point != zp || t.zero_point_locked != locked || t.column_guides_locked != columns {
         let d = Arc::make_mut(to);
         d.settings.zero_point = zp;
         d.settings.zero_point_locked = locked;
+        d.settings.column_guides_locked = columns;
     }
 }
 

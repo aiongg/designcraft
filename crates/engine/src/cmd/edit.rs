@@ -173,7 +173,7 @@ pub fn specs() -> Vec<CommandSpec> {
             let e = st.history.undo.pop().ok_or_else(|| super::bad("edit.undo", "nothing to undo"))?;
             st.history.redo.push(HistoryEntry { label: e.label.clone(), doc: st.doc.clone(), selection: st.selection.clone() });
             let mut doc = e.doc;
-            super::rulers::keep_zero_point(&st.doc, &mut doc);
+            super::rulers::keep_view_settings(&st.doc, &mut doc);
             st.doc = doc;
             st.selection = e.selection;
             st.bump_revision();
@@ -186,7 +186,7 @@ pub fn specs() -> Vec<CommandSpec> {
             let e = st.history.redo.pop().ok_or_else(|| super::bad("edit.redo", "nothing to redo"))?;
             st.history.undo.push(HistoryEntry { label: e.label.clone(), doc: st.doc.clone(), selection: st.selection.clone() });
             let mut doc = e.doc;
-            super::rulers::keep_zero_point(&st.doc, &mut doc);
+            super::rulers::keep_view_settings(&st.doc, &mut doc);
             st.doc = doc;
             st.selection = e.selection;
             st.bump_revision();

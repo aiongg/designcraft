@@ -39,6 +39,15 @@ pub fn specs() -> Vec<CommandSpec> {
                 Ok(json!({"deleted": n}))
             })
         }),
+        cmd!(noundo
+            "view.lockColumnGuides",
+            "Lock Column Guides",
+            ["View", "Grids & Guides"],
+            None,
+            "{on?: bool (default: toggle)} → {locked} — locked column guides can't be dragged; saved with the document (IDML ColumnGuideLocked), on in new documents; not an undo step",
+            has_doc,
+            lock_column_guides
+        ),
         cmd!(query "guide.list", "Guides", [], None, "{spread?} → [{page, index, orientation, position, spread}]", has_doc, |s, p| {
             let d = &s.doc()?.doc;
             let sp = d.spread(super::spread_param(p, "guide.list")?).ok_or_else(|| bad("guide.list", "no such spread"))?;
@@ -60,6 +69,18 @@ pub fn specs() -> Vec<CommandSpec> {
             create_guides
         ),
     ]
+}
+
+fn lock_column_guides(s: &mut Session, p: &Value) -> Result<Value> {
+    let cur = s.doc()?.doc.settings.column_guides_locked;
+    let on = p.get("on").and_then(Value::as_bool).unwrap_or(!cur);
+    if on == cur {
+        return Ok(json!({"locked": cur}));
+    }
+    s.edit(|d, _| {
+        d.settings.column_guides_locked = on;
+        Ok(json!({"locked": on}))
+    })
 }
 
 fn checked_usize(value: &Value, key: &str, command: &str) -> Result<usize> {
@@ -314,6 +335,36 @@ fn create_guides(s: &mut Session, p: &Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lock_column_guides_toggles_and_sets_without_undo_steps() {
+        let mut s = Session::new();
+        s.execute("file.new", &json!({})).unwrap();
+        let locked = |s: &Session| s.doc().unwrap().doc.settings.column_guides_locked;
+        assert!(locked(&s), "locked in new documents");
+        s.execute("frame.create", &json!({"rect": [36, 36, 136, 136]})).unwrap();
+        let undo_steps = s.doc().unwrap().history.undo.len();
+        assert_eq!(s.execute("view.lockColumnGuides", &json!({})).unwrap()["locked"], false);
+        assert!(!locked(&s));
+        assert_eq!(s.doc().unwrap().history.undo.len(), undo_steps, "not an undo step");
+        // Undo takes back the frame and leaves the lock as it is.
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(!locked(&s));
+        s.execute("edit.redo", &json!({})).unwrap();
+        assert!(!locked(&s));
+        assert_eq!(s.execute("view.lockColumnGuides", &json!({"on": false})).unwrap()["locked"], false);
+        assert_eq!(s.execute("view.lockColumnGuides", &json!({"on": true})).unwrap()["locked"], true);
+        assert!(locked(&s));
+        assert_eq!(s.execute("view.lockColumnGuides", &json!({})).unwrap()["locked"], false);
+        // Saved with the document; files without the setting read as locked.
+        let json = serde_json::to_string(&*s.doc().unwrap().doc).unwrap();
+        assert!(json.contains("\"columnGuidesLocked\":false"), "{json}");
+        let back: Document = serde_json::from_str(&json).unwrap();
+        assert!(!back.settings.column_guides_locked);
+        let old = json.replace("\"columnGuidesLocked\":false,", "").replace(",\"columnGuidesLocked\":false", "");
+        let back: Document = serde_json::from_str(&old).unwrap();
+        assert!(back.settings.column_guides_locked);
+    }
 
     #[test]
     fn guides_add_move_delete_and_grid() {
