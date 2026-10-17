@@ -487,8 +487,8 @@ fn relink_folder(s: &mut Session, p: &Value) -> Result<Value> {
             Some(dir) => Some(dir.clone()),
             None => a.link.as_deref().and_then(|l| crate::io::document_path(l, document).ok()).and_then(|p| p.parent().map(Path::to_path_buf)),
         };
-        let plain_name = name.to_str().is_some_and(|n| !n.contains(['/', '\\']) && craft_docpath::is_local(n));
-        let cand = folder.filter(|_| plain_name).map(|f| f.join(&name));
+        let plain_name = name.to_str().filter(|n| !n.contains(['/', '\\']));
+        let cand = folder.zip(plain_name).and_then(|(f, n)| crate::io::folder_path(n, &f).ok());
         if let Some(cand) = cand.filter(|c| crate::io::exists(c)) {
             todo.push((a.id, cand));
         } else {

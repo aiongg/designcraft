@@ -105,3 +105,16 @@ fn a_relative_link_resolves_beside_the_document() {
     assert!(seen.iter().all(|p| p.starts_with(&dir)), "{seen:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_relative_link_in_an_unsaved_document_is_missing() {
+    // With no document path there is nothing to resolve against; the working directory is not used.
+    let mut s = document_with_links(Path::new("doc.designcraft"), &["logo.png", "img/logo.png"]);
+    s.doc_mut().unwrap().path = None;
+    let (rows, seen) = crate::io::touched(|| s.execute("links.list", &json!({})).unwrap());
+    assert!(seen.is_empty(), "{seen:?}");
+    for row in rows.as_array().unwrap() {
+        assert_eq!(row["status"], "missing", "{row}");
+        assert_eq!(row["refused"], "the path is not valid", "{row}");
+    }
+}
