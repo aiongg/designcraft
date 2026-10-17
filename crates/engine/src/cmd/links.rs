@@ -144,7 +144,7 @@ pub fn link_missing(a: &designcraft_doc::Asset, document: Option<&Path>) -> bool
     let Some(link) = &a.link else { return false };
     #[cfg(not(target_arch = "wasm32"))]
     {
-        crate::io::document_path(link, document).map_or(true, |path| !crate::io::exists(path))
+        !crate::io::document_path(link, document).is_ok_and(crate::io::exists)
     }
     #[cfg(target_arch = "wasm32")]
     {
