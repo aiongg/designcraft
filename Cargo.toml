@@ -125,3 +125,7 @@ hayro = { git = "https://github.com/storytold/pdfcraft", rev = "b5467d93a0ffaa5e
 hayro-interpret = { git = "https://github.com/storytold/pdfcraft", rev = "b5467d93a0ffaa5e5e6658bccdf8655a3ba689c9" }
 hayro-syntax = { git = "https://github.com/storytold/pdfcraft", rev = "b5467d93a0ffaa5e5e6658bccdf8655a3ba689c9" }
 hayro-jbig2 = { git = "https://github.com/storytold/pdfcraft", rev = "b5467d93a0ffaa5e5e6658bccdf8655a3ba689c9" }
+
+# Docking trial: craft-ui from the craft-libs `docking` branch.
+[patch."https://github.com/storytold/craft-libs"]
+craft-ui = { git = "https://github.com/aiongg/craft-libs", rev = "352a8308c5cc53c2ae31326fa38a4a6bcb0ff9eb" }

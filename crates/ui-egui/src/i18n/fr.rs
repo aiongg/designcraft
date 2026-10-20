@@ -135,7 +135,6 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Orientation", "Orientation"),
     ("Package", "Assemblage"),
     ("Page Break", "Saut de page"),
-    ("Panels", "Panneaux"),
     ("Paragraph Return", "Retour de paragraphe"),
     ("Paragraph Symbol", "Symbole de paragraphe"),
     ("Picas", "Picas"),
