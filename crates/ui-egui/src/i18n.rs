@@ -389,6 +389,10 @@ const TABLE: &[(&str, [&str; 5])] = &[
     ("Settings for:", ["Einstellungen für:", "Paramètres pour :", "Ajustes para:", "設定対象：", "设置："]),
     ("Transparency", ["Transparenz", "Transparence", "Transparencia", "透明", "透明度"]),
     ("Transparency…", ["Transparenz…", "Transparence…", "Transparencia…", "透明…", "透明度…"]),
+    (
+        "Transparency Flattener",
+        ["Transparenzreduzierung", "Aplatissement de la transparence", "Acoplador de transparencia", "透明の分割・統合", "透明度拼合"],
+    ),
     ("Basic Blending", ["Grundlegendes Füllen", "Fusion de base", "Fusión básica", "基本的な描画モード", "基本混合"]),
     ("Opacity:", ["Deckkraft:", "Opacité :", "Opacidad:", "不透明度：", "不透明度："]),
     ("Blending", ["Füllmethode", "Fusion", "Fusión", "描画モード", "混合"]),
@@ -1229,6 +1233,7 @@ const TABLE: &[(&str, [&str; 5])] = &[
     ),
     ("Paragraph Style:", ["Paragraph Style:", "Style de paragraphe :", "Paragraph Style:", "Paragraph Style:", "段落样式："]),
     ("PDF/A-2b", ["PDF/A-2b", "PDF/A-2b", "PDF/A-2b", "PDF/A-2b", "PDF/A-2b"]),
+    ("PDF/X-1a:2003", ["PDF/X-1a:2003", "PDF/X-1a:2003", "PDF/X-1a:2003", "PDF/X-1a:2003", "PDF/X-1a:2003"]),
     ("PDF/X-4", ["PDF/X-4", "PDF/X-4", "PDF/X-4", "PDF/X-4", "PDF/X-4"]),
     ("Place PDF", ["Place PDF", "Importer un PDF", "Place PDF", "Place PDF", "置入PDF"]),
     ("Plain Text", ["Plain Text", "Texte brut", "Plain Text", "Plain Text", "纯文本"]),

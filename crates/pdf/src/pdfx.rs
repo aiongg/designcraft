@@ -194,7 +194,7 @@ fn device_rgb(pdf: &[u8]) -> Vec<String> {
 }
 
 /// Whether the file's PDF/X output intent has a four-channel (CMYK) destination profile.
-fn cmyk_output_intent(file: &hayro_syntax::Pdf) -> bool {
+pub(crate) fn cmyk_output_intent(file: &hayro_syntax::Pdf) -> bool {
     let xref = file.xref();
     let Some(catalog) = xref.get::<Dict<'_>>(xref.root_id()) else { return false };
     let Some(intents) = catalog.get::<Array<'_>>(b"OutputIntents") else { return false };
@@ -224,7 +224,7 @@ fn is_device_rgb(cs: &Object<'_>) -> bool {
 }
 
 /// How deep forms, patterns and soft masks may nest before the walk stops.
-const MAX_DEPTH: usize = 16;
+pub(crate) const MAX_DEPTH: usize = 16;
 
 /// What one page uses in device RGB, in the order found.
 #[derive(Default)]

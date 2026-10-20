@@ -28,7 +28,9 @@
 //!   right characters), so text is selectable and searchable.
 //! - **Marks:** crop marks, bleed marks and a page-information line, drawn in `[Registration]`.
 //! - **Standards:** PDF/A-2b through krilla's validator and PDF/X-4 output intent/identification
-//!   with built-in conformance checks. `designcraft-cli validate-pdf` exposes those checks for CI.
+//!   with built-in conformance checks. PDF/X-1a:2003 is the PDF/X-4 print file flattened by
+//!   craft-prepress (no transparency, only DeviceCMYK, DeviceGray, Separation and DeviceN) and
+//!   written by krilla as PDF 1.4 with the PDF/X-1a identification. `designcraft-cli validate-pdf` exposes those checks for CI.
 //!
 //! Not yet: tagged PDF, bookmarks, hyperlinks, layers as optional content.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
@@ -43,11 +45,13 @@ mod text;
 
 mod forms;
 mod pdfx;
+mod pdfx1a;
 mod transitions;
 pub use export::{
     BookletKind, BookletOptions, booklet_pairs, export_booklet, export_pdf, export_pdf_with_report, merge_pdfs, print_color, sheet_spreads,
 };
 pub use pdfx::{check_pdfx4, has_rgb_groups, make_pdfx4};
+pub use pdfx1a::check_pdfx1a;
 pub use transitions::{add_blend_space, add_catalog_entries, add_page_entries, add_transitions};
 
 /// PDF standard to target.
@@ -58,20 +62,29 @@ pub enum Standard {
     None,
     /// PDF/X-4 (PDF 1.6, trim/bleed boxes, output intent and identification).
     PdfX4,
+    /// PDF/X-1a:2003 (PDF 1.4, CMYK and spot only, no transparency): the PDF/X-4 file flattened.
+    PdfX1a,
     /// PDF/A-2b (archival; validated by krilla).
     PdfA2b,
 }
 
 impl Standard {
-    /// `none`, `x4` / `pdfx4` / `PDF/X-4`, `a2b` / `pdfa2b` / `PDF/A-2b`.
+    /// `none`, `x4` / `pdfx4` / `PDF/X-4`, `x1a` / `pdfx1a` / `PDF/X-1a:2003`, `a2b` / `pdfa2b` /
+    /// `PDF/A-2b`.
     pub fn parse(s: &str) -> Option<Self> {
         let k: String = s.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_ascii_lowercase();
         match k.as_str() {
             "" | "none" => Some(Self::None),
             "x4" | "pdfx4" | "pdfx42008" | "pdfx42010" => Some(Self::PdfX4),
+            "x1a" | "pdfx1a" | "pdfx1a2003" => Some(Self::PdfX1a),
             "a2b" | "pdfa2b" => Some(Self::PdfA2b),
             _ => None,
         }
+    }
+
+    /// PDF/X: a CMYK output intent, trim boxes, no interpolation.
+    pub fn is_pdfx(self) -> bool {
+        matches!(self, Self::PdfX4 | Self::PdfX1a)
     }
 }
 
@@ -129,6 +142,22 @@ pub struct PdfOptions {
     pub tagged: bool,
     /// Interactive PDF: placed video and sound are embedded and play in Screen annotations.
     pub media: bool,
+    /// PDF/X-1a: the resolution (pixels per inch) craft-prepress's flattener rasterizes complex
+    /// transparent regions at.
+    pub flatten_dpi: f32,
+    /// Soft drop shadows drawn as their shadow color through a coverage mask, by item id (spread
+    /// items only). Items without one draw the simple offset silhouette.
+    pub shadows: std::sync::Arc<std::collections::HashMap<designcraft_doc::ItemId, ShadowMask>>,
+}
+
+/// A soft drop shadow's coverage over `rect` (spread coordinates): `width` × `height` greys,
+/// 255 = the shadow color at full strength. Its opacity is in the coverage.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ShadowMask {
+    pub rect: designcraft_geom::Rect,
+    pub width: u32,
+    pub height: u32,
+    pub coverage: std::sync::Arc<Vec<u8>>,
 }
 
 impl Default for PdfOptions {
@@ -146,6 +175,8 @@ impl Default for PdfOptions {
             created: None,
             tagged: false,
             media: false,
+            flatten_dpi: 300.0,
+            shadows: Default::default(),
         }
     }
 }
@@ -221,6 +252,8 @@ mod print_tests;
 mod rtl_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod x1a_tests;
 
 // Run the same public API/output contracts with the unit-only colliding cache hasher as well
 // as the production RandomState used by the integration-test executable.

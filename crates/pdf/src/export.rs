@@ -133,7 +133,7 @@ pub(crate) fn mark_start(opts: &PdfOptions, bleed: [f64; 4]) -> f64 {
 /// working space (which PDF/X also carries as its output intent). True when the document blends
 /// in CMYK, and always in PDF/X; PDF/A exports are RGB.
 pub fn print_color(doc: &Document, opts: &PdfOptions) -> bool {
-    opts.standard != Standard::PdfA2b && (doc.settings.blend_space == designcraft_doc::BlendSpace::Cmyk || opts.standard == Standard::PdfX4)
+    opts.standard != Standard::PdfA2b && (doc.settings.blend_space == designcraft_doc::BlendSpace::Cmyk || opts.standard.is_pdfx())
 }
 
 /// Like [`export_pdf`], also returning warnings about approximated or dropped features.
@@ -145,14 +145,15 @@ fn export_pdf_with_report_inner(doc: &Document, cache: &Cache, opts: &PdfOptions
     let sheets = sheets(doc, opts)?;
     let (version, archival) = match opts.standard {
         Standard::None => (PdfVersion::Pdf17, None),
-        Standard::PdfX4 => (PdfVersion::Pdf16, None),
+        // PDF/X-1a starts as the PDF/X-4 print file, then is flattened.
+        Standard::PdfX4 | Standard::PdfX1a => (PdfVersion::Pdf16, None),
         Standard::PdfA2b => (PdfVersion::Pdf17, Some(Archival::A2_B)),
     };
     let configuration = write::configuration(version, archival)?;
     let mut warnings = Vec::new();
     let base = if print_color(doc, opts) {
         // An output intent only for PDF/X, as in InDesign.
-        let (settings, warning) = crate::pdfx::print_settings(opts.standard == Standard::PdfX4)?;
+        let (settings, warning) = crate::pdfx::print_settings(opts.standard.is_pdfx())?;
         warnings.extend(warning);
         let pdfx_version = (opts.standard == Standard::PdfX4).then(|| "PDF/X-4".to_string());
         krilla::SerializeSettings { pdfx_version, ..settings }
@@ -254,6 +255,8 @@ fn export_pdf_with_report_inner(doc: &Document, cache: &Cache, opts: &PdfOptions
     if !fields.is_empty() || !media.is_empty() {
         if opts.standard == Standard::PdfX4 {
             warnings.push("PDF/X-4: form fields and media were left out".into());
+        } else if opts.standard == Standard::PdfX1a {
+            warnings.push("PDF/X-1a: form fields and media were left out".into());
         } else if opts.standard == Standard::PdfA2b {
             warnings.push("PDF/A-2b: form fields and media were left out".into());
         } else {
@@ -272,6 +275,9 @@ fn export_pdf_with_report_inner(doc: &Document, cache: &Cache, opts: &PdfOptions
         for issue in crate::pdfx::check_pdfx4(&bytes) {
             warnings.push(format!("PDF/X-4: {issue}"));
         }
+    }
+    if opts.standard == Standard::PdfX1a {
+        bytes = crate::pdfx1a::flatten_x1a(&bytes, opts.flatten_dpi, &mut warnings)?;
     }
     warnings.dedup();
     Ok(ExportReport { bytes, pages: sheets.len(), warnings })
@@ -632,7 +638,7 @@ pub(crate) fn solid_fill(c: krilla::color::Color, opacity: f32) -> Fill {
 impl Exporter<'_> {
     /// A print document, or a PDF/X file (whose output intent is CMYK).
     pub(crate) fn for_print(&self) -> bool {
-        self.doc.settings.intent == designcraft_doc::Intent::Print || self.opts.standard == Standard::PdfX4
+        self.doc.settings.intent == designcraft_doc::Intent::Print || self.opts.standard.is_pdfx()
     }
 
     /// Whether a paint overprints: its own attribute, or 100% [Black] when Preferences ›
@@ -970,8 +976,15 @@ impl Exporter<'_> {
         if frame_art {
             s.start_tagged(ContentTag::Artifact(Artifact::new(ArtifactType::Other, None)));
         }
-        // Drop shadow (simple offset silhouette, like the renderer).
+        // Drop shadow: its coverage mask when one was rendered, else a simple offset silhouette.
         if ds.on
+            && let Some(mask) = self.opts.shadows.get(&it.id)
+            && let Some(c) = self.swatch_color(&ds.color, 1.0)
+        {
+            s.push_transform(&tf(parent));
+            draw_coverage(s, mask, c);
+            s.pop();
+        } else if ds.on
             && let Some(p) = &path
             && let Some(c) = self.swatch_color(&ds.color, 1.0)
         {
@@ -1608,6 +1621,37 @@ impl Exporter<'_> {
     }
 }
 
+/// `paint` through `mask`'s coverage, a luminosity mask: the color's own inks (spot, process),
+/// never an RGB raster. The shadow multiplies with what is beneath it, as InDesign's drop shadow
+/// does by default (the shadow model has no blend mode of its own), so a spot under a black
+/// shadow keeps its full ink.
+fn draw_coverage(s: &mut Surface, mask: &crate::ShadowMask, paint: krilla::color::Color) {
+    let r = mask.rect;
+    let (Some(size), Some(rect), Some(image)) = (
+        Size::from_wh(r.width().max(1e-3) as f32, r.height().max(1e-3) as f32),
+        to_path(&r.to_path(0.1)),
+        CoverageImage::from_grey(mask.coverage.clone(), (mask.width, mask.height)),
+    ) else {
+        return;
+    };
+    let Ok(image) = Image::from_custom(image, false) else { return };
+    let mut sb = s.stream_builder();
+    let mut ms = sb.surface();
+    ms.push_transform(&tf(Affine::translate((r.x0, r.y0))));
+    ms.draw_image(image, size);
+    ms.pop();
+    ms.finish();
+    let stream = sb.finish();
+    s.push_blend_mode(krilla::blend::BlendMode::Multiply);
+    s.push_mask(krilla::mask::Mask::new(stream, krilla::mask::MaskType::Luminosity));
+    s.set_stroke(None);
+    s.set_fill(Some(Fill { paint: paint.into(), ..Default::default() }));
+    s.draw_path(&rect);
+    s.set_fill(None);
+    s.pop();
+    s.pop();
+}
+
 /// The ink coverage of a greyscale or bitmap image (255 = black, 0 = white or transparent) as a
 /// DeviceGray image, painted into a luminosity mask.
 #[derive(Clone, Hash)]
@@ -1624,6 +1668,12 @@ impl CoverageImage {
         }
         let grey = rgba.pixels().map(|p| ((u16::from(255 - p[0]) * u16::from(p[3]) + 127) / 255) as u8).collect();
         Some(Self { grey: Arc::new(grey), size })
+    }
+
+    /// Coverage given directly, one byte per pixel; `None` when the size doesn't match.
+    fn from_grey(grey: Arc<Vec<u8>>, size: (u32, u32)) -> Option<Self> {
+        let n = usize::try_from(u64::from(size.0) * u64::from(size.1)).ok()?;
+        (n > 0 && grey.len() == n).then_some(Self { grey, size })
     }
 }
 
@@ -1700,7 +1750,7 @@ struct RasterMode {
 
 impl RasterMode {
     fn for_standard(standard: Standard) -> Self {
-        Self { interpolate: standard == Standard::None, tag_rgb: standard == Standard::PdfX4 }
+        Self { interpolate: standard == Standard::None, tag_rgb: standard.is_pdfx() }
     }
 }
 
