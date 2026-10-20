@@ -15,7 +15,8 @@ repository = "https://github.com/storytold/designcraft"
 craft-pdf = { git = "https://github.com/aiongg/craft-libs", rev = "0d1f33c291005568b7445650d141eb050f83d878", version = "=0.1.0", default-features = false }
 # Separations, ink coverage and the ink manager; same revision as craft-pdf and the krilla patch.
 craft-prepress = { git = "https://github.com/aiongg/craft-libs", rev = "0d1f33c291005568b7445650d141eb050f83d878", version = "=0.1.0", features = ["flatten"] }
-craft-keymap = { git = "https://github.com/aiongg/craft-libs", rev = "0d1f33c291005568b7445650d141eb050f83d878", version = "=0.1.0", features = ["egui"] }
+# Shared keyboard bindings: chords, overrides, conflicts, egui dispatch, the Keyboard Shortcuts dialog.
+craft-keymap = { git = "https://github.com/aiongg/craft-libs", rev = "0d1f33c291005568b7445650d141eb050f83d878", version = "=0.1.0", features = ["egui", "ui"] }
 # internal
 designcraft-geom = { path = "crates/geom" }
 designcraft-color = { path = "crates/color" }

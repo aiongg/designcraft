@@ -197,8 +197,6 @@ mod color_theme_tests {
     }
 }
 
-/// Edit › Keyboard Shortcuts: every command and its shortcut; click a shortcut, then press the
-/// new keys (Esc cancels, Backspace clears).
 /// Edit › Spelling › User Dictionary: added words and hyphenation exceptions (applied at once).
 fn user_dictionary(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
     crate::rtl::label(ui, egui::RichText::new(crate::i18n::tr(&app.ui.language, "Hyphenation Exceptions")).font(semibold(12.0)));
@@ -234,116 +232,6 @@ fn user_dictionary(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
                     let _ = app.run("hyphenation.removeException", json!({"word": w}));
                 }
             });
-        }
-    });
-}
-
-fn is_modifier_key(key: egui::Key) -> bool {
-    use egui::Key::*;
-    matches!(key, ShiftLeft | ShiftRight | ControlLeft | ControlRight | AltLeft | AltRight | SuperLeft | SuperRight)
-}
-
-fn keyboard_shortcuts(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
-    let mut q = d.s("query");
-    ui.add(
-        egui::TextEdit::singleline(&mut q)
-            .hint_text(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Search commands")))
-            .desired_width(f32::INFINITY),
-    );
-    d.fields.insert("query".into(), json!(q));
-    let recording = d.s("recording");
-    // Capture the next key press for the command being recorded. Pressing a modifier
-    // reports the modifier itself as a key; skip it and wait for the key it modifies.
-    if !recording.is_empty() {
-        let pressed = ui.input(|i| {
-            i.events.iter().find_map(|e| match e {
-                egui::Event::Key { key, pressed: true, modifiers, .. } if !is_modifier_key(*key) => Some((*key, *modifiers)),
-                _ => None,
-            })
-        });
-        if let Some((key, m)) = pressed {
-            let sc = match key {
-                egui::Key::Escape => None,
-                egui::Key::Backspace if !m.any() => Some(Some(String::new())),
-                _ => Some(crate::keys::chord_text(m, key)),
-            };
-            if let Some(sc) = sc {
-                let msg = match (sc, craft_keymap::CommandRef::parse_key(&recording)) {
-                    (Some(sc), Some(cmd)) => {
-                        // The recorded keys move to this command; the commands that held them lose them.
-                        match app.run("window.setShortcut", json!({"id": cmd.id, "params": cmd.params, "shortcut": sc, "steal": true})) {
-                            Ok(v) => match v["conflicts"].as_array().filter(|c| !c.is_empty()) {
-                                Some(c) => {
-                                    let labels: Vec<String> =
-                                        c.iter().filter_map(|x| x.as_str()).map(|k| crate::keys::label(&app.keymap, k)).collect();
-                                    format!("Taken from: {}", labels.join(", "))
-                                }
-                                None => String::new(),
-                            },
-                            Err(e) => e,
-                        }
-                    }
-                    (None, _) => "That key can't be used in a shortcut".to_string(),
-                    (_, None) => String::new(),
-                };
-                d.fields.insert("message".into(), json!(msg));
-            }
-            d.fields.insert("recording".into(), json!(""));
-        }
-    }
-    let ql = q.to_lowercase();
-    // (command key, label, menu path): every command with a menu row or a default shortcut, the
-    // UI commands, the panels and the tools.
-    let mut rows: Vec<(String, String, String)> = app
-        .keymap
-        .catalog()
-        .iter()
-        .filter(|b| {
-            let ui_command = crate::menus::UI_COMMANDS.iter().any(|c| c.0 == b.command.id);
-            ui_command || !b.paths.is_empty() || !b.defaults.is_empty() || b.command.id == crate::keys::PANEL_COMMAND
-        })
-        .map(|b| {
-            let menu = b.paths.first().map(|p| p.get(..p.len().saturating_sub(1)).unwrap_or_default().join(" › ")).unwrap_or_default();
-            (b.command.key(), b.label.clone(), menu)
-        })
-        .filter(|(id, l, _)| ql.is_empty() || l.to_lowercase().contains(&ql) || id.to_lowercase().contains(&ql))
-        .collect();
-    rows.sort_by(|a, b| a.1.cmp(&b.1));
-    egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
-        egui::Grid::new("shortcuts").num_columns(3).striped(true).spacing([12.0, 4.0]).show(ui, |ui| {
-            for (id, label, menu) in &rows {
-                crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, label.trim_end_matches('…')))
-                    .on_hover_text(format!("{id}{}", if menu.is_empty() { String::new() } else { format!("  ({menu})") }));
-                let cmd = craft_keymap::CommandRef::parse_key(id);
-                let cur = cmd.as_ref().and_then(|c| crate::keys::shortcut_display(&app.keymap, c)).unwrap_or_else(|| "—".into());
-                let text = if recording == *id { crate::i18n::tr(&app.ui.language, "Press keys…").to_string() } else { cur };
-                if ui.add(egui::Button::new(text).min_size(egui::vec2(110.0, 0.0))).clicked() {
-                    d.fields.insert("recording".into(), json!(id));
-                    d.fields.insert("message".into(), json!(""));
-                }
-                if let Some(cmd) = cmd.filter(|_| app.keymap.overrides().get(id).is_some()) {
-                    if ui.small_button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Default"))).clicked() {
-                        let _ = app.run("window.setShortcut", json!({"id": cmd.id, "params": cmd.params, "shortcut": null}));
-                    }
-                } else {
-                    ui.label("");
-                }
-                ui.end_row();
-            }
-        });
-    });
-    let msg = d.s("message");
-    if !msg.is_empty() {
-        ui.label(egui::RichText::new(msg).color(egui::Color32::from_rgb(240, 180, 60)));
-    }
-    ui.horizontal(|ui| {
-        if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Reset All to Defaults"))).clicked() {
-            let _ = app.run("window.resetShortcuts", json!({}));
-        }
-        if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Import InDesign Set…"))).clicked()
-            && let Some(msg) = crate::shortcut_import::pick_and_import(app)
-        {
-            d.fields.insert("message".into(), json!(msg));
         }
     });
 }
@@ -2068,6 +1956,15 @@ fn check(ui: &mut egui::Ui, d: &mut Dialog, key: &str, label: &str) {
 }
 
 pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
+    let shortcuts = app.ui.dialog.as_ref().is_some_and(|d| d.id == crate::shortcuts_dialog::DIALOG_ID);
+    if shortcuts {
+        crate::shortcuts_dialog::show(app, ctx);
+        return;
+    }
+    if app.shortcut_dialog.is_some() {
+        // Another dialog took its place: its edits are cancelled.
+        let _ = crate::shortcuts_dialog::close(app, false);
+    }
     let Some(mut d) = app.ui.dialog.clone() else { return };
     // Enter and Escape belong to an open popup (a menu, a name field) rather than the dialog.
     // Read before the dialog draws: a popup closed by this frame's Escape is still open here.
@@ -2124,7 +2021,6 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
         "pdfExport" => crate::i18n::tr(&app.ui.language, "Export PDF"),
         "colorSettings" => crate::i18n::tr(&app.ui.language, "Color Settings"),
         "layerOptions" => crate::i18n::tr(&app.ui.language, "Object Layer Options"),
-        "keyboardShortcuts" => crate::i18n::tr(&app.ui.language, "Keyboard Shortcuts"),
         "colorPicker" => crate::i18n::tr(&app.ui.language, "Color Picker"),
         "swatchOptions" => crate::i18n::tr(&app.ui.language, "Swatch Options"),
         "colorGroupOptions" => crate::i18n::tr(&app.ui.language, "Color Group Options"),
@@ -2499,7 +2395,6 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
                             }
                         }
                     }
-                    "keyboardShortcuts" => keyboard_shortcuts(app, ui, &mut d),
                     "userDictionary" => user_dictionary(app, ui, &mut d),
                     "menus" => {
                         text_field(ui, &mut d, "query", 260.0);
@@ -3047,6 +2942,9 @@ pub fn cancel(app: &mut DesignApp) {
         app.session.reset_find_scope();
     }
     let d = app.ui.dialog.take();
+    if d.as_ref().is_some_and(|d| d.id == crate::shortcuts_dialog::DIALOG_ID) {
+        let _ = crate::shortcuts_dialog::close(app, false);
+    }
     crate::new_document::end_preview(app);
     if d.as_ref().is_some_and(|d| d.fields.contains_key(PREVIEWED)) {
         app.session.cancel_interaction();
@@ -3075,6 +2973,9 @@ fn find_change_params(d: &Dialog) -> Value {
 /// Apply the open dialog.
 pub fn confirm(app: &mut DesignApp) -> Result<Value, String> {
     let Some(d) = app.ui.dialog.take() else { return Err("no dialog open".into()) };
+    if d.id == crate::shortcuts_dialog::DIALOG_ID {
+        return crate::shortcuts_dialog::close(app, true).map(|()| Value::Null);
+    }
     if matches!(d.id.as_str(), "paragraphStyleOptions" | "characterStyleOptions") && d.fields.contains_key(PREVIEWED) {
         // Restore the original before the ordinary command commits one undoable edit.
         app.session.cancel_interaction();
@@ -9774,21 +9675,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn shortcut_recorder_waits_for_the_key_after_its_modifiers() {
-        let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
-        let mut d = Dialog::new("keyboardShortcuts", json!({"query": "", "recording": "app.palette"}));
-        let ctx = egui::Context::default();
-        let key = |key, modifiers| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers };
-        // Holding Ctrl reports Ctrl itself as a key press, then Ctrl+K arrives.
-        for event in [key(egui::Key::ControlLeft, egui::Modifiers::COMMAND), key(egui::Key::K, egui::Modifiers::COMMAND)] {
-            let input = egui::RawInput { events: vec![event], ..Default::default() };
-            ctx.run_ui(input, |ui| keyboard_shortcuts(&mut app, ui, &mut d)).textures_delta.clear();
-        }
-        assert_eq!(crate::menus::shortcut_of(&app, "app.palette").as_deref(), Some("Cmd+K"));
-        assert_eq!(d.s("recording"), "", "recording ends with the recorded shortcut");
     }
 
     #[test]

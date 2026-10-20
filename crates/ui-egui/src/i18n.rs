@@ -74,6 +74,7 @@ const TABLE: &[(&str, [&str; 5])] = &[
         ],
     ),
     ("Close", ["Schließen", "Fermer", "Cerrar", "閉じる", "关闭"]),
+    ("Dismiss", ["Ausblenden", "Ignorer", "Descartar", "閉じる", "关闭"]),
     ("Save", ["Speichern", "Enregistrer", "Guardar", "保存", "保存"]),
     ("Save As…", ["Speichern unter …", "Enregistrer sous…", "Guardar como…", "別名で保存…", "另存为…"]),
     ("Save a Copy…", ["Kopie speichern …", "Enregistrer une copie…", "Guardar una copia…", "コピーを保存…", "保存副本…"]),
@@ -4822,6 +4823,8 @@ mod tests {
         for table in [ar::TABLE, de::TABLE, it::TABLE, ja::TABLE, pt_br::TABLE, uk::TABLE, ru::TABLE, cs::TABLE] {
             keys.extend(table.iter().map(|(key, _)| *key));
         }
+        // The Keyboard Shortcuts dialog's strings (craft-keymap) reach `tr` too.
+        keys.extend(crate::shortcuts_dialog::strings());
         let stale: Vec<_> = catalog.keys().filter(|k| !keys.contains(*k)).collect();
         assert!(stale.is_empty(), "French entries for unknown keys: {stale:?}");
         let placeholders = |s: &str| {
@@ -4849,6 +4852,8 @@ mod tests {
         keys.extend(pt_br::TABLE.iter().map(|(key, _)| *key));
         // A new English string falls back to English until it is translated, so only stale
         // entries (keys no catalog knows any more) fail.
+        // The Keyboard Shortcuts dialog's strings (craft-keymap) reach `tr` too.
+        keys.extend(crate::shortcuts_dialog::strings());
         let stale: Vec<_> = catalog.keys().filter(|k| !keys.contains(*k)).collect();
         assert!(stale.is_empty(), "Ukrainian entries for unknown keys: {stale:?}");
         let placeholders =
@@ -4934,6 +4939,8 @@ mod tests {
         keys.extend(uk::TABLE.iter().map(|(key, _)| *key));
         // A new English string falls back to English until it is translated, so only stale
         // entries (keys no catalog knows any more) fail.
+        // The Keyboard Shortcuts dialog's strings (craft-keymap) reach `tr` too.
+        keys.extend(crate::shortcuts_dialog::strings());
         let stale: Vec<_> = catalog.keys().filter(|k| !keys.contains(*k)).collect();
         assert!(stale.is_empty(), "Russian entries for unknown keys: {stale:?}");
         let placeholders =
@@ -4999,6 +5006,8 @@ mod tests {
             keys.extend(table.iter().map(|(key, _)| *key));
         }
         // A new English string falls back to English until it is translated; only stale entries fail.
+        // The Keyboard Shortcuts dialog's strings (craft-keymap) reach `tr` too.
+        keys.extend(crate::shortcuts_dialog::strings());
         let stale: Vec<_> = catalog.keys().filter(|k| !keys.contains(*k)).collect();
         assert!(stale.is_empty(), "Polish entries for unknown keys: {stale:?}");
         let placeholders =
@@ -5136,6 +5145,8 @@ mod tests {
         ]);
         // A new English string falls back to English until it is translated, so only stale
         // entries (keys nothing passes to `tr` any more) fail.
+        // The Keyboard Shortcuts dialog's strings (craft-keymap) reach `tr` too.
+        keys.extend(crate::shortcuts_dialog::strings());
         let stale: Vec<_> = catalog.keys().filter(|k| !keys.contains(*k)).collect();
         assert!(stale.is_empty(), "Czech entries for unknown keys: {stale:?}");
         let placeholders =

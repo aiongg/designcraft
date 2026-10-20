@@ -81,7 +81,18 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("app.palette", "Quick Apply…", Some("Cmd+Return"), "{} — search styles and commands"),
     ("app.preferences", "Preferences…", Some("Cmd+K"), "{}"),
     ("window.uiScale", "UI Scaling", None, "{scale: 0.5–3 (1 = 100%)} — the size of the whole interface"),
-    ("app.keyboardShortcuts", "Keyboard Shortcuts…", None, "{} — view and change the shortcut of any command"),
+    (
+        "app.keyboardShortcuts",
+        "Keyboard Shortcuts…",
+        None,
+        "{command?, params?} — view and change the shortcut of any command, and the shortcut sets; with command, the dialog opens on it",
+    ),
+    (
+        "window.shortcutSets",
+        "Shortcut Sets",
+        None,
+        "{select?: name} — the shortcut sets (Default is built in; Edit › Keyboard Shortcuts makes the others); select makes one active → {active, sets, builtIn}",
+    ),
     ("window.richBlack", "Appearance of Black", None, "{on: bool} — show 100% black as rich black on screen (off: accurately)"),
     (
         "window.setShortcut",
@@ -89,12 +100,12 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
         None,
         "{id, params?, shortcut: \"Cmd+Alt+J\" | \"\" (none) | null (default), steal?} — id is a command; a panel is id \"window.panel\" with params {panel: \"layers\"}, a tool is id \"tool.select\" with params {tool: \"pen\"} (or its tool id, \"pen\"); steal: true takes the keys from the commands holding them → {shortcut, conflicts: [command keys: ids, or `window.panel {\"panel\":\"layers\"}`]}",
     ),
-    ("window.resetShortcuts", "Reset Shortcuts", None, "{} — every command back to its default shortcut"),
+    ("window.resetShortcuts", "Reset Shortcuts", None, "{} — every command of the active shortcut set back to its default shortcut"),
     (
         "window.importShortcuts",
         "Import InDesign Shortcut Set",
         None,
-        "{path | text} — a set saved by InDesign's Show Set (.txt): matched commands, panels (Window menu items) and tools (Tools items) take its Default shortcuts (an item without Default keys takes its Text keys), or none when every item matched to them has none; other commands lose keys it takes unless they share them as defaults → {set, imported, changed [{id, label, item, line, from, to}], conflictsCleared [{id, label, shortcut}], skipped [{id, item, line, shortcut, takenBy, reason}] (an earlier item whose keys a later one took, or a reserved key), failed [{id, label, change, shortcuts}], unmatched [{item, line, keys, reason: noMatch | ambiguous | tool | context}], unmatchedWithoutShortcut, unreadable [{item, line, keys, reason}], approximated [{item, line, keys, note}] (numeric keypad keys bound as the main keys), suggestions [{item, line, candidates}] (never applied), matchedWithoutChange [{id, label, item, line, reason}] (a keyless panel-menu item that clears nothing), truncated}; ids are command keys (`window.panel {\"panel\":\"layers\"}`)",
+        "{path | text} — a set saved by InDesign's Show Set (.txt), imported as a new shortcut set, which becomes active: matched commands, panels (Window menu items) and tools (Tools items) take its Default shortcuts (an item without Default keys takes its Text keys), or none when every item matched to them has none; other commands lose keys it takes unless they share them as defaults → {set, imported, changed [{id, label, item, line, from, to}], conflictsCleared [{id, label, shortcut}], skipped [{id, item, line, shortcut, takenBy, reason}] (an earlier item whose keys a later one took, or a reserved key), failed [{id, label, change, shortcuts}], unmatched [{item, line, keys, reason: noMatch | ambiguous | tool | context}], unmatchedWithoutShortcut, unreadable [{item, line, keys, reason}], approximated [{item, line, keys, note}] (numeric keypad keys bound as the main keys), suggestions [{item, line, candidates}] (never applied), matchedWithoutChange [{id, label, item, line, reason}] (a keyless panel-menu item that clears nothing), truncated, shortcutSet (the new set's name)}; ids are command keys (`window.panel {\"panel\":\"layers\"}`)",
     ),
     ("app.findChange", "Find/Change…", Some("Cmd+F"), "{}"),
     ("app.insertTableDialog", "Create Table…", None, "{} — Insert Table dialog (body/header/footer rows, columns)"),
@@ -1698,8 +1709,25 @@ fn run_ui_inner(app: &mut DesignApp, id: &str, p: &Value) -> Option<Result<Value
             app.run("object.fit", json!({"mode": mode}))
         }
         "app.keyboardShortcuts" => {
-            app.ui.dialog = Some(crate::dialogs::Dialog::new("keyboardShortcuts", json!({"query": "", "recording": ""})));
+            let select = p.get("command").and_then(Value::as_str).map(|id| crate::keys::command_ref(id, p.get("params").unwrap_or(&Value::Null)));
+            crate::shortcuts_dialog::open(app, select.as_ref());
             Ok(Value::Null)
+        }
+        "window.shortcutSets" => {
+            let builtins = &crate::shortcuts_dialog::BUILTINS;
+            if let Some(name) = p.get("select").and_then(Value::as_str) {
+                if app.shortcut_dialog.is_some() {
+                    return Some(Err("close the Keyboard Shortcuts dialog first".into()));
+                }
+                if let Err(e) = app.ui.shortcut_sets.select(name, builtins) {
+                    return Some(Err(format!("{name}: {e}")));
+                }
+                crate::shortcuts_dialog::load_active_set(app);
+            }
+            let sets = &app.ui.shortcut_sets;
+            Ok(
+                json!({"active": sets.active_name(builtins), "sets": sets.names(builtins), "builtIn": builtins.iter().map(|(n, _)| *n).collect::<Vec<_>>()}),
+            )
         }
         "window.setShortcut" => {
             let Some(id) = p.get("id").and_then(Value::as_str) else { return Some(Err("missing id".into())) };

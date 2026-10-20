@@ -1,5 +1,6 @@
 //! Importing a keyboard shortcut set that InDesign's Keyboard Shortcuts dialog saved as text
-//! (Show Set): `window.importShortcuts`.
+//! (Show Set): `window.importShortcuts`, and the InDesign format of the Keyboard Shortcuts
+//! dialog's Import.
 //!
 //! The file lists items under `Product area : <area>` headers, one per line:
 //! `<name> --- [none defined]` or `<name> --- <context>: <keys>, <context>: <keys>`. Item names
@@ -7,8 +8,10 @@
 //! [`craft_keymap::ForeignSet`]; `craft_keymap::import` matches and applies it. Default keys bind
 //! in the command's home scope; an item without Default keys takes its Text keys.
 
+use std::collections::BTreeMap;
+
 use craft_keymap::import::{MAX_IMPORT_ENTRIES, MAX_IMPORT_TEXT};
-use craft_keymap::{ContextRule, Flavor, ForeignEntry, ForeignKey, ForeignSet, ImportOptions, ImportReport};
+use craft_keymap::{CommandRef, ContextRule, Flavor, ForeignEntry, ForeignKey, ForeignSet, ImportOptions, ImportReport};
 use serde_json::{Value, json};
 
 use crate::DesignApp;
@@ -186,28 +189,45 @@ fn foreign(set: &ParsedSet) -> ForeignSet {
             entry
         })
         .collect();
-    ForeignSet { name: Some(set.name.clone()), entries, truncated: 0 }
+    ForeignSet { name: Some(set.name.clone()), entries, truncated: set.dropped }
 }
 
-/// Imports a set: every matched command takes the set's shortcuts (or none, when every item
-/// matched to it has none), other commands lose keys it takes (unless they share them as
-/// defaults), and the rest keep theirs. Returns the report.
-pub fn import(app: &mut DesignApp, text: &str) -> Result<Value, String> {
+/// What DesignCraft's contexts take from a set: Default keys bind in the command's home scope; an
+/// item without Default keys takes its Text keys. Unmatched items get likely commands.
+pub fn import_options(remembered: BTreeMap<String, CommandRef>) -> ImportOptions {
+    ImportOptions {
+        contexts: vec![("Default".into(), ContextRule::Home), (crate::keys::TEXT_CONTEXT.into(), ContextRule::HomeWithoutHomeEntry)],
+        remembered,
+        suggest: true,
+        ..ImportOptions::default()
+    }
+}
+
+/// Reads a set's text for craft-keymap's importer. Items past [`MAX_IMPORT_ENTRIES`] are not read;
+/// the set counts them as truncated.
+pub fn read_set(text: &str) -> Result<ForeignSet, String> {
     if text.len() > MAX_BYTES {
         return Err(format!("the set is larger than {} MB", MAX_BYTES >> 20));
     }
     let parsed = parse(text)?;
-    let set = foreign(&parsed);
-    let options = ImportOptions {
-        contexts: vec![("Default".into(), ContextRule::Home), (crate::keys::TEXT_CONTEXT.into(), ContextRule::HomeWithoutHomeEntry)],
-        suggest: true,
-        ..ImportOptions::default()
-    };
+    Ok(foreign(&parsed))
+}
+
+/// Imports a set as a new shortcut set, which becomes active: every matched command takes the
+/// set's shortcuts (or none, when every item matched to it has none), other commands lose keys it
+/// takes (unless they share them as defaults), and the rest keep theirs. Returns the report, with
+/// the new set's name as `shortcutSet`.
+pub fn import(app: &mut DesignApp, text: &str) -> Result<Value, String> {
+    let set = read_set(text)?;
     app.sync_keymap();
-    let mut report = craft_keymap::plan(&set, &app.keymap, &options).apply(&mut app.keymap);
-    report.truncated = report.truncated.saturating_add(parsed.dropped);
-    crate::keys::store(app);
-    Ok(report_json(&report))
+    let options = import_options(app.shortcut_answers.clone());
+    let plan = craft_keymap::plan(&set, &app.keymap, &options);
+    let (name, report) =
+        app.ui.shortcut_sets.import_plan(&plan, &app.keymap, None, &crate::shortcuts_dialog::BUILTINS).map_err(|e| e.to_string())?;
+    crate::shortcuts_dialog::load_active_set(app);
+    let mut out = report_json(&report);
+    out["shortcutSet"] = json!(name);
+    Ok(out)
 }
 
 /// An enum of the report as its serde name (`noMatch`, `numpad`).
@@ -254,7 +274,7 @@ fn report_json(r: &ImportReport) -> Value {
     })
 }
 
-/// One line for the Keyboard Shortcuts dialog about an import's report.
+/// One line for the status bar about an import's report.
 pub fn summary(lang: &str, report: &Value) -> String {
     let n = |k: &str| report[k].as_u64().unwrap_or_default().to_string();
     let len = |k: &str| report[k].as_array().map_or(0, Vec::len).to_string();
@@ -275,36 +295,17 @@ pub fn summary(lang: &str, report: &Value) -> String {
     out
 }
 
-/// The Keyboard Shortcuts dialog's Import button: a native file picker imports at once and
-/// returns the summary; in a browser the chosen file arrives later through the import inbox.
-pub fn pick_and_import(app: &mut DesignApp) -> Option<String> {
-    if let Some(pick) = app.services.pick_open.as_mut() {
-        let path = pick("shortcuts")?;
-        return Some(match app.run("window.importShortcuts", json!({"path": path})) {
-            Ok(report) => summary(&app.ui.language, &report),
-            Err(e) => e,
-        });
-    }
-    let request = app.import_request("shortcuts");
-    if let Some(open) = app.services.open_async.as_mut() {
-        open(request);
-    }
-    None
-}
-
-/// A set file chosen in the browser: import it and say how it went in the open Keyboard
-/// Shortcuts dialog, or the status bar.
+/// A set file chosen in the browser: the open Keyboard Shortcuts dialog reviews it; without the
+/// dialog it is imported at once and the status bar says how it went.
 pub fn import_delivered(app: &mut DesignApp, bytes: &[u8]) {
+    if crate::shortcuts_dialog::deliver(app, bytes) {
+        return;
+    }
     let msg = match decode(bytes).and_then(|text| app.run("window.importShortcuts", json!({"text": text}))) {
         Ok(report) => summary(&app.ui.language, &report),
         Err(e) => e,
     };
-    match app.ui.dialog.as_mut().filter(|d| d.id == "keyboardShortcuts") {
-        Some(d) => {
-            d.fields.insert("message".into(), json!(msg));
-        }
-        None => app.status(msg),
-    }
+    app.status(msg);
 }
 
 #[cfg(test)]

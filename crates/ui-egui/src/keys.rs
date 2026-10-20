@@ -1,12 +1,12 @@
 //! Keyboard shortcuts on `craft-keymap`: the catalog (UI commands, engine commands, panels and
 //! tools with their default keys and menu paths), shortcut text, and the edits that
-//! `window.setShortcut`, the Keyboard Shortcuts dialog and the shortcut-set importer make.
+//! `window.setShortcut` and the shortcut-set importer make.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU8, Ordering};
 
-use craft_keymap::{AssignError, Bindable, Binding, Chord, CommandRef, Key, Keymap, Kind, Mods, Overrides, Platform, Policy, Scope, Scopes};
+use craft_keymap::{AssignError, Bindable, Binding, Chord, CommandRef, Key, Keymap, Kind, Mods, Overrides, Platform, Policy, Scope, Scopes, Trigger};
 use serde_json::{Value, json};
 
 use crate::DesignApp;
@@ -56,7 +56,7 @@ const IMPORT_ALIASES: &[(&str, &str)] = &[
 /// only to toggles.
 const TOGGLES: &[&str] = &["view.hiddenCharacters", "view.tagMarkers"];
 
-/// Extra menu paths for import, where an alias would leave two commands on one name: InDesign's
+/// Paths only the importer reads, where an alias would leave two commands on one name: InDesign's
 /// Tools area has Apply Color, which is also `object.color`'s label.
 const IMPORT_PATHS: &[(&str, &[&str])] = &[("color.applyColor", &["Tools", "Apply Color"])];
 
@@ -145,11 +145,23 @@ pub fn keymap_for(platform: Platform, overrides: Overrides) -> Keymap {
 /// commands come first (⌘N is the New Document dialog, not a bare `file.new`), then engine
 /// commands, panels and tools.
 pub fn catalog() -> &'static [Bindable] {
-    static CATALOG: OnceLock<Vec<Bindable>> = OnceLock::new();
+    &built().0
+}
+
+/// Whether the Keyboard Shortcuts dialog lists `b`. Engine commands with neither a menu row nor a
+/// default key are for scripts and the control channel (`file.save`, `selection.set`): the dialog
+/// leaves them out, and they still take keys and count in conflicts.
+pub fn listed(b: &Bindable) -> bool {
+    !(b.command.params.is_null() && built().1.contains(b.command.id.as_str()))
+}
+
+fn built() -> &'static (Vec<Bindable>, HashSet<&'static str>) {
+    static CATALOG: OnceLock<(Vec<Bindable>, HashSet<&'static str>)> = OnceLock::new();
     CATALOG.get_or_init(build_catalog)
 }
 
-fn build_catalog() -> Vec<Bindable> {
+/// The catalog and the engine commands [`listed`] leaves out.
+fn build_catalog() -> (Vec<Bindable>, HashSet<&'static str>) {
     let paths = menu_paths();
     // An engine command's own menu placement counts only where no menu row stands: a row there
     // runs a UI command in its place (File › Save is the Save dialog when needed), and two
@@ -172,9 +184,22 @@ fn build_catalog() -> Vec<Bindable> {
     for (id, label, _, _) in menus::UI_COMMANDS {
         add(CommandRef::new(*id), label, menus::default_shortcut(id).as_slice(), None, Kind::Command);
     }
+    // A UI command's default key runs it, never the engine command it stands in for (⌘S is the
+    // Save dialog when needed, not a bare `file.save`): the engine command does not get that key.
+    let ui_keys: Vec<Trigger> = menus::UI_COMMANDS
+        .iter()
+        .filter_map(|(id, ..)| menus::default_shortcut(id))
+        .filter_map(|d| Binding::parse(d).ok())
+        .map(|b| b.trigger)
+        .collect();
+    let mut internal = HashSet::new();
     for c in designcraft_engine::command_specs() {
+        let shortcut = c.shortcut.filter(|d| Binding::parse(d).is_ok_and(|b| !ui_keys.contains(&b.trigger)));
+        if c.menu.is_empty() && shortcut.is_none() && !paths.contains_key(c.id) {
+            internal.insert(c.id);
+        }
         let path = (!c.menu.is_empty()).then(|| c.menu.iter().map(|s| s.to_string()).chain([c.label.to_string()]).collect());
-        add(CommandRef::new(c.id), c.label, c.shortcut.as_slice(), path, Kind::Command);
+        add(CommandRef::new(c.id), c.label, shortcut.as_slice(), path, Kind::Command);
     }
     let mut seen = Vec::new();
     for (id, label, _) in crate::dock::DOCK_TABS.iter().chain(crate::dock::ICON_PANELS) {
@@ -191,10 +216,14 @@ fn build_catalog() -> Vec<Bindable> {
         let Some(first) = group.first() else { continue };
         for t in group.iter() {
             let kind = Kind::Tool { group: Some(first.id.to_string()) };
-            add(tool(t.id), t.label, t.shortcut.as_slice(), Some(vec!["Tools".into(), t.label.into()]), kind);
+            add(tool(t.id), t.label, t.shortcut.as_slice(), None, kind);
         }
     }
     for b in &mut out {
+        // Shortcut sets file tools under Tools, which is no menu here.
+        if matches!(b.kind, Kind::Tool { .. }) {
+            b.import_paths.push(vec!["Tools".into(), b.label.clone()]);
+        }
         if !b.command.params.is_null() {
             continue;
         }
@@ -207,9 +236,9 @@ fn build_catalog() -> Vec<Bindable> {
             b.defaults.extend(copies);
         }
         b.aliases.extend(IMPORT_ALIASES.iter().filter(|(c, _)| *c == id).map(|(_, a)| a.to_string()));
-        b.paths.extend(IMPORT_PATHS.iter().filter(|(c, _)| *c == id).map(|(_, p)| p.iter().map(|s| s.to_string()).collect()));
+        b.import_paths.extend(IMPORT_PATHS.iter().filter(|(c, _)| *c == id).map(|(_, p)| p.iter().map(|s| s.to_string()).collect()));
     }
-    out
+    (out, internal)
 }
 
 /// Menu paths (menu, submenus, label) of every menu row, by command key.
@@ -262,11 +291,28 @@ pub fn chord_text(m: egui::Modifiers, key: egui::Key) -> Option<String> {
     Some(Chord::new(Mods::from_egui(&m, platform()), key).to_string())
 }
 
-/// Copies the keymap's overrides to the saved UI state.
+/// Copies the keymap's overrides to the saved UI state and, outside the Keyboard Shortcuts
+/// dialog (which saves sets itself), to the active shortcut set.
 pub fn store(app: &mut DesignApp) {
     if app.ui.shortcuts != *app.keymap.overrides() {
         app.ui.shortcuts = app.keymap.overrides().clone();
     }
+    if app.shortcut_dialog.is_none() {
+        store_in_set(&mut app.ui);
+    }
+}
+
+/// Saves `ui.shortcuts` to the active shortcut set when they differ. Edits of the built-in set go
+/// to a new set, Custom, which becomes active.
+pub fn store_in_set(ui: &mut crate::UiState) {
+    let builtins = &crate::shortcuts_dialog::BUILTINS;
+    if ui.shortcut_sets.active_overrides(builtins) == &ui.shortcuts {
+        return;
+    }
+    let custom = crate::i18n::tr(&ui.language, crate::shortcuts_dialog::CUSTOM_SET);
+    // Refused only with the most sets already made: ui.json still saves the shortcuts themselves,
+    // and the next frame tries again.
+    let _ = ui.shortcut_sets.store(ui.shortcuts.clone(), builtins, custom);
 }
 
 /// Gives a command keys (replacing its others), no keys (`""`), or its defaults back (`None`).
@@ -330,11 +376,6 @@ pub fn conflicts(keymap: &Keymap, cmd: &CommandRef) -> Vec<String> {
         }
     }
     out
-}
-
-/// A command's label, by its key.
-pub fn label(keymap: &Keymap, key: &str) -> String {
-    CommandRef::parse_key(key).and_then(|c| keymap.bindable(&c).map(|b| b.label.clone())).unwrap_or_else(|| key.to_string())
 }
 
 #[cfg(test)]
@@ -511,6 +552,19 @@ mod tests {
             let align = crate::panels::text_attrs(&mut app).unwrap()["para"]["align"].clone();
             assert_eq!(align, "center", "{form}");
         }
+    }
+
+    /// An engine command only scripts run has no row in the dialog, yet takes keys and conflicts.
+    #[test]
+    fn an_unlisted_engine_command_is_still_bindable_and_conflicts() {
+        let find = |id: &str| catalog().iter().find(|b| b.command == CommandRef::new(id));
+        let internal = find("selection.set").unwrap();
+        assert!(!listed(internal));
+        assert!(listed(find("edit.undo").unwrap()));
+        assert!(catalog().iter().filter(|b| matches!(b.kind, Kind::Tool { .. })).all(listed));
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        let r = menus::run_ui(&mut app, "window.setShortcut", &json!({"id": "selection.set", "shortcut": "Cmd+Z"})).unwrap().unwrap();
+        assert_eq!(r["conflicts"], json!(["edit.undo"]));
     }
 
     /// A panel and the command that opens it share their key without a reported conflict.
