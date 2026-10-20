@@ -1735,6 +1735,7 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("I, II, III, IV...", "I, II, III, IV..."),
     ("Indent to Here", "აქამდე შეწევა"),
     ("Ink Limit 300%", "საღებავის ზღვარი 300%"),
+    ("All Inks", "ყველა საღებავი"),
     ("Internet Standard RGB (sRGB)", "ინტერნეტის სტანდარტული RGB (sRGB)"),
     ("Left:", "მარცხნივ:"),
     ("Legacy Macintosh RGB", "მოძველებული Macintosh RGB"),

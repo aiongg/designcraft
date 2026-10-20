@@ -121,11 +121,12 @@ debug = 0
 [patch.crates-io]
 winit = { git = "https://github.com/skylartaylor/winit.git", rev = "3d51077fd1a966f84df9ef287839dc84fd5b4ca7" }
 krilla = { git = "https://github.com/aiongg/craft-libs", rev = "8fbfea8840f0a0f5a22df18901e9db324894b2ce", version = "=0.8.2" }
-# The hayro crates from pdfcraft's vendor/ directory, with the patches its README lists.
-hayro = { git = "https://github.com/storytold/pdfcraft", rev = "b5467d93a0ffaa5e5e6658bccdf8655a3ba689c9" }
-hayro-interpret = { git = "https://github.com/storytold/pdfcraft", rev = "b5467d93a0ffaa5e5e6658bccdf8655a3ba689c9" }
-hayro-syntax = { git = "https://github.com/storytold/pdfcraft", rev = "b5467d93a0ffaa5e5e6658bccdf8655a3ba689c9" }
-hayro-jbig2 = { git = "https://github.com/storytold/pdfcraft", rev = "b5467d93a0ffaa5e5e6658bccdf8655a3ba689c9" }
+# The hayro crates from craft-libs' vendor/ directory (pdfcraft's, plus the plate mode and decode
+# limits craft-pdf and craft-prepress need); same revision as craft-pdf.
+hayro = { git = "https://github.com/aiongg/craft-libs", rev = "8fbfea8840f0a0f5a22df18901e9db324894b2ce" }
+hayro-interpret = { git = "https://github.com/aiongg/craft-libs", rev = "8fbfea8840f0a0f5a22df18901e9db324894b2ce" }
+hayro-syntax = { git = "https://github.com/aiongg/craft-libs", rev = "8fbfea8840f0a0f5a22df18901e9db324894b2ce" }
+hayro-jbig2 = { git = "https://github.com/aiongg/craft-libs", rev = "8fbfea8840f0a0f5a22df18901e9db324894b2ce" }
 
 # Docking trial: craft-ui from the craft-libs `docking` branch.
 [patch."https://github.com/storytold/craft-libs"]
