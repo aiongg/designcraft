@@ -483,9 +483,9 @@ impl Exporter<'_> {
         if fill.is_none() && stroke.is_none() {
             return;
         }
-        if st.overprint_fill || st.overprint_stroke {
-            self.warn("overprint is not exported yet");
-        }
+        let fill_op = fill.is_some() && self.overprints(&st.fill, st.fill_tint, st.overprint_fill);
+        let stroke_op = stroke.is_some() && self.overprints(&st.stroke, st.stroke_tint, st.overprint_stroke);
+        let overprint = self.push_overprint(s, fill_op, stroke_op);
         // Stroke behind fill: a double-width stroke first, as outlines so the text is not
         // duplicated, then the fill over its inner half. With no fill, the stroke is clipped
         // to the outside of the glyphs instead.
@@ -514,6 +514,9 @@ impl Exporter<'_> {
             self.paint_outlines(s, &glyph_outlines(glyphs, size, tan), origin, fill, stroke, weight);
         }
         if clipped {
+            s.pop();
+        }
+        if overprint {
             s.pop();
         }
     }

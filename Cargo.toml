@@ -12,8 +12,9 @@ repository = "https://github.com/storytold/designcraft"
 
 [workspace.dependencies]
 # Shared writer; the immutable revision must be published before this consumer.
-craft-pdf = { git = "https://github.com/storytold/craft-libs", rev = "c3487320b2d1de657b860b3c8abb44e1f2b32bd8", version = "=0.1.0", default-features = false }
-# Shared keyboard bindings: chords, overrides, conflicts, egui dispatch.
+craft-pdf = { git = "https://github.com/aiongg/craft-libs", rev = "8fbfea8840f0a0f5a22df18901e9db324894b2ce", version = "=0.1.0", default-features = false }
+# Separations, ink coverage and the ink manager; same revision as craft-pdf and the krilla patch.
+craft-prepress = { git = "https://github.com/aiongg/craft-libs", rev = "8fbfea8840f0a0f5a22df18901e9db324894b2ce", version = "=0.1.0" }
 craft-keymap = { git = "https://github.com/aiongg/craft-libs", rev = "9aaf9dfd3882c12b6aab5604cc2567fc3b64127b", version = "=0.1.0", features = ["egui"] }
 # internal
 designcraft-geom = { path = "crates/geom" }
@@ -119,7 +120,7 @@ debug = 0
 # Opt-in cancelable macOS termination on the pinned winit 0.30 line.
 [patch.crates-io]
 winit = { git = "https://github.com/skylartaylor/winit.git", rev = "3d51077fd1a966f84df9ef287839dc84fd5b4ca7" }
-krilla = { git = "https://github.com/storytold/craft-libs", rev = "c3487320b2d1de657b860b3c8abb44e1f2b32bd8", version = "=0.8.2" }
+krilla = { git = "https://github.com/aiongg/craft-libs", rev = "8fbfea8840f0a0f5a22df18901e9db324894b2ce", version = "=0.8.2" }
 # The hayro crates from pdfcraft's vendor/ directory, with the patches its README lists.
 hayro = { git = "https://github.com/storytold/pdfcraft", rev = "b5467d93a0ffaa5e5e6658bccdf8655a3ba689c9" }
 hayro-interpret = { git = "https://github.com/storytold/pdfcraft", rev = "b5467d93a0ffaa5e5e6658bccdf8655a3ba689c9" }
