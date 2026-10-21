@@ -10,6 +10,16 @@ use egui::{Color32, Rect, Response, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 
 use crate::theme::Tokens;
 
+/// How the system's region writes and reads numbers (digits, decimal mark, grouping), for
+/// [`craft_ui::localized`] number fields. Read once per process.
+pub(crate) fn locale_numbers() -> &'static craft_ui::localized::LocaleNumbers {
+    static NUMBERS: std::sync::OnceLock<craft_ui::localized::LocaleNumbers> = std::sync::OnceLock::new();
+    NUMBERS.get_or_init(|| {
+        let format = craft_i18n::Format::new(&craft_i18n::Region::system(), craft_i18n::Digits::Locale);
+        craft_ui::localized::LocaleNumbers::new(std::sync::Arc::new(format))
+    })
+}
+
 /// Field height including the 1 pt border.
 pub const FIELD_H: f32 = 21.0;
 /// Width of the spinner (⌃⌄) and preset (⌄) segments.

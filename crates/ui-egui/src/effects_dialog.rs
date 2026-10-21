@@ -204,7 +204,11 @@ fn percent(ui: &mut egui::Ui, d: &mut Dialog, path: &[&str]) {
 
 fn angle(ui: &mut egui::Ui, d: &mut Dialog, path: &[&str], enabled: bool, global: f64) {
     let mut v = if enabled { num(d, path) } else { global };
-    let r = ui.add_enabled(enabled, egui::DragValue::new(&mut v).range(-180.0..=180.0).suffix("°").max_decimals(1));
+    let drag = egui::DragValue::new(&mut v).max_decimals(1);
+    let field = craft_ui::localized::LocalizedDragValue::new(drag, crate::widgets::locale_numbers())
+        .range(-180.0..=180.0)
+        .unit(craft_ui::localized::Unit::new("{n}°"));
+    let r = ui.add_enabled(enabled, field);
     if r.changed() {
         set(d, path, json!(v));
     }
