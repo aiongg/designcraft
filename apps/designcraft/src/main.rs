@@ -391,6 +391,8 @@ fn main() -> std::process::ExitCode {
             .with_fullsize_content_view(true)
             .with_titlebar_shown(false)
             .with_title_shown(false),
+        // The UI font stack (`theme::install_fonts`) finds installed fonts itself.
+        system_font_fallback: false,
         ..Default::default()
     };
     options.viewport = options.viewport.with_app_id(APP_ID);
