@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 craft-ui = { workspace = true, features = ["system_fonts"] }
 craft-i18n = { workspace = true }
+craft-fonts-build = { workspace = true }
 designcraft-geom = { workspace = true }
 designcraft-color = { workspace = true }
 designcraft-doc = { workspace = true }
@@ -35,5 +36,6 @@ egui_kittest = { workspace = true, features = ["wgpu", "snapshot"] }
 designcraft-fonts = { workspace = true, features = ["testing"] }
 
 [build-dependencies]
+craft-fonts-build = { workspace = true, features = ["subset"] }
 serde_json = { workspace = true }
 toml = "1"
