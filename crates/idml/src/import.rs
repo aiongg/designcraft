@@ -850,6 +850,9 @@ impl<'r> Importer<'r> {
         if let Some(v) = e.boolean("CreatePrimaryTextFrame") {
             s.primary_text_frame = v;
         }
+        if let Some(v) = e.boolean("ColumnGuideLocked") {
+            s.column_guides_locked = v;
+        }
     }
 
     fn grid_prefs(&mut self, e: &El) {
@@ -976,12 +979,17 @@ impl<'r> Importer<'r> {
             let Some(id) = e.get("Self") else { continue };
             let mut stops: Vec<GradientStop> = Vec::new();
             for s in e.find_all("GradientStop") {
-                let c = s.get("StopColor").map(|r| self.color_for_ref(r, &order)).unwrap_or(Color::BLACK);
+                let r = s.get("StopColor");
+                let c = r.map(|r| self.color_for_ref(r, &order)).unwrap_or(Color::BLACK);
+                // A stop on a named swatch (a spot, a tint, [Paper]) keeps it for its inks;
+                // unnamed colors stay plain. The id becomes the swatch's name below, once
+                // repeated names are numbered.
+                let swatch = r.filter(|r| self.swatch_names.get(*r).is_some_and(|n| n != swatch::NONE)).map(str::to_string);
                 let loc = s.num("Location").unwrap_or(0.0) / 100.0;
                 if let (Some(prev), Some(m)) = (stops.last_mut(), s.num("Midpoint")) {
                     prev.midpoint = (m / 100.0) as f32;
                 }
-                stops.push(GradientStop { offset: loc as f32, color: c, opacity: 1.0, midpoint: 0.5 });
+                stops.push(GradientStop { swatch, ..GradientStop::new(loc as f32, c) });
             }
             let kind = if e.get("Type") == Some("Radial") { GradientKind::Radial } else { GradientKind::Linear };
             let unnamed = e.get("Visible") == Some("false") || e.get("Name").is_none_or(|n| n.is_empty() || n == "$ID/");
@@ -1006,6 +1014,7 @@ impl<'r> Importer<'r> {
             order.sort_by_key(|(id, _)| group_order.iter().position(|g| g == id).unwrap_or(usize::MAX));
         }
         let mut names: HashSet<String> = self.swatches.iter().map(|s| s.name.clone()).collect();
+        let first_new = self.swatches.len();
         for (id, mut s) in order {
             if names.contains(&s.name) {
                 let base = s.name.clone();
@@ -1014,6 +1023,16 @@ impl<'r> Importer<'r> {
             }
             names.insert(s.name.clone());
             self.swatches.push(s);
+        }
+        let stop_names = |stops: &mut Vec<GradientStop>, ids: &HashMap<String, String>| {
+            for stop in stops {
+                stop.swatch = stop.swatch.take().and_then(|id| ids.get(&id).cloned());
+            }
+        };
+        for s in self.swatches.iter_mut().skip(first_new).chain(self.hidden_swatches.values_mut()) {
+            if let SwatchValue::Gradient { gradient } = &mut s.value {
+                stop_names(&mut gradient.stops, &self.swatch_names);
+            }
         }
         // Colour groups other than the root one become Swatches panel folders.
         for g in top.iter().filter(|e| e.local() == "ColorGroup" && e.get("IsRootColorGroup") != Some("true")) {
@@ -2534,9 +2553,15 @@ impl<'r> Importer<'r> {
                     .map(|q| (q.margins, q.columns.clone()))
             };
             let (margins, columns) = match (p.find("MarginPreference"), &from_parent) {
-                (Some(m), _) => margins_of(m),
+                (Some(m), _) => {
+                    let (margins, columns) = margins_of(m);
+                    (margins, fit_columns(columns, &margins, r.width()))
+                }
                 (None, Some(own)) => own.clone(),
-                (None, None) => self.default_margins.clone().unwrap_or((Margins::uniform(36.0), Columns::default())),
+                (None, None) => {
+                    let (margins, columns) = self.default_margins.clone().unwrap_or((Margins::uniform(36.0), Columns::default()));
+                    (margins, fit_columns(columns, &margins, r.width()))
+                }
             };
             let local_margins = from_parent.is_some_and(|(m, c)| m != margins || c != columns);
             out_pages.push(Page {
@@ -3465,10 +3490,39 @@ fn composer_in(name: &str) -> designcraft_doc::Composer {
 
 fn margins_of(m: &El) -> (Margins, Columns) {
     let g = |k: &str, d: f64| m.num(k).filter(|v| v.is_finite()).unwrap_or(d);
-    (
-        Margins { top: g("Top", 36.0), bottom: g("Bottom", 36.0), inside: g("Left", 36.0), outside: g("Right", 36.0) },
-        Columns { count: g("ColumnCount", 1.0).clamp(1.0, 216.0) as u32, gutter: g("ColumnGutter", 12.0), positions: None },
-    )
+    let margins = Margins { top: g("Top", 36.0), bottom: g("Bottom", 36.0), inside: g("Left", 36.0), outside: g("Right", 36.0) };
+    let count = g("ColumnCount", 1.0).clamp(1.0, f64::from(designcraft_doc::MAX_COLUMNS)) as u32;
+    let gutter = g("ColumnGutter", 12.0);
+    let positions = m.get("ColumnsPositions").and_then(|s| custom_columns(s, count, gutter));
+    (margins, Columns { count, gutter, positions })
+}
+
+/// `ColumnsPositions` when the column guides have been dragged off the even split: `2 × count`
+/// offsets from the margin box's left edge, valid as [`designcraft_doc::valid_column_positions`]
+/// over the box they span. InDesign writes the attribute whether or not they have been moved, so
+/// an even set is dropped: `positions` means "custom", and keeping an even copy would freeze the
+/// columns against a later change of count or gutter. Anything malformed is the even split; at
+/// most one number past `2 × count` is parsed, so a long list costs nothing.
+fn custom_columns(s: &str, count: u32, gutter: f64) -> Option<Vec<f64>> {
+    let want = 2 * count as usize;
+    let pos = s.split_whitespace().take(want + 1).map(|v| v.parse::<f64>().ok()).collect::<Option<Vec<f64>>>()?;
+    let width = *pos.last()?;
+    if !designcraft_doc::valid_column_positions(&pos, count, width) {
+        return None;
+    }
+    let even = Columns { count, gutter, positions: None }.edges(width);
+    // The tolerance only absorbs float noise in InDesign's arithmetic; a dragged guide moves far more.
+    pos.iter().zip(&even).any(|(a, b)| (a - b).abs() > 1e-4).then_some(pos)
+}
+
+/// `columns` with custom positions only when they fit the margin box of a `page_width`-wide page
+/// with these margins (the box's width doesn't depend on which side of the spine it is).
+fn fit_columns(mut columns: Columns, margins: &Margins, page_width: f64) -> Columns {
+    let width = (page_width - margins.inside - margins.outside).max(0.0);
+    if columns.valid_positions(width).is_none() {
+        columns.positions = None;
+    }
+    columns
 }
 
 /// Text Frame Options from `TextFramePreference` elements: each attribute from the first that sets it.
@@ -3994,6 +4048,48 @@ mod page_column_import_safety_tests {
             assert_eq!(columns.gutter, 12.);
             assert_eq!(margins, Margins::uniform(36.));
         }
+    }
+
+    /// Hostile `ColumnsPositions` are the even split: never half-read, never a panic, and a long
+    /// list is not parsed past what `ColumnCount` allows (#1096).
+    #[test]
+    fn hostile_column_positions_fall_back_to_the_even_split() {
+        let positions = |count: &str, raw: &str| {
+            let m = El::new("MarginPreference").attr("ColumnCount", count).attr("ColumnGutter", "20").attr("ColumnsPositions", raw);
+            margins_of(&m).1.positions
+        };
+        assert_eq!(positions("2", "0 150 170 450"), Some(vec![0., 150., 170., 450.]));
+        let huge = (0..10_000).map(|i| i.to_string()).collect::<Vec<_>>().join(" ");
+        for (count, raw) in [
+            ("2", "0 215 235 450"),         // the even split
+            ("2", "0 150 170"),             // odd
+            ("2", "0 450"),                 // too few for the count
+            ("2", "0 100 120 200 220 450"), // too many for the count
+            ("2", "0 150 90 450"),          // descending
+            ("2", "0 NaN 170 450"),
+            ("2", "0 inf 170 450"),
+            ("2", "0 150 170 1e309"),
+            ("2", "0 x 170 450"),
+            ("2", "10 150 170 450"), // not from the margin
+            ("2", ""),
+            ("2", huge.as_str()),
+            ("4000000000", huge.as_str()), // the count is capped at 216, so is the list
+            ("216", huge.as_str()),
+            ("NaN", "0 150 170 450"),
+        ] {
+            assert_eq!(positions(count, raw), None, "{count}: {}", raw.get(..raw.len().min(40)).unwrap_or(""));
+        }
+        // The cap itself: 216 one-point columns with no gutter are the even split; one edge moved
+        // makes them custom.
+        let gapless = |raw: &str| {
+            let m = El::new("MarginPreference").attr("ColumnCount", "216").attr("ColumnGutter", "0").attr("ColumnsPositions", raw);
+            margins_of(&m).1.positions
+        };
+        let edges = |first_right: &str| {
+            (0..432).map(|i| if i == 1 { first_right.to_string() } else { ((i + 1) / 2).to_string() }).collect::<Vec<_>>().join(" ")
+        };
+        assert_eq!(gapless(&edges("1")), None);
+        assert_eq!(gapless(&edges("0.5")).map(|p| p.len()), Some(432));
     }
 }
 

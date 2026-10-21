@@ -707,6 +707,8 @@ fn imports_hand_written_fixture() {
     assert_eq!(gradient.kind, designcraft_color::GradientKind::Radial);
     assert_eq!(gradient.stops[1].color, Color::cmyk(0.1, 0.2, 0.3, 0.4));
     assert!((gradient.stops[0].midpoint - 0.3).abs() < 1e-6);
+    assert_eq!(gradient.stops[0].swatch.as_deref(), Some("Brand"), "a stop on a swatch keeps it");
+    assert_eq!(gradient.stops[1].swatch, None, "an unnamed color stays plain");
     // The parent rectangle used an unnamed colour → value-named swatch.
     let mr = &d.parents[0].items[0];
     assert_eq!(mr.fill.swatch, "C=10 M=20 Y=30 K=40");
@@ -986,6 +988,29 @@ fn round_trips_small_document() {
     assert_eq!(oval.fill.swatch, "Brand 30");
     assert!((oval.opacity - 0.5).abs() < 1e-6);
     assert!(back.swatch("Brand 30").is_some());
+}
+
+#[test]
+fn gradient_stops_keep_their_swatches_through_a_round_trip() {
+    use designcraft_color::{ColorType, Gradient, GradientKind, GradientStop};
+    let mut d = Document::new(&NewDocument::default());
+    let gold = Color::cmyk(0.0, 0.3, 0.9, 0.1);
+    d.swatches.push(Swatch { value: SwatchValue::Color { color: gold, color_type: ColorType::Spot }, ..Swatch::color("Gold", gold) });
+    d.swatches.push(Swatch { value: SwatchValue::Tint { base: "Gold".into(), tint: 0.4 }, ..Swatch::color("Gold 40%", gold) });
+    let on = |offset: f32, name: &str| GradientStop {
+        swatch: Some(name.into()),
+        ..GradientStop::new(offset, designcraft_color::swatch::resolve(&d.swatches, name, 1.0).unwrap())
+    };
+    let stops = vec![on(0.0, "Gold"), on(0.3, "Gold 40%"), GradientStop::new(0.6, Color::cmyk(0.5, 0.0, 0.0, 0.0)), on(1.0, "[Paper]")];
+    d.swatches.push(Swatch {
+        value: SwatchValue::Gradient { gradient: Gradient { kind: GradientKind::Linear, stops } },
+        ..Swatch::color("Gold fade", gold)
+    });
+    let back = import_idml(&export_idml(&d)).unwrap();
+    let SwatchValue::Gradient { gradient } = &back.swatch("Gold fade").unwrap().value else { panic!("gradient") };
+    let names: Vec<Option<&str>> = gradient.stops.iter().map(|s| s.swatch.as_deref()).collect();
+    assert_eq!(names, [Some("Gold"), Some("Gold 40%"), None, Some("[Paper]")]);
+    assert_eq!(gradient.stops[2].color, Color::cmyk(0.5, 0.0, 0.0, 0.0));
 }
 
 #[test]
@@ -2774,6 +2799,18 @@ fn round_trips_the_zero_point_and_ruler_origin() {
 }
 
 #[test]
+fn round_trips_lock_column_guides() {
+    let mut d = Document::new(&NewDocument::default());
+    assert!(zip_text(&export_idml(&d), "Resources/Preferences.xml").contains(r#"ColumnGuideLocked="true""#));
+    assert!(import_idml(&export_idml(&d)).unwrap().settings.column_guides_locked);
+    d.settings.column_guides_locked = false;
+    let bytes = export_idml(&d);
+    let prefs = zip_text(&bytes, "Resources/Preferences.xml");
+    assert!(prefs.contains(r#"ColumnGuideLocked="false""#), "{prefs}");
+    assert!(!import_idml(&bytes).unwrap().settings.column_guides_locked);
+}
+
+#[test]
 fn kenten_shatai_and_grid_settings_import_and_round_trip() {
     use designcraft_doc::cjk::CharacterAlignment;
     use designcraft_doc::cjk_settings::{AdornmentOverprint, KentenAlignment, KentenKind, KentenPosition};
@@ -4194,6 +4231,75 @@ mod liquid_page_rules {
     }
 }
 
+/// A dragged column gutter (InDesign's Custom columns) survives an IDML import, and an even set —
+/// which InDesign writes for every page, moved or not — does not pretend to be custom (#1096).
+#[test]
+fn custom_column_positions_import_and_round_trip() {
+    // Page 1 of SPREAD is 500 wide with Left=20 Right=30, so its margin box is 450 wide and
+    // starts at x=30. Two columns with gutter 20 split evenly as "0 215 235 450".
+    let with = |cols: &str| {
+        let spread = SPREAD.replace(
+            r#"<MarginPreference ColumnCount="3" ColumnGutter="12" Top="10" Bottom="10" Left="20" Right="30"/>"#,
+            &format!(
+                r#"<MarginPreference ColumnCount="2" ColumnGutter="20" Top="10" Bottom="10" Left="20" Right="30" ColumnDirection="Horizontal" {cols}/>"#
+            ),
+        );
+        import_idml_with(
+            &zip_files(&[
+                ("designmap.xml", DESIGNMAP),
+                ("Resources/Graphic.xml", GRAPHIC),
+                ("Resources/Styles.xml", STYLES),
+                ("Resources/Preferences.xml", PREFS),
+                ("MasterSpreads/MasterSpread_m1.xml", MASTER),
+                ("Spreads/Spread_sp1.xml", &spread),
+                ("Stories/Story_s1.xml", STORY),
+            ]),
+            &|_| None,
+        )
+        .unwrap()
+    };
+    let rects = |d: &designcraft_doc::Document| d.spreads[0].pages[0].column_rects().iter().map(|r| (r.x0, r.x1)).collect::<Vec<_>>();
+
+    // Dragged: the gutter sits at 150..170 instead of 215..235, and the columns follow it.
+    let d = with(r#"ColumnsPositions="0 150 170 450""#);
+    assert_eq!(d.spreads[0].pages[0].columns.positions, Some(vec![0.0, 150.0, 170.0, 450.0]));
+    assert_eq!(rects(&d), vec![(30.0, 180.0), (200.0, 480.0)]);
+
+    // The even set is dropped, so a later change of count or gutter is not frozen out. The
+    // geometry is the same either way, which is what makes keeping it pointless.
+    let even = with(r#"ColumnsPositions="0 215 235 450""#);
+    assert_eq!(even.spreads[0].pages[0].columns.positions, None);
+    assert_eq!(rects(&even), vec![(30.0, 245.0), (265.0, 480.0)]);
+    // Including when InDesign's own arithmetic leaves the last bits different.
+    assert_eq!(with(r#"ColumnsPositions="0 215.00000000000003 234.99999999999997 450""#).spreads[0].pages[0].columns.positions, None);
+
+    // Malformed sets are ignored rather than half-read: an odd count, three columns' worth for a
+    // count of two, a descending pair, a NaN, a set that stops short of the page's margin box, and
+    // a list far longer than any count allows. Each page keeps the even split.
+    let huge = format!(r#"ColumnsPositions="{}""#, (0..10_000).map(|i| i.to_string()).collect::<Vec<_>>().join(" "));
+    for bad in [
+        r#"ColumnsPositions="0 150 170""#,
+        r#"ColumnsPositions="0 100 120 200 220 450""#,
+        r#"ColumnsPositions="0 150 90 450""#,
+        r#"ColumnsPositions="0 x 170 450""#,
+        r#"ColumnsPositions="0 NaN 170 450""#,
+        r#"ColumnsPositions="0 150 170 400""#,
+        r#"ColumnsPositions="""#,
+        huge.as_str(),
+    ] {
+        let d = with(bad);
+        assert_eq!(d.spreads[0].pages[0].columns.positions, None, "{}", bad.get(..bad.len().min(60)).unwrap_or(""));
+        assert_eq!(rects(&d), rects(&even));
+    }
+
+    // And they come back from an export, so the round trip keeps the dragged gutter.
+    let back = import_idml(&export_idml(&d)).unwrap();
+    assert_eq!(back.spreads[0].pages[0].columns.positions, Some(vec![0.0, 150.0, 170.0, 450.0]));
+    assert_eq!(rects(&back), rects(&d));
+    // A page nobody dragged still exports the even split, not a frozen copy of it.
+    assert_eq!(import_idml(&export_idml(&even)).unwrap().spreads[0].pages[0].columns.positions, None);
+}
+
 /// Cell Options › Text › First Baseline, set by a cell style that a table style applies to its body
 /// region (cells with `[None]` take it from there) and overridden on one cell.
 const FIRST_BASELINE_STYLES: &str = r#"<idPkg:Styles xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging">
@@ -4233,4 +4339,57 @@ fn cell_first_baseline_comes_from_cell_styles_table_regions_and_cells_and_round_
     assert_eq!(t2.cell(0, 1).unwrap().first_baseline, FirstBaseline::Leading);
     let s2 = back.styles.cell.iter().find(|c| c.name == "Cap").unwrap();
     assert_eq!(s2.first_baseline, Some(FirstBaseline::CapHeight));
+}
+
+/// #1096: a ruler guide inside the gutter of a two-column page, written the way InDesign writes
+/// it (a `<Page>` child after its `MarginPreference`, with `Properties`/`GuideColor`, `PageIndex`
+/// and `GuideZone`), in a document without facing pages. A spread guide sits beside it.
+#[test]
+fn ruler_guide_in_a_column_gutter_imports_without_facing_pages() {
+    use designcraft_doc::Orientation::{Horizontal, Vertical};
+    let package = |view: &str| {
+        let prefs =
+            PREFS.replace(r#"FacingPages="true""#, r#"FacingPages="false""#).replace("</idPkg:Preferences>", &format!("{view}</idPkg:Preferences>"));
+        let spread = SPREAD.replace(
+            r#"<Page Self="p1" AppliedMaster="m1" GeometricBounds="0 0 700 500" ItemTransform="1 0 0 1 -500 -350">
+      <MarginPreference ColumnCount="3" ColumnGutter="12" Top="10" Bottom="10" Left="20" Right="30"/>
+    </Page>"#,
+            r#"<Page Self="p1" AppliedMaster="m1" GeometricBounds="0 0 700 500" ItemTransform="1 0 0 1 -500 -350" Name="1" OverrideList="">
+      <Properties><PageColor type="enumeration">UseMasterColor</PageColor></Properties>
+      <MarginPreference ColumnCount="2" ColumnGutter="20" Top="10" Bottom="10" Left="20" Right="30" ColumnDirection="Horizontal" ColumnsPositions="0 150 170 450"/>
+      <GridDataInformation FontStyle="Regular" PointSize="12"/>
+      <Guide Self="g1" OverriddenPageItemProps="" Orientation="Vertical" Location="180" FitToPage="true" ViewThreshold="0" Locked="false" ItemLayer="L1" PageIndex="0" GuideType="Ruler" GuideZone="0">
+        <Properties><GuideColor type="enumeration">Cyan</GuideColor></Properties>
+      </Guide>
+      <Guide Self="g2" OverriddenPageItemProps="" Orientation="Horizontal" Location="300" FitToPage="false" ViewThreshold="5" Locked="false" ItemLayer="L1" PageIndex="0" GuideType="Ruler" GuideZone="1">
+        <Properties><GuideColor type="enumeration">Cyan</GuideColor></Properties>
+      </Guide>
+    </Page>"#,
+        );
+        assert_ne!(spread, SPREAD, "the fixture's first page was replaced");
+        import_idml(&zip_files(&[
+            ("designmap.xml", DESIGNMAP),
+            ("Resources/Graphic.xml", GRAPHIC),
+            ("Resources/Styles.xml", STYLES),
+            ("Resources/Preferences.xml", &prefs),
+            ("MasterSpreads/MasterSpread_m1.xml", MASTER),
+            ("Spreads/Spread_sp1.xml", &spread),
+            ("Stories/Story_s1.xml", STORY),
+        ]))
+        .unwrap()
+    };
+    let guides =
+        |d: &Document| d.spreads[0].pages[0].guides.iter().map(|g| (g.orientation, g.position, g.spread, g.layer.is_some())).collect::<Vec<_>>();
+    // The first page starts at x 0 in our spread coordinates, so the spread's and the page's ruler
+    // origins agree; no ViewPreference means InDesign's default, the spread.
+    for view in ["", r#"<ViewPreference RulerOrigin="SpreadOrigin"/>"#, r#"<ViewPreference RulerOrigin="PageOrigin"/>"#] {
+        let first = package(view);
+        assert!(!first.settings.facing_pages);
+        assert_eq!(guides(&first), [(Vertical, 180.0, false, true), (Horizontal, 300.0, true, true)], "{view:?}");
+        // The guide sits between the page's left margin (20) and right margin (470).
+        let m = first.spreads[0].pages[0].margin_rect();
+        assert!(m.x0 < 180.0 && 180.0 < m.x1);
+        let back = import_idml(&export_idml(&first)).unwrap();
+        assert_eq!(guides(&back), guides(&first), "round trip, {view:?}");
+    }
 }

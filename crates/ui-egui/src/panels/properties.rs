@@ -16,12 +16,9 @@ use crate::widgets::{
 };
 use crate::{DesignApp, icons};
 
-/// A link to another panel. `window.panel` shows it in the docked layout or as a flyout; it
-/// toggles the flyout, so a flyout that is already open is left as it is.
+/// A link to another panel: `window.panel` shows it in the docking layout.
 fn show_panel(app: &mut DesignApp, panel: &str) {
-    if app.ui.open_panel.as_deref() != Some(panel) {
-        let _ = app.run("window.panel", json!({"panel": panel}));
-    }
+    let _ = app.run("window.panel", json!({"panel": panel}));
 }
 
 fn units(app: &DesignApp) -> Unit {
@@ -58,6 +55,9 @@ fn selection_title(app: &DesignApp, info: &Option<SelInfo>) -> String {
     let Some(st) = app.session.active() else { return String::new() };
     if st.selection.text.is_some() {
         return crate::i18n::tr(&app.ui.language, "Characters").into();
+    }
+    if info.is_none() && !st.selection.guides.is_empty() {
+        return crate::i18n::tr(&app.ui.language, "Ruler Guide").into();
     }
     match info {
         None => crate::i18n::tr(&app.ui.language, "No Selection").into(),
@@ -104,6 +104,11 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
         divider(ui);
         section(ui, crate::i18n::tr(&app.ui.language, "Quick Actions"), true);
         quick_actions_text(app, ui);
+        return;
+    }
+    if info.is_none() && app.session.active().is_some_and(|st| !st.selection.guides.is_empty()) {
+        section(ui, crate::i18n::tr(&app.ui.language, "Transform"), true);
+        guide_section(app, ui);
         return;
     }
     // The Page tool with no objects selected: the page's own settings, as InDesign's.
@@ -512,7 +517,9 @@ fn document_sections(app: &mut DesignApp, ui: &mut Ui) {
     if smart != app.ui.smart_guides {
         let _ = app.run("view.smartGuides", json!({}));
     }
-    app.ui.guides_locked = locked;
+    if locked != app.ui.guides_locked {
+        let _ = app.run("view.lockGuides", json!({"on": locked}));
+    }
     rule(ui);
     section(ui, crate::i18n::tr(&app.ui.language, "Quick Actions"), true);
     let (a, b) = button_pair(ui, crate::i18n::tr(&app.ui.language, "Import File"), crate::i18n::tr(&app.ui.language, "Insert Page"));
@@ -609,6 +616,27 @@ fn transform_section(app: &mut DesignApp, ui: &mut Ui, i: &SelInfo) {
     transform_angles(app, ui, rp);
     if more_options(ui, &app.ui.language).clicked() {
         show_panel(app, "info");
+    }
+}
+
+/// Properties › Transform for selected ruler guides: X for one vertical guide, Y for one
+/// horizontal guide; with several guides both fields are empty.
+fn guide_section(app: &mut DesignApp, ui: &mut Ui) {
+    let guide = super::guide_field(app);
+    let b = block(ui, 2.0 * FIELD_H + 4.0);
+    for (row, (label, key)) in [("X:", "gx"), ("Y:", "gy")].into_iter().enumerate() {
+        let yy = row as f32 * 25.0;
+        let on = guide.filter(|g| g.row() == row);
+        place(ui, sub(b, 40.0, yy, 18.0, FIELD_H), |ui| widgets::caption_w(ui, label, 18.0));
+        let typed = place(ui, sub(b, 59.0, yy, 135.0, FIELD_H), |ui| {
+            if on.is_none() {
+                ui.disable();
+            }
+            measure(ui, key, on.map(|g| g.value), on.map_or_else(|| units(app), |g| g.unit), 135.0)
+        });
+        if let (Some(v), Some(g)) = (typed, on) {
+            let _ = app.run("guide.move", g.move_to(v));
+        }
     }
 }
 
@@ -1170,7 +1198,7 @@ fn text_style_section(app: &mut DesignApp, ui: &mut Ui) {
         )
         .clicked()
         {
-            app.ui.open_panel = Some(if tab == 0 { "paragraphStyles" } else { "characterStyles" }.into());
+            show_panel(app, if tab == 0 { "paragraphStyles" } else { "characterStyles" });
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 12.0;
@@ -1188,7 +1216,7 @@ fn text_style_section(app: &mut DesignApp, ui: &mut Ui) {
                 let _ = app.run("style.paragraph.apply", json!({"name": cur, "clearOverrides": true}));
             }
             if icon_toggle(ui, "style-load", false, crate::i18n::tr(&app.ui.language, "Styles panel")).clicked() {
-                app.ui.open_panel = Some(if tab == 0 { "paragraphStyles" } else { "characterStyles" }.into());
+                show_panel(app, if tab == 0 { "paragraphStyles" } else { "characterStyles" });
             }
         });
     });
@@ -1690,12 +1718,8 @@ pub fn character_panel(app: &mut DesignApp, ui: &mut egui::Ui) {
     }
 }
 
-/// Opens the Typography panel, or focuses it when it is already showing. `window.panel` toggles a
-/// flyout, so it is skipped while the Typography flyout is open.
+/// Opens the Typography panel, or brings it to the front when it is already open.
 pub fn show_typography_panel(app: &mut DesignApp) {
-    if app.ui.open_panel.as_deref() == Some("typography") {
-        return;
-    }
     let _ = app.run("window.panel", json!({"panel": "typography"}));
 }
 

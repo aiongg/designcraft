@@ -74,6 +74,7 @@ const TABLE: &[(&str, [&str; 5])] = &[
         ],
     ),
     ("Close", ["Schließen", "Fermer", "Cerrar", "閉じる", "关闭"]),
+    ("Dismiss", ["Ausblenden", "Ignorer", "Descartar", "閉じる", "关闭"]),
     ("Save", ["Speichern", "Enregistrer", "Guardar", "保存", "保存"]),
     ("Save As…", ["Speichern unter …", "Enregistrer sous…", "Guardar como…", "別名で保存…", "另存为…"]),
     ("Save a Copy…", ["Kopie speichern …", "Enregistrer une copie…", "Guardar una copia…", "コピーを保存…", "保存副本…"]),
@@ -131,6 +132,111 @@ const TABLE: &[(&str, [&str; 5])] = &[
     ),
     ("Minimize", ["Minimieren", "Réduire", "Minimizar", "最小化", "最小化"]),
     ("Collapse to Icons", ["Auf Symbole minimieren", "Réduire en icônes", "Contraer a iconos", "アイコンパネルに折りたたむ", "折叠为图标"]),
+    // Docking chrome (craft-ui labels in DesignCraft's wording, `panel_docking::DOCK_LABELS`).
+    ("Group with", ["Gruppieren mit", "Grouper avec", "Agrupar con", "次とグループ化", "编组到"]),
+    ("Panels", ["Bedienfelder", "Panneaux", "Paneles", "パネル", "面板"]),
+    (
+        "Resize panels",
+        ["Größe der Bedienfelder ändern", "Redimensionner les panneaux", "Cambiar tamaño de los paneles", "パネルのサイズを変更", "调整面板大小"],
+    ),
+    (
+        "Resize panel window",
+        [
+            "Größe des Bedienfeldfensters ändern",
+            "Redimensionner la fenêtre de panneau",
+            "Cambiar tamaño de la ventana de panel",
+            "パネルウィンドウのサイズを変更",
+            "调整面板窗口大小",
+        ],
+    ),
+    (
+        "Move tab group",
+        ["Registerkartengruppe verschieben", "Déplacer le groupe d'onglets", "Mover grupo de fichas", "タブグループを移動", "移动选项卡组"],
+    ),
+    ("Expand", ["Erweitern", "Développer", "Expandir", "展開", "展开"]),
+    (
+        "Float Tab Group",
+        [
+            "Registerkartengruppe lösen",
+            "Détacher le groupe d'onglets",
+            "Hacer flotante el grupo de fichas",
+            "タブグループをフローティング表示",
+            "浮动选项卡组",
+        ],
+    ),
+    (
+        "Group Tab Group with",
+        [
+            "Registerkartengruppe gruppieren mit",
+            "Grouper le groupe d'onglets avec",
+            "Agrupar grupo de fichas con",
+            "タブグループを次とグループ化",
+            "将选项卡组编组到",
+        ],
+    ),
+    (
+        "Move panel column",
+        ["Bedienfeldspalte verschieben", "Déplacer la colonne de panneaux", "Mover columna de paneles", "パネル列を移動", "移动面板列"],
+    ),
+    ("Expand Panels", ["Bedienfelder erweitern", "Développer les panneaux", "Expandir paneles", "パネルを展開", "展开面板"]),
+    (
+        "Move panel window",
+        ["Bedienfeldfenster verschieben", "Déplacer la fenêtre de panneau", "Mover ventana de panel", "パネルウィンドウを移動", "移动面板窗口"],
+    ),
+    (
+        "Close panel window",
+        ["Bedienfeldfenster schließen", "Fermer la fenêtre de panneau", "Cerrar ventana de panel", "パネルウィンドウを閉じる", "关闭面板窗口"],
+    ),
+    ("Undock Panel", ["Bedienfeld abdocken", "Désancrer le panneau", "Desacoplar panel", "パネルのドッキングを解除", "取消停靠面板"]),
+    (
+        "Undock Panel Group",
+        [
+            "Bedienfeldgruppe abdocken",
+            "Désancrer le groupe de panneaux",
+            "Desacoplar grupo de paneles",
+            "パネルグループのドッキングを解除",
+            "取消停靠面板组",
+        ],
+    ),
+    (
+        "Close Panel Group",
+        ["Bedienfeldgruppe schließen", "Fermer le groupe de panneaux", "Cerrar grupo de paneles", "パネルグループを閉じる", "关闭面板组"],
+    ),
+    (
+        "Close Other Panels in Group",
+        [
+            "Andere Bedienfelder der Gruppe schließen",
+            "Fermer les autres panneaux du groupe",
+            "Cerrar los demás paneles del grupo",
+            "グループ内の他のパネルを閉じる",
+            "关闭组中的其他面板",
+        ],
+    ),
+    ("Maximize Frame", ["Bereich maximieren", "Agrandir la zone", "Maximizar área", "領域を最大化", "最大化区域"]),
+    (
+        "Restore Frame Size",
+        ["Bereichsgröße wiederherstellen", "Restaurer la taille de la zone", "Restaurar tamaño del área", "領域のサイズを元に戻す", "恢复区域大小"],
+    ),
+    (
+        "Move Panel to New Window",
+        [
+            "Bedienfeld in neues Fenster verschieben",
+            "Déplacer le panneau dans une nouvelle fenêtre",
+            "Mover panel a una ventana nueva",
+            "パネルを新規ウィンドウに移動",
+            "将面板移到新窗口",
+        ],
+    ),
+    (
+        "Auto-Collapse Iconic Panels",
+        [
+            "Symbolbedienfelder automatisch minimieren",
+            "Réduire automatiquement les panneaux d’icônes",
+            "Contraer automáticamente los paneles de iconos",
+            "アイコンパネルを自動的に折りたたむ",
+            "自动折叠图标面板",
+        ],
+    ),
     ("Panel Options", ["Bedienfeldoptionen", "Options du panneau", "Opciones de panel", "パネルオプション", "面板选项"]),
     ("Panel Options…", ["Bedienfeldoptionen…", "Options du panneau…", "Opciones de panel…", "パネルオプション…", "面板选项…"]),
     ("Show Thumbnails", ["Miniaturen anzeigen", "Afficher les vignettes", "Mostrar miniaturas", "サムネールを表示", "显示缩览图"]),
@@ -284,6 +390,10 @@ const TABLE: &[(&str, [&str; 5])] = &[
     ("Settings for:", ["Einstellungen für:", "Paramètres pour :", "Ajustes para:", "設定対象：", "设置："]),
     ("Transparency", ["Transparenz", "Transparence", "Transparencia", "透明", "透明度"]),
     ("Transparency…", ["Transparenz…", "Transparence…", "Transparencia…", "透明…", "透明度…"]),
+    (
+        "Transparency Flattener",
+        ["Transparenzreduzierung", "Aplatissement de la transparence", "Acoplador de transparencia", "透明の分割・統合", "透明度拼合"],
+    ),
     ("Basic Blending", ["Grundlegendes Füllen", "Fusion de base", "Fusión básica", "基本的な描画モード", "基本混合"]),
     ("Opacity:", ["Deckkraft:", "Opacité :", "Opacidad:", "不透明度：", "不透明度："]),
     ("Blending", ["Füllmethode", "Fusion", "Fusión", "描画モード", "混合"]),
@@ -318,6 +428,11 @@ const TABLE: &[(&str, [&str; 5])] = &[
     ("Duplicate", ["Duplizieren", "Dupliquer", "Duplicar", "複製", "重复"]),
     ("Select All", ["Alles auswählen", "Tout sélectionner", "Seleccionar todo", "すべてを選択", "全选"]),
     ("Deselect All", ["Auswahl aufheben", "Tout désélectionner", "Deseleccionar todo", "すべての選択を解除", "取消全选"]),
+    (
+        "Select All Guides",
+        ["Alle Hilfslinien auswählen", "Sélectionner tous les repères", "Seleccionar todas las guías", "すべてのガイドを選択", "选择所有参考线"],
+    ),
+    ("Ruler Guide", ["Hilfslinie", "Repère de règle", "Guía de regla", "定規ガイド", "标尺参考线"]),
     ("Find/Change…", ["Suchen/Ersetzen …", "Rechercher/Remplacer…", "Buscar/Cambiar…", "検索と置換…", "查找/更改…"]),
     ("Check Spelling…", ["Rechtschreibprüfung …", "Vérifier l'orthographe…", "Revisar ortografía…", "スペルチェック…", "拼写检查…"]),
     ("Preferences…", ["Voreinstellungen …", "Préférences…", "Preferencias…", "環境設定…", "首选项…"]),
@@ -1124,6 +1239,7 @@ const TABLE: &[(&str, [&str; 5])] = &[
     ),
     ("Paragraph Style:", ["Paragraph Style:", "Style de paragraphe :", "Paragraph Style:", "Paragraph Style:", "段落样式："]),
     ("PDF/A-2b", ["PDF/A-2b", "PDF/A-2b", "PDF/A-2b", "PDF/A-2b", "PDF/A-2b"]),
+    ("PDF/X-1a:2003", ["PDF/X-1a:2003", "PDF/X-1a:2003", "PDF/X-1a:2003", "PDF/X-1a:2003", "PDF/X-1a:2003"]),
     ("PDF/X-4", ["PDF/X-4", "PDF/X-4", "PDF/X-4", "PDF/X-4", "PDF/X-4"]),
     ("Place PDF", ["Place PDF", "Importer un PDF", "Place PDF", "Place PDF", "置入PDF"]),
     ("Plain Text", ["Plain Text", "Texte brut", "Plain Text", "Plain Text", "纯文本"]),
@@ -1779,7 +1895,7 @@ const TABLE: &[(&str, [&str; 5])] = &[
         ],
     ),
     ("Flattener Preview", ["Flattener Preview", "Aperçu de l'aplatissement", "Flattener Preview", "Flattener Preview", "拼合器预览"]),
-    ("Float Panel", ["Float Panel", "Détacher le panneau", "Float Panel", "Float Panel", "浮动面板"]),
+    ("Float Panel", ["Bedienfeld lösen", "Détacher le panneau", "Hacer flotante el panel", "パネルをフローティング表示", "浮动面板"]),
     ("Fonts in Document", ["Fonts in Document", "Polices du document", "Fonts in Document", "Fonts in Document", "文档中的字体"]),
     ("Footnotes", ["Footnotes", "Notes de bas de page", "Footnotes", "Footnotes", "脚注"]),
     ("Form Fields", ["Form Fields", "Champs de formulaire", "Form Fields", "Form Fields", "表单域"]),
@@ -3159,6 +3275,10 @@ const TABLE: &[(&str, [&str; 5])] = &[
     ("Last Spread", ["Last Spread", "Dernière planche", "Last Spread", "Last Spread", "最后一个跨页"]),
     ("Load DTD…", ["Load DTD…", "Charger la DTD…", "Load DTD…", "Load DTD…", "载入 DTD…"]),
     ("Location:", ["Location:", "Emplacement :", "Location:", "Location:", "位置："]),
+    (
+        "Lock Column Guides",
+        ["Spaltenhilfslinien sperren", "Verrouiller les repères de colonne", "Bloquear guías de columna", "列ガイドをロック", "锁定栏参考线"],
+    ),
     ("Lock Guides", ["Lock Guides", "Verrouiller les repères", "Lock Guides", "Lock Guides", "锁定参考线"]),
     ("Miter Limit:", ["Miter Limit:", "Limite de pointe :", "Miter Limit:", "Miter Limit:", "斜接限制："]),
     (
@@ -4754,6 +4874,8 @@ mod tests {
         for table in [ar::TABLE, de::TABLE, it::TABLE, ja::TABLE, pt_br::TABLE, uk::TABLE, ru::TABLE, cs::TABLE] {
             keys.extend(table.iter().map(|(key, _)| *key));
         }
+        // The Keyboard Shortcuts dialog's strings (craft-keymap) reach `tr` too.
+        keys.extend(crate::shortcuts_dialog::strings());
         let stale: Vec<_> = catalog.keys().filter(|k| !keys.contains(*k)).collect();
         assert!(stale.is_empty(), "French entries for unknown keys: {stale:?}");
         let placeholders = |s: &str| {
@@ -4781,6 +4903,8 @@ mod tests {
         keys.extend(pt_br::TABLE.iter().map(|(key, _)| *key));
         // A new English string falls back to English until it is translated, so only stale
         // entries (keys no catalog knows any more) fail.
+        // The Keyboard Shortcuts dialog's strings (craft-keymap) reach `tr` too.
+        keys.extend(crate::shortcuts_dialog::strings());
         let stale: Vec<_> = catalog.keys().filter(|k| !keys.contains(*k)).collect();
         assert!(stale.is_empty(), "Ukrainian entries for unknown keys: {stale:?}");
         let placeholders =
@@ -4866,6 +4990,8 @@ mod tests {
         keys.extend(uk::TABLE.iter().map(|(key, _)| *key));
         // A new English string falls back to English until it is translated, so only stale
         // entries (keys no catalog knows any more) fail.
+        // The Keyboard Shortcuts dialog's strings (craft-keymap) reach `tr` too.
+        keys.extend(crate::shortcuts_dialog::strings());
         let stale: Vec<_> = catalog.keys().filter(|k| !keys.contains(*k)).collect();
         assert!(stale.is_empty(), "Russian entries for unknown keys: {stale:?}");
         let placeholders =
@@ -4931,6 +5057,8 @@ mod tests {
             keys.extend(table.iter().map(|(key, _)| *key));
         }
         // A new English string falls back to English until it is translated; only stale entries fail.
+        // The Keyboard Shortcuts dialog's strings (craft-keymap) reach `tr` too.
+        keys.extend(crate::shortcuts_dialog::strings());
         let stale: Vec<_> = catalog.keys().filter(|k| !keys.contains(*k)).collect();
         assert!(stale.is_empty(), "Polish entries for unknown keys: {stale:?}");
         let placeholders =
@@ -5068,6 +5196,8 @@ mod tests {
         ]);
         // A new English string falls back to English until it is translated, so only stale
         // entries (keys nothing passes to `tr` any more) fail.
+        // The Keyboard Shortcuts dialog's strings (craft-keymap) reach `tr` too.
+        keys.extend(crate::shortcuts_dialog::strings());
         let stale: Vec<_> = catalog.keys().filter(|k| !keys.contains(*k)).collect();
         assert!(stale.is_empty(), "Czech entries for unknown keys: {stale:?}");
         let placeholders =

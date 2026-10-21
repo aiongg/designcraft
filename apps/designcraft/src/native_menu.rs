@@ -22,9 +22,10 @@ pub struct NativeMenu {
     items: HashMap<String, (String, Value, Handle)>,
     events: Receiver<MenuEvent>,
     last_refresh: f64,
-    /// The interface language the titles are in and whether CJK features are shown: the menu is
-    /// rebuilt when either changes.
-    shown_for: (String, bool),
+    /// The interface language the titles are in, whether CJK features are shown and whether the
+    /// Keyboard Shortcuts dialog records keys (the menu then has no key equivalents, so the keys
+    /// reach the dialog): the menu is rebuilt when any of them changes.
+    shown_for: (String, bool, bool),
     /// File › Open Recent, rebuilt when the list of recent files changes.
     recent: Option<RecentMenu>,
 }
@@ -75,7 +76,7 @@ impl NativeMenu {
         for entry in menus::MAC_APP_MENU {
             let _ = match *entry {
                 AppMenuItem::Cmd { id, label, command } => {
-                    let sc = shortcut(command).and_then(accel);
+                    let sc = shortcut(command).filter(|_| !app.shortcut_recording()).and_then(accel);
                     let item = MenuItem::with_id(id, menu_title(app, label), true, sc);
                     let appended = app_menu.append(&item);
                     items.insert(id.into(), (command.into(), Value::Null, Handle::Plain(item)));
@@ -104,7 +105,14 @@ impl NativeMenu {
             })
             .collect();
         let recent = recent.map(|submenu| RecentMenu { submenu, shown: Vec::new(), ids: Vec::new(), separator: None });
-        Self { _menu: menu, items, events, last_refresh: 0.0, shown_for: (app.ui.language.clone(), designcraft_ui_egui::cjk_features(app)), recent }
+        Self {
+            _menu: menu,
+            items,
+            events,
+            last_refresh: 0.0,
+            shown_for: (app.ui.language.clone(), designcraft_ui_egui::cjk_features(app), app.shortcut_recording()),
+            recent,
+        }
     }
 
     /// Put the current recent files at the top of File › Open Recent when they changed.
@@ -151,8 +159,12 @@ impl NativeMenu {
         }
         // Interface Language and Show CJK Features (set in Preferences or by `app.language`, or put
         // back by Cancel): the system menu bar follows at once, like the panels (the new menu
-        // replaces the old one as the application's menu before that one is dropped).
-        if app.ui.language != self.shown_for.0 || designcraft_ui_egui::cjk_features(app) != self.shown_for.1 {
+        // replaces the old one as the application's menu before that one is dropped). While the
+        // Keyboard Shortcuts dialog records, the bar has no key equivalents.
+        if app.ui.language != self.shown_for.0
+            || designcraft_ui_egui::cjk_features(app) != self.shown_for.1
+            || app.shortcut_recording() != self.shown_for.2
+        {
             *self = Self::install(app, ctx);
         }
         let now = designcraft_ui_egui::now_ms();
@@ -202,7 +214,7 @@ fn build(
             Item::Cmd { label, id, params, shortcut } => {
                 *counter += 1;
                 let mid = format!("dc{counter}");
-                let sc = if params.is_null() { shortcut.and_then(accel) } else { None };
+                let sc = if params.is_null() && !app.shortcut_recording() { shortcut.and_then(accel) } else { None };
                 let label = menu_title(app, label);
                 let handle = if menus::checked(app, id, params).is_some() {
                     let c = CheckMenuItem::with_id(mid.clone(), label, true, false, sc);
