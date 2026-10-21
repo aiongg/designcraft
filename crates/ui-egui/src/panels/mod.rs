@@ -261,7 +261,7 @@ pub fn swatch_menu_row(ui: &mut egui::Ui, doc: &designcraft_doc::Document, name:
     crate::widgets::paint_chip(ui.painter(), chip, c, g);
     // A name too long for the list is cut at the row's end.
     let text = ui.painter().with_clip_rect(ui.clip_rect().intersect(row.shrink2(vec2(2.0, 0.0))));
-    (&text).text(
+    text.text(
         row.min + vec2(SWATCH_MENU_TEXT_X, SWATCH_MENU_ROW_H / 2.0),
         egui::Align2::LEFT_CENTER,
         name,

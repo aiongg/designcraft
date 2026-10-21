@@ -401,7 +401,7 @@ fn card(ui: &mut Ui, c: &Card, units: Unit, selected: bool) -> egui::Response {
     let page = Rect::from_center_size(pos2(r.center().x, r.top() + 56.0), vec2(72.0, 72.0));
     paint_page(ui.painter(), page, &c.nd, c.custom, if selected { t.text_strong } else { t.icon });
     ui.painter().text(pos2(r.center().x, r.top() + 114.0), Align2::CENTER_CENTER, &c.label, semibold(12.0), t.text_strong);
-    ui.painter().text(pos2(r.center().x, r.top() + 132.0), Align2::CENTER_CENTER, &size_text(&c.nd, units), FontId::proportional(11.0), t.text_dim);
+    ui.painter().text(pos2(r.center().x, r.top() + 132.0), Align2::CENTER_CENTER, size_text(&c.nd, units), FontId::proportional(11.0), t.text_dim);
     resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, selected, &c.label));
     resp
 }

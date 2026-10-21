@@ -1133,7 +1133,7 @@ fn text_style_section(app: &mut DesignApp, ui: &mut Ui) {
     let ag = Rect::from_min_size(resp.rect.min + vec2(6.0, 6.0), vec2(22.0, 22.0));
     ui.painter().rect_filled(ag, 1.0, egui::Color32::WHITE);
     ui.painter().text(ag.center(), egui::Align2::CENTER_CENTER, "Ag", egui::FontId::new(13.0, egui::FontFamily::Proportional), egui::Color32::BLACK);
-    (&ui.painter().with_clip_rect(resp.rect.shrink2(vec2(20.0, 0.0)))).text(
+    ui.painter().with_clip_rect(resp.rect.shrink2(vec2(20.0, 0.0))).text(
         pos2(ag.max.x + 8.0, resp.rect.center().y),
         egui::Align2::LEFT_CENTER,
         &label,
