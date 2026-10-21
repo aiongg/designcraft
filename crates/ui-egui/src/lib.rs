@@ -775,11 +775,8 @@ pub struct DesignApp {
     #[cfg(test)]
     input_ticks: u32,
     styled: bool,
-    /// The interface language the UI fonts were installed for (it orders the CJK fallbacks).
+    /// The interface language the UI fonts were installed for.
     fonts_lang: String,
-    /// The installed CJK faces are among the UI fonts (false while the system fonts are still
-    /// being cataloged: the fonts are installed again when they are).
-    fonts_system: bool,
     pub restyle: bool,
     fonts_ready: bool,
     /// Files the operating system asked to open (macOS Finder, Dock, Open With), opened once the
@@ -908,7 +905,6 @@ impl DesignApp {
             input_ticks: 0,
             styled: false,
             fonts_lang: String::new(),
-            fonts_system: false,
             restyle: false,
             fonts_ready: false,
             os_documents: Vec::new(),
@@ -1393,19 +1389,19 @@ impl DesignApp {
         }
     }
 
-    /// Install the UI fonts on the first frame, and again when the language or the system fonts change.
+    /// Install the UI fonts on the first frame, and again when the language changes.
     fn update_fonts(&mut self, ctx: &egui::Context) {
         if !self.styled {
             // The UI scale is a preference (applied above); egui's own Cmd+Plus/Minus/0 would rescale the
             // whole window instead of the canvas, only to be reset next frame.
             ctx.options_mut(|o| o.zoom_with_keyboard = false);
-            self.fonts_system = theme::install_fonts(ctx, &self.ui.language);
+            theme::install_fonts(ctx, &self.ui.language);
             self.fonts_lang = self.ui.language.clone();
             self.styled = true;
             self.restyle = true;
         } else {
-            if self.fonts_lang != self.ui.language || (!self.fonts_system && theme::system_fonts_ready()) {
-                self.fonts_system = theme::install_fonts(ctx, &self.ui.language);
+            if self.fonts_lang != self.ui.language {
+                theme::install_fonts(ctx, &self.ui.language);
                 self.fonts_lang = self.ui.language.clone();
             }
             self.fonts_ready = true;
@@ -1468,10 +1464,6 @@ impl DesignApp {
             ctx.set_zoom_factor(scale);
         }
         self.update_fonts(ctx);
-        if !self.fonts_system {
-            // The font scan runs in the background: look again shortly.
-            ctx.request_repaint_after(std::time::Duration::from_millis(250));
-        }
         if self.restyle {
             theme::apply(ctx, &theme::Tokens::for_brightness(self.ui.brightness));
             self.restyle = false;
