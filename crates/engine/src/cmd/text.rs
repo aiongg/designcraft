@@ -71,7 +71,15 @@ pub fn specs() -> Vec<CommandSpec> {
             s.typing_format = None;
             ok()
         }),
-        cmd!("text.insert", "Type", [], None, "{text, raw?: bool (no typographer's quotes)} — replaces the selected text", has_text, insert),
+        cmd!(
+            "text.insert",
+            "Type",
+            [],
+            None,
+            "{text, raw?: bool (no typographer's quotes), before?, after?} — replaces the selected text, and `before`/`after` UTF-8 bytes on either side of it (an input method's replacement, widened to whole characters)",
+            has_text,
+            insert
+        ),
         cmd!("text.delete", "Delete Text", [], None, "{forward?: bool, word?: bool}", has_text, delete),
         cmd!(noundo "text.move", "Move Caret", [], None, "{dir: left|right|up|down|lineStart|lineEnd|storyStart|storyEnd, extend?, word?}", has_text, move_caret),
         cmd!(noundo "text.exitToFrame", "Select Frame", [], None, "{}", has_doc, |s, _| {
@@ -668,11 +676,16 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     let tracking = s.doc()?.doc.settings.track_changes;
     let autocorrect = (s.prefs.autocorrect && !tracking && !raw).then(|| s.prefs.autocorrect_list.clone());
     let typing = typing_format(s).cloned();
+    let bytes = |key: &str| p.get(key).and_then(Value::as_u64).map_or(0, |n| usize::try_from(n).unwrap_or(usize::MAX));
+    let (before, after) = (bytes("before"), bytes("after"));
     let result = s.edit(|d, sel| {
         let t = sel.text.ok_or_else(|| bad("text.insert", "no insertion point"))?;
         let st = d.text_story_mut(t.story, t.cell).ok_or(designcraft_doc::DocError::NoStory(t.story))?;
         let r = t.range();
         let mut r = r.start.min(st.len())..r.end.min(st.len());
+        if before > 0 || after > 0 {
+            r = floor_char_boundary(&st.text, r.start.saturating_sub(before))..st.text.ceil_char_boundary(r.end.saturating_add(after));
+        }
         // Between a break character and its return is the end of that paragraph: typing there goes
         // to the start of the next one.
         if r.is_empty()

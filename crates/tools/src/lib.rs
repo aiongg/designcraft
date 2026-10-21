@@ -467,8 +467,10 @@ pub trait Tool: Send {
     fn ime_preedit(&mut self, _cx: &ToolContext, _text: &str, _active_chars: Option<std::ops::Range<usize>>) -> Vec<Action> {
         vec![]
     }
-    /// The IME committed `text`: it replaces the marked text and is typed as one step.
-    fn ime_commit(&mut self, _cx: &ToolContext, _text: &str) -> Vec<Action> {
+    /// The IME committed `text`: it replaces the marked text and is typed as one step. `around`
+    /// is the UTF-8 bytes before and after the marked (or selected) text that the IME replaces
+    /// too, in the same step (macOS press-and-hold accents replace the letter typed before).
+    fn ime_commit(&mut self, _cx: &ToolContext, _text: &str, _around: [usize; 2]) -> Vec<Action> {
         vec![]
     }
     /// End a composition from outside the IME (a click, another command): the marked text stays

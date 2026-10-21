@@ -2563,7 +2563,13 @@ fn ime_event(app: &mut DesignApp, e: egui::ImeEvent, vi: designcraft_engine::Vie
         }
         egui::ImeEvent::Commit(t) => {
             app.ime_marked = None;
-            app.session.tool_ime_commit(&t, vi).map_err(|e| e.to_string())
+            app.session.tool_ime_replace(&t, std::mem::take(&mut app.ime_around), vi).map_err(|e| e.to_string())
+        }
+        // Text the commit that follows replaces (macOS press-and-hold accents, Wayland): deleted
+        // with it, in the same undo step.
+        egui::ImeEvent::DeleteSurroundingBytes { before_bytes, after_bytes } => {
+            app.ime_around = [before_bytes, after_bytes];
+            Ok(())
         }
         // The web text agent's corrections and mobile Backspace: characters around the caret go.
         egui::ImeEvent::DeleteSurrounding { before_chars, after_chars } if !app.session.tool_composing() => {
@@ -2592,6 +2598,7 @@ fn delete_surrounding(app: &mut DesignApp, before: usize, after: usize) -> Resul
 /// End a composition outside the IME (a click away, the canvas losing the keyboard): the marked
 /// text stays as typed, and the system IME is told to drop its copy.
 pub(crate) fn keep_marked_text(app: &mut DesignApp) {
+    app.ime_around = [0, 0];
     if app.ime_marked.take().is_some() {
         app.ime_discard = true;
     }
@@ -4428,6 +4435,30 @@ mod tests {
         h.state_mut().run("tool.select", json!({"tool": "selection"})).unwrap();
         h.run_steps(2);
         assert!(h.output().platform_output.ime.is_none());
+    }
+
+    /// Holding E on a Mac and picking è replaces the "e" already typed: the input method deletes
+    /// it by byte count with the commit, as one undo step. Without that the story reads "eè".
+    #[test]
+    fn press_and_hold_accents_replace_the_letter_typed() {
+        let (mut h, id) = typing("ẫ");
+        h.state_mut().run("text.placeCaret", json!({"frame": id, "point": [390.0, 80.0]})).unwrap();
+        h.run_steps(2);
+        let text = |h: &Harness<'_, DesignApp>| h.state().session.doc().unwrap().doc.stories.values().map(|s| s.text.clone()).collect::<String>();
+        h.event(egui::Event::Text("e".into()));
+        h.run_steps(2);
+        assert_eq!(text(&h), "ẫe");
+        h.event(egui::Event::Ime(egui::ImeEvent::DeleteSurroundingBytes { before_bytes: 1, after_bytes: 0 }));
+        h.event(egui::Event::Ime(egui::ImeEvent::Commit("è".into())));
+        h.run_steps(2);
+        assert_eq!(text(&h), "ẫè");
+        // A count that ends inside a character takes the whole character.
+        h.event(egui::Event::Ime(egui::ImeEvent::DeleteSurroundingBytes { before_bytes: 1, after_bytes: 0 }));
+        h.event(egui::Event::Ime(egui::ImeEvent::Commit("o".into())));
+        h.run_steps(2);
+        assert_eq!(text(&h), "ẫo");
+        h.state_mut().run("edit.undo", json!({})).unwrap();
+        assert_eq!(text(&h), "ẫè", "the deletion and the commit undo together");
     }
 
     #[test]

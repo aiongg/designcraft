@@ -617,6 +617,9 @@ pub struct DesignApp {
     /// The marked text the system IME last sent (`None` once it commits or clears). When the
     /// composition ends some other way (a click, a tool switch), the IME is told to drop it.
     pub(crate) ime_marked: Option<String>,
+    /// UTF-8 bytes before and after the marked or selected text that the IME's next commit
+    /// replaces (`ImeEvent::DeleteSurroundingBytes`, sent just before the commit).
+    pub(crate) ime_around: [usize; 2],
     /// The system IME must drop its marked text (see [`Self::take_ime_discard`]).
     pub(crate) ime_discard: bool,
     /// The canvas asked for the system IME in the last frame (the web build's text input has the
@@ -694,6 +697,7 @@ impl DesignApp {
             in_control: false,
             object_clip_text: None,
             ime_marked: None,
+            ime_around: [0, 0],
             ime_discard: false,
             canvas_ime: false,
             quit_requested: false,

@@ -226,7 +226,13 @@ impl Session {
     /// The IME committed `text`: it replaces the marked text as one `text.insert` (one undo step,
     /// one journaled command).
     pub fn tool_ime_commit(&mut self, text: &str, view: ViewInfo) -> Result<()> {
-        let actions = self.with_ctx(view, |s, cx| s.tool.ime_commit(cx, text)).unwrap_or_default();
+        self.tool_ime_replace(text, [0, 0], view)
+    }
+
+    /// The IME committed `text` and replaces `around` UTF-8 bytes before and after the marked (or
+    /// selected) text with it, all in one `text.insert`.
+    pub fn tool_ime_replace(&mut self, text: &str, around: [usize; 2], view: ViewInfo) -> Result<()> {
+        let actions = self.with_ctx(view, |s, cx| s.tool.ime_commit(cx, text, around)).unwrap_or_default();
         self.run_actions(actions)
     }
 
