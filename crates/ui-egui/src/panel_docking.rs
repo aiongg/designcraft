@@ -572,6 +572,17 @@ fn shared_command(app: &mut DesignApp, id: &str, params: &Value) -> Result<Value
     Ok(txn.commit(app, closed, reveal))
 }
 
+/// Where floating windows may go: the window, below the title-bar strip when DesignCraft draws
+/// its own title bar under macOS's transparent one. A floating window in that strip would take
+/// presses that move the whole app window.
+fn float_bounds(app: &DesignApp, ctx: &egui::Context) -> egui::Rect {
+    let mut r = ctx.content_rect();
+    if app.integrated_titlebar {
+        r.min.y = (r.min.y + crate::chrome::MAC_APP_BAR).min(r.max.y);
+    }
+    r
+}
+
 /// Where a command floats a panel, group or column it gives no rect: inside the dock area as
 /// last drawn, else inside the window, else (headless, before any frame) inside
 /// [`HEADLESS_AREA`].
@@ -579,7 +590,7 @@ fn shared_command(app: &mut DesignApp, id: &str, params: &Value) -> Result<Value
 /// same command, or headless) floats at that size too.
 fn float_space(app: &DesignApp) -> FloatSpace<String> {
     let space = match app.egui_ctx.as_ref() {
-        Some(ctx) => craft_ui::docking::float_space::<String>(ctx, area_id()).unwrap_or_else(|| FloatSpace::new(ctx.content_rect())),
+        Some(ctx) => craft_ui::docking::float_space::<String>(ctx, area_id()).unwrap_or_else(|| FloatSpace::new(float_bounds(app, ctx))),
         None => FloatSpace::new(HEADLESS_AREA),
     };
     crate::dock::DOCK_TABS
@@ -877,7 +888,10 @@ pub(crate) fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
         blocked.push(rect);
     }
     let style = dock_style(ui, &app.ui.language);
-    let mut dock = craft_ui::docking::DockArea::new(area).blocked_rects(&blocked).auto_collapse_iconic(app.ui.dock_auto_collapse);
+    let mut dock = craft_ui::docking::DockArea::new(area)
+        .float_bounds(float_bounds(app, ui.ctx()))
+        .blocked_rects(&blocked)
+        .auto_collapse_iconic(app.ui.dock_auto_collapse);
     if let Some(panel) = raise {
         dock = dock.raise_panel(panel);
     }

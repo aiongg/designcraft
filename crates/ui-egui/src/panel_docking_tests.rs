@@ -1143,3 +1143,17 @@ fn docking_labels_are_translated() {
         }
     }
 }
+
+/// With DesignCraft's title bar under macOS's transparent one, a floating window saved in the
+/// title-bar strip is drawn below it, where its title bar can't move the app window.
+#[test]
+fn a_floating_window_saved_in_the_title_bar_strip_is_drawn_below_it() {
+    let mut app = app();
+    app.integrated_titlebar = true;
+    app.run("window.panel.float", json!({"panel":"properties"})).unwrap();
+    let window = app.ui.docking.as_mut().unwrap().floating.iter_mut().find(|w| w.panels().any(|p| p == "properties")).unwrap();
+    window.rect = [200.0, 0.0, 280.0, 360.0];
+    let h = harness(app, egui::vec2(1400.0, 900.0));
+    let drawn = h.ctx.memory(|m| m.area_rect(crate::panel_docking::floating_layer("properties").id)).unwrap();
+    assert!(drawn.min.y >= crate::chrome::MAC_APP_BAR - 0.5, "{drawn:?}");
+}
