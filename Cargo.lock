@@ -1575,8 +1575,7 @@ checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 [[package]]
 name = "ecolor"
 version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "31bcbef0d4263a63eb32c4834e5d711613035ce1333468e107d928923e21e6e2"
+source = "git+https://github.com/aiongg/egui?branch=craft%2F0.37#99976562891e5e411ad81cc52237e6d718c07347"
 dependencies = [
  "bytemuck",
  "emath",
@@ -1585,8 +1584,7 @@ dependencies = [
 [[package]]
 name = "eframe"
 version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c5642501a65ca657d05f00c643a5c14ff2346cb3818032bfe23d58e1f8e5f84"
+source = "git+https://github.com/aiongg/egui?branch=craft%2F0.37#99976562891e5e411ad81cc52237e6d718c07347"
 dependencies = [
  "ahash",
  "bytemuck",
@@ -1621,8 +1619,7 @@ dependencies = [
 [[package]]
 name = "egui"
 version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bec9144f49b7a28b5f395d3147e325b4fe3e77ba686eac11d1bdf0a7da3f375f"
+source = "git+https://github.com/aiongg/egui?branch=craft%2F0.37#99976562891e5e411ad81cc52237e6d718c07347"
 dependencies = [
  "accesskit",
  "ahash",
@@ -1641,8 +1638,7 @@ dependencies = [
 [[package]]
 name = "egui-wgpu"
 version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0309cbe1febed48af5b974e4bcc424b35e9664863a4d402697147b57a488c864"
+source = "git+https://github.com/aiongg/egui?branch=craft%2F0.37#99976562891e5e411ad81cc52237e6d718c07347"
 dependencies = [
  "ahash",
  "bytemuck",
@@ -1661,8 +1657,7 @@ dependencies = [
 [[package]]
 name = "egui-winit"
 version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4e449f4c4a2a60c7ccb4ba7fa4078417bfe1f9ddc03b5e05ce75748e33a70de"
+source = "git+https://github.com/aiongg/egui?branch=craft%2F0.37#99976562891e5e411ad81cc52237e6d718c07347"
 dependencies = [
  "accesskit_winit",
  "arboard",
@@ -1685,8 +1680,7 @@ dependencies = [
 [[package]]
 name = "egui_glow"
 version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9275ca5cc35a6b7c94e0e8cedf22542f66cb0cf45ed8ab2657c78ff49fec7268"
+source = "git+https://github.com/aiongg/egui?branch=craft%2F0.37#99976562891e5e411ad81cc52237e6d718c07347"
 dependencies = [
  "bytemuck",
  "egui",
@@ -1699,8 +1693,7 @@ dependencies = [
 [[package]]
 name = "egui_kittest"
 version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0979c2e37860fcf13a2bea77508607f067a9a6a84ba9bd47b5e298582fb59b86"
+source = "git+https://github.com/aiongg/egui?branch=craft%2F0.37#99976562891e5e411ad81cc52237e6d718c07347"
 dependencies = [
  "dify",
  "eframe",
@@ -1726,8 +1719,7 @@ checksum = "252afb9ae5eaa683babdc6a068b3f5726eb19e05070c731f9b2a23a7c3e8ed34"
 [[package]]
 name = "emath"
 version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e73ce90f54750be8672c02be0743fe47530e6f251e066f0ee2869b59eb297af5"
+source = "git+https://github.com/aiongg/egui?branch=craft%2F0.37#99976562891e5e411ad81cc52237e6d718c07347"
 dependencies = [
  "bytemuck",
 ]
@@ -1776,8 +1768,7 @@ dependencies = [
 [[package]]
 name = "epaint"
 version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97bac86ae3dde93fc3951e790951caea739ff39a6c89d909cdaf1d9278dbb1bd"
+source = "git+https://github.com/aiongg/egui?branch=craft%2F0.37#99976562891e5e411ad81cc52237e6d718c07347"
 dependencies = [
  "ahash",
  "bytemuck",
@@ -1793,6 +1784,7 @@ dependencies = [
  "self_cell",
  "skrifa 0.44.0",
  "smallvec",
+ "unicode-bidi",
  "unicode-general-category",
  "unicode-properties",
  "unicode-segmentation",
@@ -1802,8 +1794,7 @@ dependencies = [
 [[package]]
 name = "epaint_default_fonts"
 version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfc1cc505827f4c23eedc297975a0fd038268d41293f389dd8ff3b574aefab19"
+source = "git+https://github.com/aiongg/egui?branch=craft%2F0.37#99976562891e5e411ad81cc52237e6d718c07347"
 
 [[package]]
 name = "equivalent"
@@ -7067,7 +7058,7 @@ checksum = "d6bbff5f0aada427a1e5a6da5f1f98158182f26556f345ac9e04d36d0ebed650"
 [[package]]
 name = "winit"
 version = "0.30.13"
-source = "git+https://github.com/storytold/winit.git?rev=3d51077fd1a966f84df9ef287839dc84fd5b4ca7#3d51077fd1a966f84df9ef287839dc84fd5b4ca7"
+source = "git+https://github.com/aiongg/winit?branch=craft%2Fsuite#5f3f0c68998edd3d069fc5bb009e14380edb90c1"
 dependencies = [
  "ahash",
  "android-activity",
@@ -7104,6 +7095,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "wayland-backend",
  "wayland-client",
+ "wayland-cursor",
  "wayland-protocols",
  "wayland-protocols-plasma",
  "web-sys",
