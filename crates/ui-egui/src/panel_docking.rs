@@ -113,7 +113,7 @@ const ICON_GROUPS: &[&[&str]] = &[
     &["flexLayout", "liquid"],
     &["links", "library"],
     &["info"],
-    &["attributes", "preflight"],
+    &["attributes", "preflight", "separations"],
     &["notes", "trackChanges", "conditions"],
     &["hyperlinks", "bookmarks"],
     &["buttons", "states"],
