@@ -2,7 +2,7 @@
 
 use std::sync::OnceLock;
 
-use craft_fonts_build::{CJK_SCRIPTS, EmbeddedFace};
+use craft_fonts_build::EmbeddedFace;
 use craft_ui::direction;
 use craft_ui::fonts::{CraftFace, Family, I18nScripts, Stack, SystemFonts, UiFonts};
 use egui::{Color32, CornerRadius, FontData, FontFamily, FontId, Stroke, TextStyle, Visuals};
@@ -269,26 +269,14 @@ fn language_tag(lang: &str) -> &str {
     if lang.is_empty() { "en" } else { lang }
 }
 
-/// craft-fonts' CJK interface faces, cut at build time to the characters of the interface's text
-/// (`build.rs`); empty unless built with `CRAFT_FONTS_DIR`.
+/// The craft-fonts faces the interface draws with (`build.rs`): the CJK interface faces cut to
+/// the characters of the interface's text, and the other scripts' faces whole. Empty unless built
+/// with `CRAFT_FONTS_DIR`.
 static INTERFACE_FACES: &[EmbeddedFace] = include!(concat!(env!("OUT_DIR"), "/craft_fonts_ui.rs"));
 
-/// The craft-fonts faces the interface draws with: the cut CJK interface faces, then the other
-/// scripts' faces from [`designcraft_fonts::CRAFT_FONTS`]. Its full CJK faces are for document
-/// text. Empty unless built with `CRAFT_FONTS_DIR`.
 pub(crate) fn craft_faces() -> &'static [CraftFace] {
     static FACES: OnceLock<Vec<CraftFace>> = OnceLock::new();
-    FACES.get_or_init(|| {
-        let is_cjk = |script: &&str| CJK_SCRIPTS.iter().any(|cjk| script.split('-').next() == Some(*cjk));
-        let others = designcraft_fonts::CRAFT_FONTS.iter().filter(|f| !f.scripts.iter().any(is_cjk)).map(|f| CraftFace {
-            family: f.family,
-            style: f.style,
-            scripts: f.scripts,
-            bytes: f.bytes,
-            index: 0,
-        });
-        INTERFACE_FACES.iter().copied().map(CraftFace::from).chain(others).collect()
-    })
+    FACES.get_or_init(|| INTERFACE_FACES.iter().copied().map(CraftFace::from).collect())
 }
 
 /// The UI faces every family starts with: Source Sans 3 (the semibold shares its line metrics)
@@ -453,6 +441,34 @@ mod font_tests {
                 assert!(galley.size().x > 0.0 && galley.rect.is_finite());
             }
         });
+    }
+
+    /// Characters no catalog has draw in a text field without panicking: a rare Han character, a
+    /// Vietnamese letter and ⌘. ẫ and ⌘ come from the bundled UI face, so they never draw as tofu;
+    /// the Han character draws from an installed font that has it, and as tofu without one.
+    #[test]
+    fn text_fields_draw_characters_outside_the_catalogs() {
+        const HAN: char = '𠀋';
+        let id = FontId::new(13.0, FontFamily::Proportional);
+        let bundled = font_stack("", SystemFonts::Off);
+        assert!("ẫ⌘".chars().all(|c| bundled.fonts(false).has_glyph(&id, c)));
+        let installed = font_stack("", SystemFonts::AfterCraft);
+        let han_installed = installed.fonts(true).has_glyph(&id, HAN);
+        for (stack, text, tofu) in [(&bundled, "ẫ ⌘", false), (&bundled, "𠀋 ẫ ⌘", true), (&installed, "𠀋 ẫ ⌘", !han_installed)] {
+            let mut field = text.to_owned();
+            let stack = stack.clone();
+            let builder = egui_kittest::Harness::builder();
+            let builder = if tofu { builder.allow_missing_glyphs() } else { builder };
+            // The fonts apply from the frame after they are installed: the field comes then.
+            let mut h = builder.build_ui(move |ui| {
+                if ui.ctx().cumulative_frame_nr() == 0 {
+                    stack.install(ui.ctx());
+                } else {
+                    ui.add(egui::TextEdit::singleline(&mut field)).accessible_name("Sample");
+                }
+            });
+            h.run_steps(3);
+        }
     }
 
     /// Installing works with whatever faces this build has.

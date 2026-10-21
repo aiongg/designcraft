@@ -1423,6 +1423,7 @@ name = "designcraft-fonts"
 version = "0.13.0"
 dependencies = [
  "core-text",
+ "craft-fonts-build",
  "harfrust 0.13.3",
  "kurbo",
  "log",

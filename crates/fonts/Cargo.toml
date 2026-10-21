@@ -13,6 +13,8 @@ workspace = true
 testing = []
 
 [dependencies]
+# `EmbeddedFace`, the type of the craft-fonts document table (build.rs).
+craft-fonts-build = { workspace = true }
 kurbo = { workspace = true }
 skrifa = { workspace = true }
 harfrust = { workspace = true }
@@ -25,3 +27,6 @@ log = { workspace = true }
 # register from their own folders. A safe API; MIT OR Apache-2.0. 20.x shares core-foundation 0.9
 # and core-graphics 0.23 with the dependencies already locked.
 core-text = "=20.1.0"
+
+[build-dependencies]
+craft-fonts-build = { workspace = true }
