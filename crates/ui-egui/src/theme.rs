@@ -406,14 +406,20 @@ mod font_tests {
 
     /// Every shipped translation and every language's menu name draws with the UI fonts alone, no
     /// installed fonts. Latin and Cyrillic need only the bundled faces; Japanese, Chinese, Arabic
-    /// and Georgian need the craft-fonts faces, so they are checked in a build with them
-    /// (`CRAFT_FONTS_DIR`).
+    /// and Georgian are checked in a build whose craft-fonts (`CRAFT_FONTS_DIR`) has a face for
+    /// their script, and are left to installed fonts otherwise.
     #[test]
     fn ui_fonts_cover_every_catalog() {
         use craft_ui::fonts::{Sample, assert_covers};
-        let with_craft = !craft_faces().is_empty();
-        let entries: Vec<(&str, &str, &str)> =
-            crate::i18n::catalog_entries().into_iter().filter(|(lang, ..)| with_craft || !matches!(*lang, "ja" | "zh" | "ar" | "ka")).collect();
+        let craft_has = |script: &str| craft_faces().iter().any(|f| f.scripts.contains(&script));
+        let checked = |lang: &str| match lang {
+            "ja" => craft_has("Jpan"),
+            "zh" => craft_has("Hans"),
+            "ar" => craft_has("Arab"),
+            "ka" => craft_has("Geor"),
+            _ => true,
+        };
+        let entries: Vec<(&str, &str, &str)> = crate::i18n::catalog_entries().into_iter().filter(|(lang, ..)| checked(lang)).collect();
         let samples = entries.iter().map(|(lang, key, text)| Sample { language: language_tag(lang), key, text });
         assert_covers(&font_stack("", SystemFonts::Off), samples);
     }
