@@ -2,6 +2,7 @@
 
 use std::sync::OnceLock;
 
+use craft_fonts_build::{CJK_SCRIPTS, EmbeddedFace};
 use craft_ui::direction;
 use craft_ui::fonts::{CraftFace, Family, I18nScripts, Stack, SystemFonts, UiFonts};
 use egui::{Color32, CornerRadius, FontData, FontFamily, FontId, Stroke, TextStyle, Visuals};
@@ -268,15 +269,25 @@ fn language_tag(lang: &str) -> &str {
     if lang.is_empty() { "en" } else { lang }
 }
 
-/// The craft-fonts faces this build embedded ([`designcraft_fonts::CRAFT_FONTS`]; empty unless
-/// built with `CRAFT_FONTS_DIR`).
+/// craft-fonts' CJK interface faces, cut at build time to the characters of the interface's text
+/// (`build.rs`); empty unless built with `CRAFT_FONTS_DIR`.
+static INTERFACE_FACES: &[EmbeddedFace] = include!(concat!(env!("OUT_DIR"), "/craft_fonts_ui.rs"));
+
+/// The craft-fonts faces the interface draws with: the cut CJK interface faces, then the other
+/// scripts' faces from [`designcraft_fonts::CRAFT_FONTS`]. Its full CJK faces are for document
+/// text. Empty unless built with `CRAFT_FONTS_DIR`.
 pub(crate) fn craft_faces() -> &'static [CraftFace] {
     static FACES: OnceLock<Vec<CraftFace>> = OnceLock::new();
     FACES.get_or_init(|| {
-        designcraft_fonts::CRAFT_FONTS
-            .iter()
-            .map(|f| CraftFace { family: f.family, style: f.style, scripts: f.scripts, bytes: f.bytes, index: 0 })
-            .collect()
+        let is_cjk = |script: &&str| CJK_SCRIPTS.iter().any(|cjk| script.split('-').next() == Some(*cjk));
+        let others = designcraft_fonts::CRAFT_FONTS.iter().filter(|f| !f.scripts.iter().any(is_cjk)).map(|f| CraftFace {
+            family: f.family,
+            style: f.style,
+            scripts: f.scripts,
+            bytes: f.bytes,
+            index: 0,
+        });
+        INTERFACE_FACES.iter().copied().map(CraftFace::from).chain(others).collect()
     })
 }
 

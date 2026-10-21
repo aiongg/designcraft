@@ -35,9 +35,15 @@ fn craft_fonts(dir: &std::path::Path) -> Result<String, String> {
     let mut out = String::new();
     for line in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
         let f: Vec<&str> = line.split(" | ").map(str::trim).collect();
-        let [family, style, file, scripts, ..] = f.as_slice() else {
+        let [family, style, file, scripts, rest @ ..] = f.as_slice() else {
             return Err(format!("malformed manifest line: {line}"));
         };
+        // craft-fonts' CJK interface sources (`Noto Sans TC UI`, role `ui`): ui-egui's build embeds
+        // them cut to the interface's characters. BIZ UDPGothic Regular, also an interface source,
+        // stays here as a document face.
+        if rest.get(4) == Some(&"ui") && family.ends_with(" UI") {
+            continue;
+        }
         if wasm && !matches!((*family, *style), ("BIZ UDPGothic" | "Noto Sans Georgian", "Regular")) {
             continue;
         }
