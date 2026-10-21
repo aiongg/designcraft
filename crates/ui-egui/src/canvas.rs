@@ -300,7 +300,7 @@ pub fn set_zoom(app: &mut DesignApp, z: f64) {
 /// motion keeps its key to its end: the wheel is smoothed over a few frames, and a trackpad swipe
 /// coasts on after the key is let go.
 fn wheel_alt(ui: &egui::Ui) -> bool {
-    let id = egui::Id::new("canvas_wheel_alt");
+    let id = egui::Id::unique("canvas_wheel_alt");
     // Alt, and whether a trackpad swipe is under way.
     let (mut alt, mut swipe): (bool, bool) = ui.data(|d| d.get_temp(id)).unwrap_or_default();
     ui.input(|i| {
@@ -376,7 +376,7 @@ fn navigation_space(app: &mut DesignApp, ctx: &egui::Context) -> bool {
 }
 
 fn spring_zoom_mode(app: &DesignApp, ctx: &egui::Context, space: bool) -> bool {
-    let down = ctx.data(|d| d.get_temp::<bool>(egui::Id::new(("canvas_pointer_down", app.pane)))).unwrap_or(false);
+    let down = ctx.data(|d| d.get_temp::<bool>(egui::Id::unique(("canvas_pointer_down", app.pane)))).unwrap_or(false);
     space && ctx.input(|i| i.modifiers.command) && !down && !app.session.tool_busy()
 }
 
@@ -388,7 +388,7 @@ struct SpringZoom {
 
 /// Lend the Zoom tool the gesture; the selected tool and document selection stay intact.
 fn spring_zoom_input(app: &mut DesignApp, ui: &egui::Ui, resp: &egui::Response, xf: &Xf, active: bool) -> bool {
-    let id = egui::Id::new(("canvas_spring_zoom", app.pane));
+    let id = egui::Id::unique(("canvas_spring_zoom", app.pane));
     let mut zoom: SpringZoom = ui.data(|d| d.get_temp(id)).unwrap_or_default();
     if !ui.input(|i| i.focused) {
         ui.data_mut(|d| d.remove::<SpringZoom>(id));
@@ -532,7 +532,7 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
     }
     if !preview {
         draw_guides(app, &painter, &xf, &doc, &layout, &t);
-        if let Some(g) = ui.data(|d| d.get_temp::<GuideDrag>(egui::Id::new(GUIDE_DRAG)))
+        if let Some(g) = ui.data(|d| d.get_temp::<GuideDrag>(egui::Id::unique(GUIDE_DRAG)))
             && let Some(p) = g.at
         {
             let col = Color32::from_rgb(74, 227, 255);
@@ -591,8 +591,8 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
         let space = navigation_space(app, ui.ctx());
         let zoom = spring_zoom_mode(app, ui.ctx(), space);
         let middle = ui.input(|i| i.pointer.middle_down());
-        let alt_hand: bool = ui.data(|d| d.get_temp(egui::Id::new(("canvas_alt_hand", app.pane)))).unwrap_or(false);
-        let tool_drag: bool = ui.data(|d| d.get_temp(egui::Id::new(("canvas_pointer_down", app.pane)))).unwrap_or(false);
+        let alt_hand: bool = ui.data(|d| d.get_temp(egui::Id::unique(("canvas_alt_hand", app.pane)))).unwrap_or(false);
+        let tool_drag: bool = ui.data(|d| d.get_temp(egui::Id::unique(("canvas_pointer_down", app.pane)))).unwrap_or(false);
         let alt_text = wants_text && !tool_drag && ui.input(|i| i.modifiers.alt);
         let c = if middle || alt_hand {
             Cursor::HandGrab
@@ -1521,7 +1521,7 @@ fn draw_text_selection(
 /// A text field had keyboard focus when this frame began, per window: egui keeps one focus per
 /// viewport, so a field focused in the main window must not mute the second window's canvas.
 fn field_focused_id(ctx: &egui::Context) -> egui::Id {
-    egui::Id::new("canvas_field_focused").with(ctx.viewport_id())
+    egui::Id::unique("canvas_field_focused").with(ctx.viewport_id())
 }
 
 /// Called before the panels draw. A panel field gives up focus on Enter or Tab while it draws,
@@ -1620,10 +1620,10 @@ fn draw_inverse_highlight(
     );
     let (w, h) = (((bbox.width() * ppp).round() as u32).clamp(1, 8192), ((bbox.height() * ppp).round() as u32).clamp(1, 8192));
     let Some(st) = app.session.active() else { return };
-    let key = egui::Id::new(("inverse_sel", st.uid, st.revision, std::sync::Arc::as_ptr(&st.doc) as usize, story.0))
+    let key = egui::Id::unique(("inverse_sel", st.uid, st.revision, std::sync::Arc::as_ptr(&st.doc) as usize, story.0))
         .with((runs.iter().map(|r| r.2.len() + r.3.len() * 7919).sum::<usize>(), w, h))
         .with((bbox.min.x.to_bits(), bbox.min.y.to_bits(), xf.zoom.to_bits(), st.selection.text.map(|t| (t.anchor, t.focus))));
-    let cache_id = egui::Id::new("inverse_sel_tex");
+    let cache_id = egui::Id::unique("inverse_sel_tex");
     let cached: Option<(egui::Id, egui::TextureHandle)> = ctx.data(|d| d.get_temp(cache_id));
     let tex = match cached {
         Some((k, t)) if k == key => t,
@@ -1845,7 +1845,7 @@ fn draw_content_ghost(painter: &egui::Painter, xf: &Xf, doc: &Document, layout: 
 /// A screen-resolution proxy of a placed graphic for the ghost, cached per asset.
 fn ghost_texture(ctx: &egui::Context, doc: &Document, g: &designcraft_doc::Graphic) -> Option<egui::TextureHandle> {
     let asset = doc.assets.get(&g.asset)?;
-    let key = egui::Id::new(("content_ghost", std::sync::Arc::as_ptr(&asset.data) as usize, asset.data.len(), asset.page));
+    let key = egui::Id::unique(("content_ghost", std::sync::Arc::as_ptr(&asset.data) as usize, asset.data.len(), asset.page));
     if let Some(t) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(key)) {
         return Some(t);
     }
@@ -1922,7 +1922,7 @@ fn draw_rulers(app: &DesignApp, ui: &egui::Ui, full: Rect, rect: Rect, xf: &Xf, 
     // While the zero point is dragged out of the corner, the rulers measure from where it would
     // land (kept on the pasteboard, as the engine keeps it) and crosshair lines show the spot.
     // Cmd-dragged, the lines are the two guides it makes; locked, a plain drag does nothing.
-    let dragged = ui.data(|d| d.get_temp::<Pos2>(egui::Id::new((ZERO_POINT_DRAG, app.pane)))).filter(|p| !corner.contains(*p));
+    let dragged = ui.data(|d| d.get_temp::<Pos2>(egui::Id::unique((ZERO_POINT_DRAG, app.pane)))).filter(|p| !corner.contains(*p));
     let guides = ui.input(|i| i.modifiers.command);
     let moving = dragged.filter(|_| !guides && !doc.settings.zero_point_locked).and_then(|p| zero_point_at(app, xf, p));
     let cross = if guides { dragged } else { moving.map(|(_, c)| xf.to_screen(c)) };
@@ -2121,7 +2121,7 @@ struct MenuRequest {
 
 /// The popup id of the canvas context menu in split-view pane `pane`.
 fn context_menu_id(pane: u8) -> egui::Id {
-    egui::Id::new(("canvas_context_menu", pane))
+    egui::Id::unique(("canvas_context_menu", pane))
 }
 
 /// Was a canvas context menu open (in either pane of this window) when this frame began?
@@ -2129,7 +2129,7 @@ fn context_menu_id(pane: u8) -> egui::Id {
 /// click or key still belongs to the menu. Popups are per window (viewport), and so is input.
 pub fn context_menu_open(ctx: &egui::Context) -> bool {
     let pass = ctx.cumulative_pass_nr();
-    let key = egui::Id::new("canvas_context_menu_open").with(ctx.viewport_id());
+    let key = egui::Id::unique("canvas_context_menu_open").with(ctx.viewport_id());
     if let Some((p, open)) = ctx.data(|d| d.get_temp::<(u64, bool)>(key))
         && p == pass
     {
@@ -2265,7 +2265,7 @@ fn scrollbars(app: &mut DesignApp, ui: &mut egui::Ui, outer: Rect, screen: Rect,
     let mut hot = [false; 2];
     for (n, vertical) in [true, false].into_iter().enumerate() {
         let (track, thumb, k) = scrollbar_rects(outer, screen, cb, vertical);
-        let id = egui::Id::new(("canvas_scrollbar", app.pane, vertical));
+        let id = egui::Id::unique(("canvas_scrollbar", app.pane, vertical));
         let resp = ui.interact(track, id, Sense::click_and_drag());
         let grab_id = id.with("grab");
         if resp.drag_started() {
@@ -2347,7 +2347,7 @@ fn handle_input(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, r
     // Space-drag = hand (unless a tool drag is under way: then Space is a modifier, e.g. Live
     // Distribute while resizing). Middle-drag pans too, with any tool; tools only
     // see the primary button.
-    let tool_drag: bool = ui.data(|d| d.get_temp(egui::Id::new(("canvas_pointer_down", app.pane)))).unwrap_or(false);
+    let tool_drag: bool = ui.data(|d| d.get_temp(egui::Id::unique(("canvas_pointer_down", app.pane)))).unwrap_or(false);
     let hand = space && !ui.input(|i| i.modifiers.command);
     if !tool_drag && ((hand && resp.dragged()) || resp.dragged_by(egui::PointerButton::Middle)) {
         let d = xf.unrotate_delta(resp.drag_delta());
@@ -2358,7 +2358,7 @@ fn handle_input(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, r
     }
     // Editing text (Space types a space): Alt held at the press gives the Hand tool until the
     // button is released, and the caret stays. Alt pressed later in a text drag copies the text.
-    let alt_hand_id = egui::Id::new(("canvas_alt_hand", app.pane));
+    let alt_hand_id = egui::Id::unique(("canvas_alt_hand", app.pane));
     let mut alt_hand: bool = ui.data(|d| d.get_temp(alt_hand_id)).unwrap_or(false);
     let (press, alt, primary_down) = ui.input(|i| (i.pointer.primary_pressed(), i.modifiers.alt, i.pointer.primary_down()));
     if press && alt && wants_text && !tool_drag && !menu_open && resp.hovered() {
@@ -2382,9 +2382,9 @@ fn handle_input(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, r
     let vi = app.view_info();
     let pos = |p: Pos2| xf.to_canvas(p);
     let mut events: Vec<PointerEvent> = Vec::new();
-    let down_id = egui::Id::new(("canvas_pointer_down", app.pane));
+    let down_id = egui::Id::unique(("canvas_pointer_down", app.pane));
     let mut down: bool = ui.data(|d| d.get_temp(down_id)).unwrap_or(false);
-    let clicks_id = egui::Id::new(("canvas_clicks", app.pane));
+    let clicks_id = egui::Id::unique(("canvas_clicks", app.pane));
     let (pressed, released, origin, latest, now) =
         ui.input(|i| (i.pointer.primary_pressed(), i.pointer.primary_released(), i.pointer.press_origin(), i.pointer.latest_pos(), i.time));
     let in_view = |o: Pos2| if xf.rot == 0 { rect.contains(o) } else { resp.rect.contains(o) };
@@ -2409,7 +2409,7 @@ fn handle_input(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, r
         events.push(PointerEvent { kind: PointerKind::Drag, pos: pos(p), mods: m, clicks: 1 });
     }
     // Power Zoom: holding the Hand tool still for half a second turns the press into one.
-    let hold_id = egui::Id::new(("canvas_hold", app.pane));
+    let hold_id = egui::Id::unique(("canvas_hold", app.pane));
     if down && !released && app.session.tool_id() == "hand" && !m.alt {
         let (now, origin_pos) = ui.input(|i| (i.time, i.pointer.press_origin()));
         let (start, fired): (f64, bool) = ui.data(|d| d.get_temp(hold_id)).unwrap_or((now, false));
@@ -2692,7 +2692,7 @@ fn draw_flattener_preview(painter: &egui::Painter, xf: &Xf, doc: &Document, layo
 /// story version).
 fn draw_dynamic_spelling(app: &DesignApp, ctx: &egui::Context, painter: &egui::Painter, xf: &Xf, doc: &Document, layout: &CanvasLayout) {
     for story in doc.stories.values() {
-        let key = egui::Id::new(("dyn_spell", std::sync::Arc::as_ptr(story) as usize, doc.user_words.len()));
+        let key = egui::Id::unique(("dyn_spell", std::sync::Arc::as_ptr(story) as usize, doc.user_words.len()));
         let bad: std::sync::Arc<Vec<std::ops::Range<usize>>> = match ctx.data(|d| d.get_temp(key)) {
             Some(v) => v,
             None => {
@@ -2752,7 +2752,7 @@ const ZERO_POINT_DRAG: &str = "canvas_zero_point_drag";
 /// Cmd-dragged (Ctrl elsewhere), it makes a horizontal and a vertical guide instead.
 /// Holds the pointer position while dragging; returns true while it owns the pointer.
 fn zero_point_drag(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, rect: Rect, xf: &Xf) -> bool {
-    let id = egui::Id::new((ZERO_POINT_DRAG, app.pane));
+    let id = egui::Id::unique((ZERO_POINT_DRAG, app.pane));
     let corner = Rect::from_min_max(resp.rect.min, rect.min);
     let (pressed, released, down, origin, latest, dbl, command) = ui.input(|i| {
         (
@@ -2873,7 +2873,7 @@ fn guide_at(app: &DesignApp, xf: &Xf, p: Pos2) -> Option<(designcraft_doc::Sprea
 /// Ruler guides: drag one out of a ruler, drag an existing one (Selection tools, not over an
 /// object) to move it, drop it back on a ruler to delete it. Returns true while it owns the pointer.
 fn guide_drag(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, rect: Rect, xf: &Xf) -> bool {
-    let id = egui::Id::new(GUIDE_DRAG);
+    let id = egui::Id::unique(GUIDE_DRAG);
     let (pressed, released, origin, latest) =
         ui.input(|i| (i.pointer.primary_pressed(), i.pointer.primary_released(), i.pointer.press_origin(), i.pointer.latest_pos()));
     let mut drag: Option<GuideDrag> = ui.data(|d| d.get_temp(id));
@@ -3213,7 +3213,7 @@ mod tests {
     }
 
     fn wheel(phase: egui::TouchPhase, up: f32, modifiers: egui::Modifiers) -> egui::Event {
-        egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: vec2(0.0, up), phase, modifiers }
+        egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: vec2(0.0, up), phase, modifiers, source: egui::MouseWheelSource::Unknown }
     }
 
     // Plays `events` with the pointer at `at`, a frame each, and lets the motion settle.
@@ -4887,7 +4887,7 @@ mod scrollbar_tests {
         let h = window();
         let rect = h.state().app.canvas_rect.unwrap();
         for vertical in [true, false] {
-            let r = h.ctx.read_response(egui::Id::new(("canvas_scrollbar", 0u8, vertical))).expect("scrollbar").rect;
+            let r = h.ctx.read_response(egui::Id::unique(("canvas_scrollbar", 0u8, vertical))).expect("scrollbar").rect;
             let (track, thumb, k) = bar(&h, vertical);
             assert_eq!(r, track);
             assert!(k > 0.0, "the zoomed-in view scrolls");
@@ -4939,7 +4939,7 @@ mod scrollbar_tests {
         let (_, v1, _) = bar(&h, true);
         let (_, h1, _) = bar(&h, false);
         assert!(v1.min.y > v0.min.y && h1.min.x > h0.min.x, "{v0:?} → {v1:?}, {h0:?} → {h1:?}");
-        let r = h.ctx.read_response(egui::Id::new(("canvas_scrollbar", 0u8, true))).expect("scrollbar");
+        let r = h.ctx.read_response(egui::Id::unique(("canvas_scrollbar", 0u8, true))).expect("scrollbar");
         assert_eq!(r.rect, bar(&h, true).0);
     }
 

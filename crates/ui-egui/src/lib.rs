@@ -582,6 +582,8 @@ pub struct DesignApp {
     pub story_editor: Option<story_editor::Target>,
     control_rx: Option<Receiver<ControlRequest>>,
     pending_shots: Vec<(u64, Option<String>, Sender<ControlResponse>, f64)>,
+    /// Screenshots the backend has taken, by token, until `collect_screenshots` hands them out.
+    taken_shots: std::sync::Arc<std::sync::Mutex<Vec<(u64, std::sync::Arc<egui::ColorImage>)>>>,
     queued_shots: Vec<(u64, f64, u32)>,
     shot_token: u64,
     styled: bool,
@@ -676,6 +678,7 @@ impl DesignApp {
             story_editor: None,
             control_rx: None,
             pending_shots: vec![],
+            taken_shots: Default::default(),
             queued_shots: vec![],
             shot_token: 0,
             styled: false,
@@ -1184,7 +1187,7 @@ impl DesignApp {
         if !self.synthetic.is_empty() || !self.control_synthetic.is_empty() {
             ctx.request_repaint();
         }
-        self.collect_screenshots(ctx);
+        self.collect_screenshots();
         self.issue_screenshots(ctx);
         if self.fonts_ready {
             menus::shortcuts(self, ctx);
@@ -1660,7 +1663,11 @@ impl DesignApp {
         self.queued_shots.retain_mut(|(token, at, frames)| {
             *frames += 1;
             if now >= *at && *frames >= 3 {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::new(*token)));
+                let (token, taken, repaint) = (*token, std::sync::Arc::clone(&self.taken_shots), ctx.clone());
+                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::ScreenshotCallback::new(move |image| {
+                    taken.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push((token, image));
+                    repaint.request_repaint();
+                })));
                 false
             } else {
                 true
@@ -1671,23 +1678,11 @@ impl DesignApp {
         }
     }
 
-    fn collect_screenshots(&mut self, ctx: &egui::Context) {
+    fn collect_screenshots(&mut self) {
         if self.pending_shots.is_empty() {
             return;
         }
-        let events: Vec<_> = ctx.input(|i| {
-            i.raw
-                .events
-                .iter()
-                .filter_map(|e| match e {
-                    egui::Event::Screenshot { user_data, image, .. } => {
-                        let token = user_data.data.as_ref().and_then(|d| d.downcast_ref::<u64>()).copied()?;
-                        Some((token, image.clone()))
-                    }
-                    _ => None,
-                })
-                .collect()
-        });
+        let events = std::mem::take(&mut *self.taken_shots.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
         for (token, image) in events {
             if let Some(i) = self.pending_shots.iter().position(|(t, ..)| *t == token) {
                 let (_, path, reply, _) = self.pending_shots.remove(i);
@@ -1804,10 +1799,10 @@ mod tests {
             app,
         );
         h.run_steps(4);
-        let bar = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("control_bar")).unwrap().outer_rect;
+        let bar = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("control_bar")).unwrap().outer_rect;
         assert!(bar.height() > 40.0, "{bar:?}");
         // The X/Y/W/H group: its second row holds Y: and H:.
-        let group = h.ctx.read_response(egui::Id::new(("object_control", "dimensions"))).unwrap().rect;
+        let group = h.ctx.read_response(egui::Id::unique(("object_control", "dimensions"))).unwrap().rect;
         assert!(bar.contains(group.left_top()), "the X/Y/W/H group {group:?} is in the Control panel {bar:?}");
         assert!(group.bottom() <= bar.bottom(), "X/Y/W/H group {group:?} hangs below the Control panel {bar:?}");
     }
@@ -2786,13 +2781,14 @@ pub(crate) mod test_window {
             delta,
             phase: egui::TouchPhase::Move,
             modifiers: egui::Modifiers::NONE,
+            source: egui::MouseWheelSource::Unknown,
         });
         h.run_steps(10);
     }
 
     /// The outer rect of a side or top panel, from egui's memory.
     pub fn panel_rect(h: &Harness<'static, Window>, id: &str) -> egui::Rect {
-        egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new(id)).map(|s| s.outer_rect).unwrap()
+        egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique(id)).map(|s| s.outer_rect).unwrap()
     }
 
     /// A primary click at `pos`, then a few frames.

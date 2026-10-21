@@ -132,7 +132,7 @@ impl Dialog {
 
 fn text_field(ui: &mut egui::Ui, d: &mut Dialog, key: &str, w: f32) {
     let mut s = d.s(key);
-    if ui.add(egui::TextEdit::singleline(&mut s).desired_width(w).horizontal_align(egui::Align::Min)).changed() {
+    if ui.add(egui::TextEdit::singleline(&mut s).desired_width(w).align(egui::Align2::LEFT_TOP)).changed() {
         d.fields.insert(key.into(), Value::String(s));
     }
 }
@@ -744,7 +744,7 @@ fn reference_point(ui: &mut egui::Ui, d: &mut Dialog, key: &str) {
     for (i, name) in designcraft_engine::autosize::REFERENCES.iter().enumerate() {
         let c = r.min + egui::vec2(5.0 + 18.0 * (i % 3) as f32, 5.0 + 18.0 * (i / 3) as f32);
         let dot = egui::Rect::from_center_size(c, egui::vec2(8.0, 8.0));
-        let resp = ui.interact(dot.expand(2.0), ui.id().with((key, i)), egui::Sense::click());
+        let resp = ui.interact(dot.expand(2.0), ui.scope_id().with((key, i)), egui::Sense::click());
         if resp.clicked() {
             d.fields.insert(key.into(), json!(name));
         }
@@ -987,7 +987,7 @@ fn margins_and_columns_dialog(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Di
                             crate::icons::button(ui, if linked { "link" } else { "link-broken" }, 20.0, linked, &tip)
                         })
                         .inner;
-                    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &tip));
+                    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &tip));
                     if resp.clicked() {
                         d.fields.insert("link".into(), json!(!linked));
                     }
@@ -1096,7 +1096,7 @@ fn create_guides_dialog(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog) 
 /// InDesign shows it ("click in another field to see the value multiplied by two").
 fn measure_field(ui: &mut egui::Ui, d: &mut Dialog, key: &str, w: f32) {
     let mut s = d.s(key);
-    let r = ui.add(egui::TextEdit::singleline(&mut s).desired_width(w).horizontal_align(egui::Align::Min));
+    let r = ui.add(egui::TextEdit::singleline(&mut s).desired_width(w).align(egui::Align2::LEFT_TOP));
     if r.changed() {
         d.fields.insert(key.into(), Value::String(s));
     }
@@ -1270,7 +1270,7 @@ fn setup_spin(ui: &mut egui::Ui, d: &mut Dialog, key: &str, width: f32, min: f64
         (1.0, egui::Rect::from_min_max(seg.min, egui::pos2(seg.max.x, seg.center().y))),
         (-1.0, egui::Rect::from_min_max(egui::pos2(seg.min.x, seg.center().y), seg.max)),
     ] {
-        let resp = ui.interact(half, ui.id().with((key, dir < 0.0)), egui::Sense::click());
+        let resp = ui.interact(half, ui.scope_id().with((key, dir < 0.0)), egui::Sense::click());
         if resp.hovered() {
             ui.painter().rect_filled(half.shrink(1.0), 1.0, t.hover);
         }
@@ -1289,7 +1289,8 @@ fn setup_spin(ui: &mut egui::Ui, d: &mut Dialog, key: &str, width: f32, min: f64
     let text = egui::Rect::from_min_max(egui::pos2(seg.right() + 5.0, r.top() + 1.0), egui::pos2(r.right() - 3.0, r.bottom() - 1.0));
     let mut s = d.s(key);
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(text).layout(egui::Layout::left_to_right(egui::Align::Center)));
-    let resp = child.add(egui::TextEdit::singleline(&mut s).id(ui.id().with((key, "text"))).frame(egui::Frame::NONE).desired_width(text.width()));
+    let resp =
+        child.add(egui::TextEdit::singleline(&mut s).id(ui.scope_id().with((key, "text"))).frame(egui::Frame::NONE).desired_width(text.width()));
     if resp.changed() {
         d.fields.insert(key.into(), Value::String(s));
         changed = true;
@@ -2093,7 +2094,7 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
         },
     };
     // No dimmed backdrop: the page behind a dialog is what its settings and colours are judged against.
-    let host = egui::Id::new("dialog");
+    let host = egui::Id::unique("dialog");
     let instance = host.with(&d.id);
     crate::modal_drag::modal(ctx, host, instance).backdrop_color(egui::Color32::TRANSPARENT).show(ctx, |ui| {
         let frame_margin = egui::Frame::popup(ui.style()).total_margin().sum();
@@ -6409,7 +6410,7 @@ fn toc_dialog(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
             toc_style_combo(ui, "page_number", &char_styles, none, &mut r.page_number_style);
             ui.end_row();
             crate::rtl::label(ui, tr("Between Entry and Number:"));
-            ui.add(egui::TextEdit::singleline(&mut r.separator).desired_width(80.0).horizontal_align(egui::Align::Min));
+            ui.add(egui::TextEdit::singleline(&mut r.separator).desired_width(80.0).align(egui::Align2::LEFT_TOP));
             crate::rtl::label(ui, tr("Style:"));
             toc_style_combo(ui, "separator", &char_styles, none, &mut r.separator_style);
             ui.end_row();
@@ -6688,7 +6689,7 @@ fn color_picker(ui: &mut egui::Ui, d: &mut Dialog) {
     let mut cmyk = nums::<4>(d, "cmyk").unwrap_or_else(|| cmyk_of(rgb));
     let mut model = if d.s("model") == "cmyk" || (!d.fields.contains_key("model") && d.fields.contains_key("cmyk")) { "cmyk" } else { "rgb" };
     let mut edit = ColorEdit::None;
-    let hex_id = egui::Id::new("color_picker_hex");
+    let hex_id = egui::Id::unique("color_picker_hex");
     ui.horizontal_top(|ui| {
         let mut c = egui::Color32::from_rgb(to8(rgb[0]), to8(rgb[1]), to8(rgb[2]));
         let shown = c;
@@ -7780,7 +7781,7 @@ mod tests {
             open_style_options(&mut app, paragraph, "Tutorial");
             let mut h = Harness::builder().with_size(egui::vec2(1000.0, 800.0)).build_ui_state(
                 |ui, app: &mut DesignApp| {
-                    let key = egui::Id::new("style_preview_test_fonts");
+                    let key = egui::Id::unique("style_preview_test_fonts");
                     if ui.data(|d| d.get_temp::<bool>(key)).is_none() {
                         crate::theme::install_fonts(ui.ctx(), "");
                         ui.data_mut(|d| d.insert_temp(key, true));
@@ -8178,7 +8179,13 @@ mod tests {
             screen,
             vec![
                 egui::Event::PointerMoved(pos),
-                egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta, phase: egui::TouchPhase::Move, modifiers: egui::Modifiers::NONE },
+                egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta,
+                    phase: egui::TouchPhase::Move,
+                    modifiers: egui::Modifiers::NONE,
+                    source: egui::MouseWheelSource::Unknown,
+                },
             ],
         );
         // Let smooth wheel scrolling and scrollbar visibility settle before clicking.
@@ -9753,7 +9760,7 @@ mod tests {
             h.event(Event::PointerButton { pos: to, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
             h.run_steps(3);
         }
-        let rect = |h: &Harness<'static, DesignApp>| h.ctx.memory(|m| m.area_rect(egui::Id::new("dialog"))).unwrap();
+        let rect = |h: &Harness<'static, DesignApp>| h.ctx.memory(|m| m.area_rect(egui::Id::unique("dialog"))).unwrap();
         let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
         app.run("file.new", json!({})).unwrap();
         app.ui.dialog = Some(Dialog::new("insertTable", Value::Null));
@@ -9806,7 +9813,7 @@ mod tests {
     fn the_new_document_window_drags_mostly_aside_and_keeps_its_preview() {
         use egui::{Event, Modifiers, PointerButton, vec2};
         use egui_kittest::{Harness, kittest::Queryable};
-        let rect = |h: &Harness<'static, DesignApp>| h.ctx.memory(|m| m.area_rect(egui::Id::new("dialog"))).unwrap();
+        let rect = |h: &Harness<'static, DesignApp>| h.ctx.memory(|m| m.area_rect(egui::Id::unique("dialog"))).unwrap();
         let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
         app.run("file.new", json!({"title": "A"})).unwrap();
         app.ui.new_document_preview = true;

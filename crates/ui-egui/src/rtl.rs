@@ -200,7 +200,7 @@ fn layout(ctx: &egui::Context, job: LayoutJob) -> Arc<Galley> {
         return layout_uncached(ctx, job);
     }
     let token = ctx.fonts_mut(|fonts| fonts.layout_no_wrap(String::new(), FontId::default(), Color32::TRANSPARENT));
-    let id = egui::Id::new("designcraft.rtl.layout-cache");
+    let id = egui::Id::unique("designcraft.rtl.layout-cache");
     let key = egui::util::hash(&job);
     let cached = ctx.data_mut(|data| data.get_temp_mut_or_default::<LayoutCache>(id).lookup(token, key, &job));
     if let Some(galley) = cached {
@@ -453,7 +453,7 @@ mod tests {
     #[test]
     fn non_rtl_widgets_keep_native_text_and_formatting() {
         with_fonts(|ctx| {
-            egui::Area::new(egui::Id::new("rtl-fast-path-test")).show(ctx, |ui| {
+            egui::Area::new(egui::Id::unique("rtl-fast-path-test")).show(ctx, |ui| {
                 for text in ["中文", "日本語", "Édition", "🎨"] {
                     let rendered = widget(ui, egui::RichText::new(text).strong());
                     assert!(matches!(rendered, WidgetText::RichText(_)));

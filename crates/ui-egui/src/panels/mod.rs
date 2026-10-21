@@ -249,7 +249,7 @@ fn swatch_menu_font() -> egui::FontId {
 pub fn swatch_menu_row(ui: &mut egui::Ui, doc: &designcraft_doc::Document, name: &str, current: &str, width: f32) -> bool {
     let t = Tokens::get(ui.ctx());
     let (row, resp) = ui.allocate_exact_size(vec2(width, SWATCH_MENU_ROW_H), egui::Sense::click());
-    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, name == current, name));
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, name == current, name));
     let hovered = resp.hovered();
     if hovered {
         ui.painter().rect_filled(row, 2.0, t.accent_strong);
@@ -360,7 +360,7 @@ pub fn font_combo(
 pub fn font_popup(app: &mut DesignApp, field: &egui::Response, menu: &[designcraft_fonts::FamilyInfo], current: &str) -> Option<FontPick> {
     let shown = if current.is_empty() { "—".to_string() } else { font_label(app, menu, current) };
     field.widget_info(|| {
-        let mut info = egui::WidgetInfo::new(egui::WidgetType::ComboBox);
+        let mut info = egui::WidgetInfo::new(egui::Role::ComboBox);
         info.enabled = true;
         info.current_text_value = Some(shown.clone());
         info

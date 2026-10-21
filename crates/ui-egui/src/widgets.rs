@@ -141,7 +141,7 @@ impl<'a> NumField<'a> {
     /// values that may be unset, like a character style's attributes).
     pub fn show_or_clear(self, ui: &mut Ui) -> Option<Option<f64>> {
         let t = Tokens::get(ui.ctx());
-        let key = ui.id().with(self.id);
+        let key = ui.scope_id().with(self.id);
         let (rect, _) = ui.allocate_exact_size(vec2(self.width, FIELD_H), Sense::hover());
         let step = self.step.unwrap_or_else(|| self.kind.step());
         let clamp = |v: f64| v.clamp(self.range.0, self.range.1);
@@ -200,7 +200,7 @@ impl<'a> NumField<'a> {
             .font(label_font())
             .text_color(fg)
             .margin(egui::Margin::ZERO)
-            .vertical_align(egui::Align::Center);
+            .align(egui::Align2::LEFT_CENTER);
         // The field already allocated its slot. A scoped allocation here would consume another
         // grid cell and enlarge toolbar rows; the value editor must stay inside that same slot.
         let value_rect = Rect::from_min_max(text_rect.min + vec2(5.0, 1.0), text_rect.max - vec2(1.0, 1.0));
@@ -341,7 +341,7 @@ pub fn outline_button(ui: &mut Ui, label: &str, width: f32) -> Response {
     p.rect_stroke(r, 2.0, Stroke::new(1.0, t.field_border), StrokeKind::Inside);
     crate::rtl::paint(p, r.center(), egui::Align2::CENTER_CENTER, label, label_font(), t.text);
     // Screen readers (and tests) find it by its label.
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
     resp
 }
 
@@ -372,7 +372,7 @@ pub fn link_label(ui: &mut Ui, text: &str, width: f32) -> Response {
     ui.painter().galley(pos, g, t.text);
     let y = r.center().y + 6.5;
     ui.painter().line_segment([pos2(r.min.x, y), pos2(r.min.x + w, y)], Stroke::new(1.0, if resp.hovered() { t.text_strong } else { t.text_dim }));
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Link, true, text));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Link, true, text));
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
@@ -381,7 +381,7 @@ pub fn more_options(ui: &mut Ui, language: &str) -> Response {
     let t = Tokens::get(ui.ctx());
     let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 14.0), Sense::hover());
     let r = Rect::from_min_max(pos2(row.max.x - 26.0, row.min.y), pos2(row.max.x - 4.0, row.max.y));
-    let resp = ui.interact(r, ui.id().with(("more", row.min.y as i32)), Sense::click());
+    let resp = ui.interact(r, ui.scope_id().with(("more", row.min.y as i32)), Sense::click());
     for i in 0..3 {
         ui.painter().circle_filled(pos2(r.min.x + 4.0 + i as f32 * 7.0, r.center().y), 1.9, if resp.hovered() { t.text_strong } else { t.icon });
     }
@@ -401,7 +401,7 @@ pub fn caption_w(ui: &mut Ui, s: &str, w: f32) {
     let t = Tokens::get(ui.ctx());
     let (r, resp) = ui.allocate_exact_size(vec2(w, FIELD_H), Sense::hover());
     // Painted, so tell screen readers (and UI tests) what it says.
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, s));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, s));
     crate::rtl::paint(ui.painter(), pos2(r.max.x - 2.0, r.center().y), egui::Align2::RIGHT_CENTER, s, egui::FontId::proportional(11.5), t.text);
 }
 
@@ -422,7 +422,7 @@ pub fn section(ui: &mut Ui, title: &str, _default_open: bool) -> bool {
     let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 16.0), Sense::hover());
     crate::rtl::paint(ui.painter(), r.left_center(), egui::Align2::LEFT_CENTER, title, egui::FontId::proportional(11.5), t.text_strong);
     // Screen readers hear the section's title.
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, title));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, title));
     ui.add_space(3.0);
     true
 }
@@ -539,7 +539,7 @@ pub fn icon_toggle_sized(ui: &mut Ui, icon: &str, on: bool, tip: &str, size: egu
     let s = (size.y - 4.0).min(17.0);
     crate::icons::paint(ui.painter(), Rect::from_center_size(r.center(), vec2(s, s)), icon, if on { t.text_strong } else { t.icon });
     // Named by its tooltip, for screen readers.
-    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, tip));
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, on, tip));
     if tip.is_empty() {
         resp
     } else {
@@ -578,7 +578,7 @@ pub fn segmented(ui: &mut Ui, labels: &[&str], active: usize, width: f32) -> Opt
     let mut out = None;
     for (i, l) in labels.iter().enumerate() {
         let sr = Rect::from_min_size(pos2(r.min.x + w * i as f32, r.min.y), vec2(w, BUTTON_H));
-        let resp = ui.interact(sr, ui.id().with(("seg", l)), Sense::click());
+        let resp = ui.interact(sr, ui.scope_id().with(("seg", l)), Sense::click());
         if i == active {
             ui.painter().rect_filled(sr, 0.0, t.well);
         } else if resp.hovered() {

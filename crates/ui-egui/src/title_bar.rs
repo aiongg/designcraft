@@ -71,7 +71,7 @@ pub fn double_click_command(action: DoubleClick, maximized: bool) -> Option<egui
 /// detected here as a press on the empty area that has stopped being a click.
 pub fn empty_area(ui: &mut egui::Ui, rect: egui::Rect) {
     prefetch();
-    let resp = ui.interact(rect, ui.id().with("title_bar_empty"), egui::Sense::click());
+    let resp = ui.interact(rect, ui.scope_id().with("title_bar_empty"), egui::Sense::click());
     // A control in this layer covers the empty area under the pointer. Another layer on top (a
     // modal's backdrop, a tooltip) leaves the window movable, as AppKit's own title bar would be.
     let on_control =
@@ -100,7 +100,7 @@ pub fn empty_area(ui: &mut egui::Ui, rect: egui::Rect) {
 }
 
 fn movable_id() -> egui::Id {
-    egui::Id::new("title_bar_window_movable")
+    egui::Id::unique("title_bar_window_movable")
 }
 
 /// Whether AppKit may move the window when a drag starts in the title-bar band: false while the

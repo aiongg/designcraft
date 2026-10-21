@@ -11,7 +11,7 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
     let Ok(list) = app.session.execute("note.list", &json!({})) else { return };
     let notes = list.as_array().cloned().unwrap_or_default();
     let has_text = app.session.active().is_some_and(|d| d.selection.text.is_some());
-    let id = egui::Id::new("new_note_text");
+    let id = egui::Id::unique("new_note_text");
     let mut draft: String = ui.data(|d| d.get_temp(id)).unwrap_or_default();
     ui.add(
         egui::TextEdit::multiline(&mut draft)

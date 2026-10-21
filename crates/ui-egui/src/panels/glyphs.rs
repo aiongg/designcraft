@@ -21,7 +21,7 @@ struct State {
 
 pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
-    let id = egui::Id::new("glyphs_panel");
+    let id = egui::Id::unique("glyphs_panel");
     let mut st: State = ui.data(|d| d.get_temp(id)).unwrap_or_default();
     // Default to the font at the text cursor.
     if st.family.is_empty() {
@@ -120,7 +120,7 @@ pub fn grid(
     let max_rows = (ui.ctx().input(|i| i.max_texture_side) as u32 / cell_px).max(1);
     chars.truncate((max_rows * cols) as usize);
     let ink = t.text_strong;
-    let key = egui::Id::new(("glyph_grid", family, style, scope, q, cols, cell_px, ink.to_array()));
+    let key = egui::Id::unique(("glyph_grid", family, style, scope, q, cols, cell_px, ink.to_array()));
     let tex: egui::TextureHandle = match ui.data(|d| d.get_temp::<egui::TextureHandle>(key)) {
         Some(t) => t,
         None => {

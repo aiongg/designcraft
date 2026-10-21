@@ -763,7 +763,7 @@ mod ukrainian_font_tests {
         {
             let data = &definitions.font_data[name].font;
             let face = db.face(family, style);
-            assert_eq!(face.data(), data.as_ref(), "configured UI face {name}");
+            assert_eq!(face.data(), (**data).as_ref(), "configured UI face {name}");
             for character in &characters {
                 assert_ne!(face.glyph_for(*character), 0, "missing {character} in {name}");
             }
@@ -790,7 +790,7 @@ mod russian_font_tests {
         {
             let data = &definitions.font_data[name].font;
             let face = db.face(family, style);
-            assert_eq!(face.data(), data.as_ref(), "configured UI face {name}");
+            assert_eq!(face.data(), (**data).as_ref(), "configured UI face {name}");
             for character in &characters {
                 assert_ne!(face.glyph_for(*character), 0, "missing {character} in {name}");
             }

@@ -326,7 +326,7 @@ mod tests {
         let mut h = Harness::builder().with_size(vec2(360.0, 900.0)).with_step_dt(1.0 / 60.0).build_ui_state(
             move |ui, app: &mut DesignApp| {
                 // The fonts are installed before the first frame that draws.
-                let id = egui::Id::new("test_fonts");
+                let id = egui::Id::unique("test_fonts");
                 if ui.data(|d| d.get_temp::<bool>(id)).is_none() {
                     crate::theme::install_fonts(ui.ctx(), "");
                     ui.data_mut(|d| d.insert_temp(id, true));
