@@ -1428,16 +1428,17 @@ dependencies = [
 name = "designcraft-render"
 version = "0.10.0"
 dependencies = [
+ "craft-pdf",
  "designcraft-color",
  "designcraft-compose",
  "designcraft-doc",
  "designcraft-fonts",
  "designcraft-geom",
  "designcraft-images",
- "hayro",
  "image",
  "log",
  "serde",
+ "thiserror 2.0.21",
  "vello_common 0.2.0",
  "vello_cpu 0.2.0",
 ]

@@ -70,7 +70,6 @@ krilla-svg = "=0.8.1"
 flo_curves = "0.8"
 # QR codes (Object › Generate QR Code); MIT.
 qrcodegen = "1.8"
-hayro = "0.7"
 quick-xml = "0.41"
 zip = { version = "3", default-features = false, features = ["deflate"] }
 # INDD/INDT → IDML conversion for File › Open: storytold/indd-utils, tracking its main branch
