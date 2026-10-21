@@ -4527,14 +4527,45 @@ pub fn tr_context<'a>(lang: &str, s: &'a str, context: &str) -> &'a str {
     tr(lang, s)
 }
 
+/// Every interface string, as (language, English key, text), and each language's own name.
 #[cfg(test)]
-pub(crate) fn ukrainian_catalog() -> Vec<&'static str> {
-    uk::TABLE.iter().map(|(_, text)| *text).chain(uk::CONTEXT.iter().map(|(_, _, text)| *text)).collect()
-}
-
-#[cfg(test)]
-pub(crate) fn russian_catalog() -> Vec<&'static str> {
-    ru::TABLE.iter().map(|(_, text)| *text).chain(ru::CONTEXT.iter().map(|(_, _, text)| *text)).collect()
+pub(crate) fn catalog_entries() -> Vec<(&'static str, &'static str, &'static str)> {
+    let shared = ["de", "fr", "es", "ja", "zh"];
+    let tables: [(&str, &[(&str, &str)]); 11] = [
+        ("ar", ar::TABLE),
+        ("cs", cs::TABLE),
+        ("de", de::TABLE),
+        ("fr", fr::TABLE),
+        ("it", it::TABLE),
+        ("ja", ja::TABLE),
+        ("ka", ka::TABLE),
+        ("pl", pl::TABLE),
+        ("pt-br", pt_br::TABLE),
+        ("ru", ru::TABLE),
+        ("uk", uk::TABLE),
+    ];
+    let contexts: [(&str, &[(&str, &str, &str)]); 6] =
+        [("ar", ar::CONTEXT), ("cs", cs::CONTEXT), ("ja", ja::CONTEXT), ("pl", pl::CONTEXT), ("ru", ru::CONTEXT), ("uk", uk::CONTEXT)];
+    let mut entries: Vec<(&str, &str, &str)> = Vec::new();
+    for (key, texts) in TABLE {
+        entries.extend(shared.iter().zip(texts).map(|(lang, text)| (*lang, *key, *text)));
+    }
+    for (key, _, texts) in CONTEXT {
+        entries.extend(shared.iter().zip(texts).map(|(lang, text)| (*lang, *key, *text)));
+    }
+    for (lang, table) in tables {
+        entries.extend(table.iter().map(|(key, text)| (lang, *key, *text)));
+        // English shows the keys themselves.
+        entries.extend(table.iter().map(|(key, _)| ("", *key, *key)));
+    }
+    for (lang, table) in contexts {
+        entries.extend(table.iter().map(|(key, _, text)| (lang, *key, *text)));
+    }
+    for (key, forms) in cs::PLURALS {
+        entries.extend(forms.iter().map(|text| ("cs", *key, *text)));
+    }
+    entries.extend(LANGUAGES.iter().map(|(code, name)| (*code, "language name", *name)));
+    entries
 }
 
 /// Ukrainian, Russian, Polish and Georgian put the category before the value in count captions
@@ -5155,6 +5186,6 @@ mod tests {
             assert!(x('ج') < x('P') && x('P') < x('ف'), "{text}");
             assert_eq!(x(latin) < x('ج'), left, "{text}");
         }
-        let _ = ctx.end_pass();
+        ctx.end_pass().textures_delta.clear();
     }
 }
