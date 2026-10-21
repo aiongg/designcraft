@@ -92,30 +92,55 @@ impl Placed {
 
     /// A group of the unplaced registered panels of `panels`, with the one at `active` in front
     /// when it is among them.
-    fn group(&mut self, panels: &[String], active: usize) -> Option<Group<String>> {
-        let front = panels.get(active).and_then(|p| normalize(p));
-        let kept: Vec<String> = panels.iter().filter_map(|p| self.take(p)).collect();
+    fn group(&mut self, panels: &[impl AsRef<str>], active: usize) -> Option<Group<String>> {
+        let front = panels.get(active).and_then(|p| normalize(p.as_ref()));
+        let kept: Vec<String> = panels.iter().filter_map(|p| self.take(p.as_ref())).collect();
         let active = front.and_then(|f| kept.iter().position(|p| p == f)).unwrap_or(0);
         (!kept.is_empty()).then(|| Group::new(kept, active))
     }
 }
 
-/// A workspace's iconic column: its named `icon_groups` (Essentials Classic, Typography), or
-/// one group per panel not placed yet. Window › Styles opens the style panels as a floating
-/// group, so they start outside it.
+/// The iconic column's groups, top to bottom, in a workspace without its own `icon_groups`:
+/// InDesign's panel families, with a separator only between families.
+const ICON_GROUPS: &[&[&str]] = &[
+    &["stroke", "color", "swatches", "gradient"],
+    &["effects"],
+    &["character", "paragraph", "typography"],
+    &["glyphs"],
+    &["table"],
+    &["textWrap"],
+    &["align", "pathfinder"],
+    &["flexLayout", "liquid"],
+    &["links", "library"],
+    &["info"],
+    &["attributes", "preflight"],
+    &["notes", "trackChanges", "conditions"],
+    &["hyperlinks", "bookmarks"],
+    &["buttons", "states"],
+    &["media", "transitions"],
+    &["articles", "tags"],
+    &["book", "dataMerge", "scripts"],
+];
+
+/// A workspace's iconic column of the panels not placed yet: its named `icon_groups`
+/// (Essentials Classic, Typography), or [`ICON_GROUPS`] followed by any other dock panel as a
+/// group of its own. Window › Styles opens the style panels as a floating group, so they start
+/// outside it.
 fn icon_column(icon_groups: Option<&[Vec<String>]>, placed: &mut Placed) -> Option<Column<String>> {
     let (groups, width): (Vec<Group<String>>, f32) = match icon_groups {
         Some(groups) => (groups.iter().filter_map(|g| placed.group(g, 0)).collect(), NAMED_ICON_WIDTH),
-        None => (
-            crate::dock::DOCK_TABS
-                .iter()
-                .chain(crate::dock::ICON_PANELS)
-                .filter(|p| !FLOATING_GROUPS.iter().any(|g| g.contains(&p.0)))
-                .filter_map(|p| placed.take(p.0))
-                .map(|id| Group::new(vec![id], 0))
-                .collect(),
-            ICON_WIDTH,
-        ),
+        None => {
+            let mut groups: Vec<Group<String>> = ICON_GROUPS.iter().filter_map(|g| placed.group(g, 0)).collect();
+            groups.extend(
+                crate::dock::DOCK_TABS
+                    .iter()
+                    .chain(crate::dock::ICON_PANELS)
+                    .filter(|p| !FLOATING_GROUPS.iter().any(|g| g.contains(&p.0)))
+                    .filter_map(|p| placed.take(p.0))
+                    .map(|id| Group::new(vec![id], 0)),
+            );
+            (groups, ICON_WIDTH)
+        }
     };
     (!groups.is_empty()).then_some(Column { groups, width: COLUMN_WIDTH, iconic: true, iconic_width: Some(width) })
 }

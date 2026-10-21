@@ -289,8 +289,8 @@ mod tests {
         assert_eq!(columns[0].groups[0].active, 3);
         assert!(!columns[0].iconic);
         let icons = &columns[1];
-        assert!(icons.iconic && icons.groups.iter().any(|g| g.panels == ["stroke"]));
-        assert!(icons.groups.iter().all(|g| g.panels != ["swatches"]), "each panel appears once");
+        assert!(icons.iconic && icons.groups.iter().any(|g| g.panels == ["stroke", "color", "gradient"]));
+        assert!(icons.groups.iter().all(|g| !g.panels.iter().any(|p| p == "swatches")), "each panel appears once");
 
         // Splits: a vertical split stacks groups in one column, a horizontal one adds a column
         // (the dock lists columns from the window edge inwards).

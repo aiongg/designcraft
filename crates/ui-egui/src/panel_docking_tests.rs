@@ -811,7 +811,9 @@ fn default_workspaces_are_the_canvas_beside_an_end_dock() {
     assert_eq!(outer.groups.len(), 1);
     assert_eq!(outer.groups[0].panels, ["properties", "pages", "layers"]);
     assert!(icons.iconic);
-    assert!(icons.groups.iter().all(|g| g.panels.len() == 1));
+    let groups: Vec<Vec<&str>> = icons.groups.iter().map(|g| g.panels.iter().map(String::as_str).collect()).collect();
+    let expected: Vec<Vec<&str>> = ICON_GROUPS.iter().map(|g| g.to_vec()).collect();
+    assert_eq!(groups, expected, "the iconic column groups InDesign's panel families");
     assert!(!layout.contains(&"paragraphStyles".to_string()), "Window › Styles opens the styles floating");
     // Essentials Classic: only its named icon groups, in one iconic column.
     app.run("window.workspace", json!({"name": "Essentials Classic"})).unwrap();
@@ -824,6 +826,32 @@ fn default_workspaces_are_the_canvas_beside_an_end_dock() {
     let groups: Vec<Vec<String>> = column.groups.iter().map(|g| g.panels.clone()).collect();
     assert_eq!(groups.len(), expected.len());
     assert!(groups.iter().flatten().all(|p| expected.iter().flatten().any(|e| e == p)));
+}
+
+/// Every dock panel that starts in the iconic column has one place in [`ICON_GROUPS`], so a new
+/// panel is not left as a group of its own.
+#[test]
+fn every_icon_panel_is_in_one_default_icon_group() {
+    for (id, _, _) in crate::dock::ICON_PANELS.iter().filter(|p| !FLOATING_GROUPS.iter().any(|g| g.contains(&p.0))) {
+        assert_eq!(ICON_GROUPS.iter().flat_map(|g| g.iter()).filter(|p| *p == id).count(), 1, "{id}");
+    }
+    for id in ICON_GROUPS.iter().flat_map(|g| g.iter()) {
+        assert!(crate::dock::ICON_PANELS.iter().any(|p| p.0 == *id), "{id} is not a dock panel");
+    }
+}
+
+/// A panel the workspace places elsewhere leaves its icon group; a group it empties goes.
+#[test]
+fn placed_panels_leave_their_icon_groups() {
+    let mut placed = Placed::default();
+    for id in ["properties", "pages", "layers", "swatches", "effects"] {
+        placed.take(id);
+    }
+    let column = icon_column(None, &mut placed).unwrap();
+    let groups: Vec<Vec<&str>> = column.groups.iter().map(|g| g.panels.iter().map(String::as_str).collect()).collect();
+    assert_eq!(groups.first().unwrap(), &["stroke", "color", "gradient"]);
+    assert_eq!(groups.get(1).unwrap(), &["character", "paragraph", "typography"]);
+    assert_eq!(groups.len(), ICON_GROUPS.len() - 1);
 }
 
 #[test]
