@@ -213,7 +213,11 @@ fn percent(ui: &mut egui::Ui, d: &mut Dialog, path: &[&str]) {
 /// global light angle: editing it then changes that one, for every effect that uses it.
 fn angle(ui: &mut egui::Ui, d: &mut Dialog, path: &[&str], own: bool, global: f64) -> egui::Response {
     let mut v = if own { num(d, path) } else { global };
-    let r = ui.add(egui::DragValue::new(&mut v).range(-180.0..=180.0).suffix("°").max_decimals(1));
+    let drag = egui::DragValue::new(&mut v).max_decimals(1);
+    let field = craft_ui::localized::LocalizedDragValue::new(drag, crate::widgets::locale_numbers())
+        .range(-180.0..=180.0)
+        .unit(craft_ui::localized::Unit::new("{n}°"));
+    let r = ui.add(field);
     if r.changed() {
         if own {
             set(d, path, json!(v));

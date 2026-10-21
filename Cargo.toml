@@ -90,6 +90,8 @@ craft-cms = { version = "0.1.0", git = "https://github.com/storytold/craft-libs"
 # ui
 # Shared frontend components; keep this dependency above the engine boundary.
 craft-ui = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "e8b4dde5137fe41823326b55018c31302218d3a4", features = ["serde"] }
+# Locale number formats for localized fields (craft-libs).
+craft-i18n = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "e8b4dde5137fe41823326b55018c31302218d3a4" }
 # The application bar as the window's title bar (craft-libs).
 craft-window = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "e8b4dde5137fe41823326b55018c31302218d3a4", features = ["egui"] }
 egui = "0.37"

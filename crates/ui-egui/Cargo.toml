@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 craft-ui = { workspace = true, features = ["system_fonts", "native-windows"] }
 craft-window = { workspace = true }
+craft-i18n = { workspace = true }
 designcraft-geom = { workspace = true }
 designcraft-color = { workspace = true }
 designcraft-doc = { workspace = true }
