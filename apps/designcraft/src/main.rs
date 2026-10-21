@@ -450,8 +450,7 @@ fn main() -> std::process::ExitCode {
             .with_fullsize_content_view(true)
             .with_titlebar_shown(false)
             .with_title_shown(false),
-        // DesignCraft's own FontDb supplies script-specific system fallbacks; egui's system-font
-        // provider would put its discovery ahead of that order and change line metrics.
+        // The UI font stack (`theme::install_fonts`) finds installed fonts itself.
         system_font_fallback: false,
         ..Default::default()
     };
