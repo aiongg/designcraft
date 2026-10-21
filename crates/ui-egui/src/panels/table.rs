@@ -73,6 +73,7 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
                         }
                     }
                 });
+                crate::widgets::name_combo(ui, ("tp_style", kind), "tp_style");
                 if crate::icons::button(
                     ui,
                     "plus",
@@ -132,6 +133,7 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
                     }
                 }
             });
+        crate::widgets::name_combo(ui, "tp_rowmode", "tp_rowmode");
         if let Some(h) = measure(ui, "tp_rowh", row["height"].as_f64(), unit, 64.0) {
             run(app, "table.setRowHeight", json!({"height": h}));
         }

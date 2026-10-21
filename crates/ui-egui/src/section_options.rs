@@ -112,6 +112,7 @@ fn style_menu(ui: &mut Ui, d: &mut Dialog, key: &str) {
             }
         }
     });
+    crate::widgets::name_combo(ui, ("section_style", key), "section_style");
 }
 
 fn checkbox(ui: &mut Ui, d: &mut Dialog, key: &str, label: &str) {

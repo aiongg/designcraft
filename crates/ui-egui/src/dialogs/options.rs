@@ -134,6 +134,7 @@ pub fn swatch_options(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
                                 }
                             }
                         });
+                    crate::widgets::name_combo(ui, "swatch_color_type", "swatch_color_type");
                     ui.end_row();
                 }
                 caption(ui, lang, "Color Mode:");
@@ -153,6 +154,7 @@ pub fn swatch_options(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
                         }
                     }
                 });
+                crate::widgets::name_combo(ui, "swatch_color_mode", "swatch_color_mode");
                 ui.end_row();
                 match d.s("mode").as_str() {
                     "rgb" => {
@@ -284,6 +286,7 @@ pub fn layer_options(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
                     }
                 }
             });
+            crate::widgets::name_combo(ui, "layer_color", "layer_color");
             super::color_field(ui, d, "rgb");
         });
         ui.end_row();

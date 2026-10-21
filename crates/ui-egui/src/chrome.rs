@@ -515,6 +515,7 @@ fn control_page(app: &mut DesignApp, ui: &mut egui::Ui) {
                 }
             }
         });
+        crate::widgets::name_combo(ui, "ctl_page_preset", "ctl_page_preset");
         ui.horizontal(|ui| {
             for (icon, tip, want) in [("orient-portrait", "Portrait", false), ("orient-landscape", "Landscape", true)] {
                 if crate::widgets::icon_toggle(ui, icon, landscape == want, crate::i18n::tr(&lang, tip)).clicked() && landscape != want {
@@ -534,6 +535,7 @@ fn control_page(app: &mut DesignApp, ui: &mut egui::Ui) {
                 }
             }
         });
+        crate::widgets::name_combo(ui, "ctl_page_rule", "ctl_page_rule");
     });
     vsep(ui);
     ui.vertical(|ui| {

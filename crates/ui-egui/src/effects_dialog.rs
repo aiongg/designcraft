@@ -247,6 +247,7 @@ fn swatch(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog, path: &[&str]) {
             }
         }
     });
+    crate::widgets::name_combo(ui, ("fx_swatch", path.join(".")), "fx_swatch");
 }
 
 fn heading(ui: &mut egui::Ui, text: &str) {
@@ -294,6 +295,7 @@ fn page_ui(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog, page: &str) {
                         }
                     }
                 });
+                crate::widgets::name_combo(ui, "fx_blend", "fx_blend");
                 row(ui, "Opacity:");
                 let mut o = d.fields.get("opacity").and_then(Value::as_f64).unwrap_or(1.0) * 100.0;
                 if ui.add_sized([70.0, 20.0], egui::DragValue::new(&mut o).range(0.0..=100.0).suffix("%").max_decimals(0)).changed() {
@@ -362,6 +364,7 @@ fn page_ui(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog, page: &str) {
                             }
                         }
                     });
+                    crate::widgets::name_combo(ui, "fx_glow_mode", "fx_glow_mode");
                     ui.end_row();
                 }
                 row(ui, "Color:");
@@ -393,6 +396,7 @@ fn page_ui(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog, page: &str) {
                             }
                         },
                     );
+                    crate::widgets::name_combo(ui, "fx_technique", "fx_technique");
                     ui.end_row();
                     row(ui, "Source:");
                     let mut center = d.fields.get("fx").is_some_and(|f| f["innerGlow"]["center"].as_bool().unwrap_or(false));
@@ -404,6 +408,7 @@ fn page_ui(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog, page: &str) {
                             }
                         }
                     });
+                    crate::widgets::name_combo(ui, "fx_source", "fx_source");
                 }
                 ui.end_row();
             });
@@ -485,6 +490,7 @@ fn page_ui(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog, page: &str) {
                         }
                     }
                 });
+                crate::widgets::name_combo(ui, "fx_corners", "fx_corners");
                 ui.end_row();
             });
         }
@@ -534,6 +540,7 @@ fn page_ui(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog, page: &str) {
                         }
                     }
                 });
+                crate::widgets::name_combo(ui, "fx_gtype", "fx_gtype");
                 row(ui, "Angle:");
                 angle(ui, d, &["gradientFeather", "angle"], true, global);
                 ui.end_row();
@@ -562,6 +569,7 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
         // Stroke, Fill and Text levels aren't in the document model yet: the object only.
         ui.add_enabled_ui(false, |ui| {
             egui::ComboBox::from_id_salt("fx_level").selected_text(tr("Object")).width(110.0).show_ui(ui, |_| {});
+            crate::widgets::name_combo(ui, "fx_level", "fx_level");
         });
     });
     ui.add_space(6.0);

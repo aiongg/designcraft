@@ -132,7 +132,8 @@ impl Dialog {
 
 fn text_field(ui: &mut egui::Ui, d: &mut Dialog, key: &str, w: f32) {
     let mut s = d.s(key);
-    if ui.add(egui::TextEdit::singleline(&mut s).desired_width(w).align(egui::Align2::LEFT_TOP)).changed() {
+    // Accessibility and UI automation name the field by its key, as NumFields are named.
+    if ui.add(egui::TextEdit::singleline(&mut s).desired_width(w).align(egui::Align2::LEFT_TOP)).accessible_name(key).changed() {
         d.fields.insert(key.into(), Value::String(s));
     }
 }
@@ -361,6 +362,7 @@ fn print_dialog(app: &crate::DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
                     }
                 }
             });
+            crate::widgets::name_combo(ui, "printer", "printer");
         }
         ui.end_row();
         ui.label(crate::i18n::tr(&app.ui.language, "Copies:"));
@@ -440,6 +442,7 @@ fn pdf_export(app: &crate::DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
                 }
             }
         });
+        crate::widgets::name_combo(ui, "pdf_preset", "pdf_preset");
     });
     if preset_clicked {
         let p = d.s("preset");
@@ -1088,7 +1091,7 @@ fn create_guides_dialog(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog) 
 /// InDesign shows it ("click in another field to see the value multiplied by two").
 fn measure_field(ui: &mut egui::Ui, d: &mut Dialog, key: &str, w: f32) {
     let mut s = d.s(key);
-    let r = ui.add(egui::TextEdit::singleline(&mut s).desired_width(w).align(egui::Align2::LEFT_TOP));
+    let r = ui.add(egui::TextEdit::singleline(&mut s).desired_width(w).align(egui::Align2::LEFT_TOP)).accessible_name(key);
     if r.changed() {
         d.fields.insert(key.into(), Value::String(s));
     }
@@ -1362,6 +1365,7 @@ fn document_setup(app: &crate::DesignApp, ui: &mut egui::Ui, d: &mut Dialog) -> 
                     }
                 }
             });
+        crate::widgets::name_combo(ui, "ds_intent", "ds_intent");
     });
     setup_row(ui, rtl, |ui| {
         setup_caption(ui, tr("Number of Pages:"), label_w);
@@ -1389,6 +1393,7 @@ fn document_setup(app: &crate::DesignApp, ui: &mut egui::Ui, d: &mut Dialog) -> 
                     }
                 }
             });
+        crate::widgets::name_combo(ui, "ds_binding", "ds_binding");
     });
     ui.add_space(4.0);
     // Page Size.
@@ -1411,6 +1416,7 @@ fn document_setup(app: &crate::DesignApp, ui: &mut egui::Ui, d: &mut Dialog) -> 
                     }
                 }
             });
+            crate::widgets::name_combo(ui, "ds_preset", "ds_preset");
         });
         setup_row(ui, rtl, |ui| {
             setup_caption(ui, tr("Width:"), 70.0);
@@ -1749,6 +1755,7 @@ fn preferences(app: &crate::DesignApp, ui: &mut egui::Ui, d: &mut Dialog, max_he
                                     }
                                 }
                             });
+                        crate::widgets::name_combo(ui, "pref_black", "pref_black");
                     });
                     ui.horizontal(|ui| {
                         ui.label(crate::i18n::tr(&app.ui.language, "Printing / Exporting:"));
@@ -1766,6 +1773,7 @@ fn preferences(app: &crate::DesignApp, ui: &mut egui::Ui, d: &mut Dialog, max_he
                                     }
                                 }
                             });
+                        crate::widgets::name_combo(ui, "pref_black_out", "pref_black_out");
                     });
                     if d.fields.contains_key("overprintBlack") {
                         ui.add_space(6.0);
@@ -1803,6 +1811,7 @@ fn preferences(app: &crate::DesignApp, ui: &mut egui::Ui, d: &mut Dialog, max_he
                                     }
                                 }
                             });
+                        crate::widgets::name_combo(ui, "bg_rel", "bg_rel");
                         ui.end_row();
                         ui.label(crate::i18n::tr(&app.ui.language, "Increment Every:"));
                         text_field(ui, d, "bg.increment", 80.0);
@@ -1882,6 +1891,7 @@ fn preferences(app: &crate::DesignApp, ui: &mut egui::Ui, d: &mut Dialog, max_he
                                     }
                                 }
                             });
+                        crate::widgets::name_combo(ui, "pref_dq", "pref_dq");
                     });
                 }
                 "units" => {
@@ -1901,6 +1911,7 @@ fn preferences(app: &crate::DesignApp, ui: &mut egui::Ui, d: &mut Dialog, max_he
                                 }
                             },
                         );
+                        crate::widgets::name_combo(ui, "rulerOrigin", "rulerOrigin");
                         ui.end_row();
                         for (key, label) in [("horizontalUnits", "Horizontal:"), ("verticalUnits", "Vertical:")] {
                             ui.label(crate::i18n::tr(&app.ui.language, label));
@@ -1942,6 +1953,7 @@ fn preferences(app: &crate::DesignApp, ui: &mut egui::Ui, d: &mut Dialog, max_he
                             }
                         }
                     });
+                    crate::widgets::name_combo(ui, "pref_language", "pref_language");
                     ui.add_space(6.0);
                     ui.label(egui::RichText::new(crate::i18n::tr(&app.ui.language, "When Scaling")).font(semibold(12.0)));
                     check(ui, d, "scaleStrokes", crate::i18n::tr(&app.ui.language, "Include Stroke Weight"));
@@ -2194,6 +2206,7 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
                                             }
                                         }
                                     });
+                                crate::widgets::name_combo(ui, "objKind", "objKind");
                                 ui.end_row();
                             });
                             let mut crit = json!({});
@@ -2235,6 +2248,7 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
                                         }
                                     }
                                 });
+                                crate::widgets::name_combo(ui, "fcscope", "fcscope");
                                 ui.end_row();
                             });
                             ui.horizontal(|ui| {
@@ -2325,6 +2339,7 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
                                     }
                                 }
                             });
+                            crate::widgets::name_combo(ui, "pdf_crop", "pdf_crop");
                         });
                     }
                     "layerOptions" => {
@@ -2356,6 +2371,7 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
                                         }
                                     }
                                 });
+                                crate::widgets::name_combo(ui, ("ws", key), "ws");
                                 ui.end_row();
                             }
                             ui.label(crate::i18n::tr(&app.ui.language, "Intent:"));
@@ -2372,6 +2388,7 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
                                         }
                                     }
                                 });
+                            crate::widgets::name_combo(ui, "ws_intent", "ws_intent");
                             ui.end_row();
                         });
                         check(ui, &mut d, "bpc", crate::i18n::tr(&app.ui.language, "Use Black Point Compensation"));
@@ -2474,6 +2491,7 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
                                                 }
                                             }
                                         });
+                                        crate::widgets::name_combo(ui, ("imp_map", w), "imp_map");
                                         ui.end_row();
                                     }
                                 });
@@ -2577,6 +2595,7 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
                                     }
                                 }
                             });
+                            crate::widgets::name_combo(ui, "ff_fit", "ff_fit");
                         });
                         ui.horizontal(|ui| {
                             ui.label(crate::i18n::tr(&app.ui.language, "Align From:"));
@@ -2632,6 +2651,7 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
                                     }
                                 }
                             });
+                            crate::widgets::name_combo(ui, "qr_type", "qr_type");
                         });
                         let fields: &[(&str, &str)] = match cur.as_str() {
                             "sms" => &[("number", "Cell Number:"), ("message", "Message:")],
@@ -3772,6 +3792,7 @@ fn paragraph_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
                             }
                         }
                     });
+                    crate::widgets::name_combo(ui, "export_tag", "export_tag");
                 });
                 ui.horizontal(|ui| {
                     ui.label(crate::i18n::tr(&app.ui.language, "Class:"));
@@ -3805,6 +3826,7 @@ fn paragraph_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
                                 }
                             }
                         });
+                    crate::widgets::name_combo(ui, "ps_dropcap_style", "ps_dropcap_style");
                     ui.end_row();
                 });
                 for (label, key) in [("Align Left Edge", "dropCapAlignLeft"), ("Scale for Descenders", "dropCapScaleDescenders")] {
@@ -3832,6 +3854,7 @@ fn paragraph_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
                                     }
                                 }
                             });
+                        crate::widgets::name_combo(ui, ("ns_style", i), "ns_style");
                         let through = ns["through"].as_bool().unwrap_or(true);
                         egui::ComboBox::from_id_salt(("ns_thr", i))
                             .selected_text(crate::i18n::tr(&app.ui.language, if through { "through" } else { "up to" }))
@@ -3844,6 +3867,7 @@ fn paragraph_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
                                     }
                                 }
                             });
+                        crate::widgets::name_combo(ui, ("ns_thr", i), "ns_thr");
                         let mut n = ns["count"].as_u64().unwrap_or(1) as u32;
                         let mut count_value = |ui: &mut egui::Ui, ns: &mut Value, changed: &mut bool| {
                             if ui.add(egui::DragValue::new(&mut n).range(1..=999)).changed() {
@@ -3882,6 +3906,7 @@ fn paragraph_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
                                     }
                                 }
                             });
+                        crate::widgets::name_combo(ui, ("ns_until", i), "ns_until");
                         if crate::i18n::category_first(&app.ui.language) {
                             count_value(ui, ns, &mut changed);
                         }
@@ -3933,6 +3958,7 @@ fn paragraph_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
                                     }
                                 }
                             });
+                        crate::widgets::name_combo(ui, ("nls_style", i), "nls_style");
                         ui.label(if crate::i18n::category_first(&app.ui.language) {
                             format!("{}:", crate::i18n::tr(&app.ui.language, "lines"))
                         } else {
@@ -3989,6 +4015,7 @@ fn paragraph_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
                                     }
                                 }
                             });
+                        crate::widgets::name_combo(ui, ("gs_style", i), "gs_style");
                         ui.label(crate::i18n::tr(&app.ui.language, "To Text:"));
                         let mut pat = g["pattern"].as_str().unwrap_or("").to_string();
                         let bad = grep_error(&pat).is_some();
@@ -4042,6 +4069,7 @@ fn paragraph_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
                             }
                         },
                     );
+                    crate::widgets::name_combo(ui, "psalign", "psalign");
                     ui.end_row();
                     for (label, key) in [
                         ("Left Indent:", "leftIndent"),
@@ -4101,12 +4129,13 @@ fn paragraph_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
             s if style_cjk::is_section(s) => style_cjk::section_ui(app, ui, d, s, &CharFields { base: &cv, sparse: false }, Some(&pv), &doc),
             _ => {
                 egui::Grid::new("psg").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
-                    ui.label(crate::i18n::tr(&app.ui.language, "Style Name:"));
+                    let caption = crate::i18n::tr(&app.ui.language, "Style Name:");
+                    ui.label(caption);
                     if !d.fields.contains_key("rename") {
                         d.fields.insert("rename".into(), json!(name));
                     }
                     let mut rn = d.s("rename");
-                    if ui.add(egui::TextEdit::singleline(&mut rn).desired_width(220.0)).changed() {
+                    if ui.add(egui::TextEdit::singleline(&mut rn).desired_width(220.0)).accessible_name(caption).changed() {
                         d.fields.insert("rename".into(), json!(rn));
                     }
                     ui.end_row();
@@ -4128,6 +4157,7 @@ fn paragraph_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
                             }
                         },
                     );
+                    crate::widgets::name_combo(ui, "psbased", "psbased");
                     ui.end_row();
                 });
                 ui.add_space(8.0);
@@ -4231,6 +4261,7 @@ fn delete_paragraph_style(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog
             }
         },
     );
+    crate::widgets::name_combo(ui, "del_para_replace", "del_para_replace");
 }
 
 /// Paragraph Style Options › Tabs: the style's stops on a ruler as wide as the first page's
@@ -4358,6 +4389,7 @@ fn para_choice(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, pv: &Value, key: &
             }
         }
     });
+    crate::widgets::name_combo(ui, ("pschoice", key), "pschoice");
 }
 
 /// Four per-side values in the order the attribute holds them: top, left, bottom, right. An
@@ -4431,6 +4463,7 @@ fn border_type_menu(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, pv: &Value, d
             }
         }
     });
+    crate::widgets::name_combo(ui, "psbordertype", "psbordertype");
 }
 
 /// Corner size and shape of a border or shading (`key` holds top left, top right, bottom right,
@@ -4458,6 +4491,7 @@ fn para_corners(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, pv: &Value, key: 
                     }
                 },
             );
+            crate::widgets::name_combo(ui, ("pscornershape", key, i), "pscornershape");
             ui.end_row();
         }
     });
@@ -4649,6 +4683,7 @@ fn span_columns(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, pv: &Value, doc: 
                 }
             }
         });
+        crate::widgets::name_combo(ui, "psspankind", "psspankind");
         ui.end_row();
         match cur {
             SpanColumns::Single => {}
@@ -4665,6 +4700,7 @@ fn span_columns(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, pv: &Value, doc: 
                         }
                     }
                 });
+                crate::widgets::name_combo(ui, "psspann", "psspann");
                 ui.end_row();
             }
             SpanColumns::Split(n) => {
@@ -4757,6 +4793,7 @@ fn list_char_style(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, pv: &Value, ke
             }
         }
     });
+    crate::widgets::name_combo(ui, ("pslistcs", key), "pslistcs");
 }
 
 /// The bullet character: common bullets, a field, and the font's glyphs in a grid to pick from.
@@ -4826,6 +4863,7 @@ fn bullet_font(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, pv: &Value, lu: &L
             }
         },
     );
+    crate::widgets::name_combo(ui, "psbulletfont", "psbulletfont");
     ui.end_row();
     ui.label(crate::i18n::tr(lang, "Font Style:"));
     let style = para_value(d, pv, "bulletFontStyle").as_str().unwrap_or("").to_string();
@@ -4837,6 +4875,7 @@ fn bullet_font(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, pv: &Value, lu: &L
                 }
             }
         });
+        crate::widgets::name_combo(ui, "psbulletstyle", "psbulletstyle");
     });
     ui.end_row();
 }
@@ -4880,6 +4919,7 @@ fn bullets_and_numbering(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, pv: &Val
                             }
                         }
                     });
+                    crate::widgets::name_combo(ui, "pslist", "pslist");
                     ui.end_row();
                     ui.label(crate::i18n::tr(lang, "Format:"));
                     para_choice(lang, ui, d, pv, "numberStyle", &NUMBER_STYLES);
@@ -4900,6 +4940,7 @@ fn bullets_and_numbering(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, pv: &Val
                                 para_set(d, "startAt", json!(1));
                             }
                         });
+                        crate::widgets::name_combo(ui, "psmode", "psmode");
                         if let Some(n) = start
                             && let Some(v) = crate::widgets::number(ui, "psstartat", Some(n as f64), "", 60.0, 0)
                         {
@@ -4921,6 +4962,7 @@ fn bullets_and_numbering(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, pv: &Val
                                     }
                                 }
                             });
+                            crate::widgets::name_combo(ui, "psrestartafter", "psrestartafter");
                         });
                     });
                     ui.end_row();
@@ -5107,6 +5149,7 @@ fn character_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
                             }
                         }
                     });
+                    crate::widgets::name_combo(ui, "csbased", "csbased");
                     ui.end_row();
                 });
                 let status = d.s("status");
@@ -5200,6 +5243,7 @@ fn char_choice(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, cf: &CharFields, k
             }
         }
     });
+    crate::widgets::name_combo(ui, ("cs", key), "cs");
 }
 
 /// An on/off attribute; for a character style a third, mixed state leaves it unset (clicks go
@@ -5253,6 +5297,7 @@ fn basic_character_formats(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
                     }
                 }
             });
+        crate::widgets::name_combo(ui, "psfam", "psfam");
         ui.end_row();
         ui.label(crate::i18n::tr(lang, "Font Style:"));
         let sty = cf.get(d, "fontStyle").as_str().unwrap_or("").to_string();
@@ -5273,6 +5318,7 @@ fn basic_character_formats(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
                     }
                 }
             });
+            crate::widgets::name_combo(ui, "pssty", "pssty");
         }
         ui.end_row();
         ui.label(crate::i18n::tr(lang, "Size:"));
@@ -5381,6 +5427,7 @@ fn advanced_character_formats(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, cf:
                 }
             }
         });
+        crate::widgets::name_combo(ui, ("cs", "digits"), "cs");
         ui.end_row();
     });
 }
@@ -5454,6 +5501,7 @@ fn open_type_features(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, cf: &CharFi
                 }
             }
         });
+        crate::widgets::name_combo(ui, "csfig", "csfig");
     });
     ui.add_space(4.0);
     ui.label(crate::i18n::tr(lang, "Stylistic Sets"));
@@ -5535,6 +5583,7 @@ fn delete_character_style(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog
             }
         },
     );
+    crate::widgets::name_combo(ui, "del_char_replace", "del_char_replace");
 }
 
 fn combo(ui: &mut egui::Ui, d: &mut Dialog, key: &str, opts: &[(&str, &str)]) {
@@ -5736,6 +5785,7 @@ fn paragraph_rules(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog, prefix: &
                 }
             }
         });
+        crate::widgets::name_combo(ui, "rule_which", "rule_which");
         ui.add_space(12.0);
         let mut on = rule["on"].as_bool().unwrap_or(false);
         if ui.checkbox(&mut on, crate::i18n::tr(lang, "Rule On")).changed() {
@@ -5772,6 +5822,7 @@ fn paragraph_rules(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog, prefix: &
                         }
                     }
                 });
+            crate::widgets::name_combo(ui, ("rule_width", which), "rule_width");
             ui.end_row();
             ui.label(crate::i18n::tr(lang, "Offset:"));
             if let Some(v) = sized(ui, &mut |ui| crate::widgets::measure(ui, &key("offset"), rule["offset"].as_f64(), v_units, 80.0)) {
@@ -6178,6 +6229,7 @@ fn toc_style_combo(ui: &mut egui::Ui, salt: &str, styles: &[String], auto: &str,
             }
         }
     });
+    crate::widgets::name_combo(ui, ("toc_style", salt), "toc_style");
     changed
 }
 
@@ -6264,6 +6316,7 @@ fn toc_dialog(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
                     }
                 }
             });
+            crate::widgets::name_combo(ui, "toc_page_number", "toc_page_number");
             ui.label(tr("Style:"));
             toc_style_combo(ui, "page_number", &char_styles, none, &mut r.page_number_style);
             ui.end_row();
@@ -6283,6 +6336,7 @@ fn toc_dialog(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
                     }
                 }
             });
+            crate::widgets::name_combo(ui, "toc_level", "toc_level");
             ui.end_row();
         });
     }

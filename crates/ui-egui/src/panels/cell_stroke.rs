@@ -208,6 +208,7 @@ pub fn stroke_fields(app: &mut DesignApp, ui: &mut Ui, id: &str, v: &Value) -> O
                 }
             }
         });
+        crate::widgets::name_combo(ui, (id, "type"), "type");
         ui.end_row();
         for (label, key, tint_label, tint_key) in [("Color:", "color", "Tint:", "tint"), ("Gap Color:", "gapColor", "Gap Tint:", "gapTint")] {
             caption(ui, tr(&lang, label));

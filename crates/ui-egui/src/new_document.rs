@@ -769,6 +769,7 @@ fn details(app: &mut DesignApp, ui: &mut Ui, d: &mut Dialog) {
                     }
                 }
             });
+            crate::widgets::name_combo(ui, "nd_units", "nd_units");
         });
     });
     row(ui, rtl, |ui| {

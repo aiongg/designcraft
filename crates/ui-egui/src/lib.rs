@@ -1790,7 +1790,7 @@ mod tests {
             app,
         );
         h.run_steps(4);
-        let bar = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("control_bar")).unwrap().outer_rect;
+        let bar = crate::panel_outer_rect(&h, "control_bar").unwrap();
         assert!(bar.height() > 40.0, "{bar:?}");
         // The X/Y/W/H group: its second row holds Y: and H:.
         let group = h.ctx.read_response(egui::Id::unique(("object_control", "dimensions"))).unwrap().rect;
@@ -2719,6 +2719,13 @@ mod import_warning_tests {
     }
 }
 
+/// The outer rect of the side or top panel `name` (its id salt) that the app shows in the
+/// harness's `Ui`, from egui's memory. egui keys a panel's state by its parent's scope and its salt.
+#[cfg(test)]
+pub(crate) fn panel_outer_rect<S>(h: &egui_kittest::Harness<'_, S>, name: &str) -> Option<egui::Rect> {
+    egui::containers::panel::PanelState::load(&h.ctx, h.ui_id().with_salt(egui::IdSalt::new(name))).map(|s| s.outer_rect)
+}
+
 /// The whole window in a headless test harness, at a chosen window size.
 #[cfg(test)]
 pub(crate) mod test_window {
@@ -2779,7 +2786,7 @@ pub(crate) mod test_window {
 
     /// The outer rect of a side or top panel, from egui's memory.
     pub fn panel_rect(h: &Harness<'static, Window>, id: &str) -> egui::Rect {
-        egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique(id)).map(|s| s.outer_rect).unwrap()
+        crate::panel_outer_rect(h, id).unwrap()
     }
 
     /// A primary click at `pos`, then a few frames.

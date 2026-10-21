@@ -338,6 +338,7 @@ pub fn buttons(app: &mut DesignApp, ui: &mut egui::Ui) {
                     }
                 }
             });
+        crate::widgets::name_combo(ui, "button_action", "button_action");
     });
     let mut params = None;
     if let Some(k) = pick {
@@ -395,6 +396,7 @@ pub fn buttons(app: &mut DesignApp, ui: &mut egui::Ui) {
                     }
                 }
             });
+        crate::widgets::name_combo(ui, "form_kind", "form_kind");
     });
     if let Some(f) = ff {
         let key = egui::Id::unique(("form_edit", id.0));
@@ -502,6 +504,7 @@ pub fn liquid(app: &mut DesignApp, ui: &mut egui::Ui) {
             }
         }
     });
+    crate::widgets::name_combo(ui, "liquid_rule", "liquid_rule");
     ui.separator();
     // The selected object (one on this page).
     let item = app
@@ -620,6 +623,7 @@ pub fn transitions(app: &mut DesignApp, ui: &mut egui::Ui) {
             }
         },
     );
+    crate::widgets::name_combo(ui, "transition_kind", "transition_kind");
     let mut duration = cur.map_or(1.0, |c| c.duration);
     let mut horizontal = cur.is_some_and(|c| c.horizontal);
     let mut changed = kind != cur.map(|c| c.kind);

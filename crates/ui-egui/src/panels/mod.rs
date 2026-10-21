@@ -358,9 +358,9 @@ pub fn font_combo(
 /// readers hear as a combo box with the current family as its value. Returns the font picked.
 pub fn font_popup(app: &mut DesignApp, field: &egui::Response, menu: &[designcraft_fonts::FamilyInfo], current: &str) -> Option<FontPick> {
     let shown = if current.is_empty() { "—".to_string() } else { font_label(app, menu, current) };
+    let name = crate::i18n::tr(&app.ui.language, "Font");
     field.widget_info(|| {
-        let mut info = egui::WidgetInfo::new(egui::Role::ComboBox);
-        info.enabled = true;
+        let mut info = egui::WidgetInfo::labeled(egui::Role::ComboBox, true, name);
         info.current_text_value = Some(shown.clone());
         info
     });
@@ -414,6 +414,7 @@ pub fn font_style_picker(app: &mut DesignApp, ui: &mut egui::Ui, family: &str, c
             }
         }
     });
+    crate::widgets::name_combo(ui, "font_style", "font_style");
     if let Some(s) = pick {
         let _ = app.run("type.char", json!({"attrs": {"fontStyle": s}}));
     }
@@ -431,6 +432,7 @@ pub fn para_style_picker(app: &mut DesignApp, ui: &mut egui::Ui, current: &str, 
             }
         }
     });
+    crate::widgets::name_combo(ui, "para_style", "para_style");
     if let Some(n) = pick {
         let _ = app.run("style.paragraph.apply", json!({"name": n, "clearOverrides": false}));
     }

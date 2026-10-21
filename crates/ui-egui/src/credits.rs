@@ -233,6 +233,7 @@ pub fn contributors_ui(ui: &mut egui::Ui, lang: &str) {
                 }
             }
         });
+        crate::widgets::name_combo(ui, "credits_sort", "credits_sort");
         if ui.button(if v.ascending { "▲" } else { "▼" }).on_hover_text(tr(lang, "Reverse the order")).clicked() {
             v.ascending = !v.ascending;
         }

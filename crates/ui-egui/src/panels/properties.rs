@@ -1525,6 +1525,7 @@ pub fn character_panel(app: &mut DesignApp, ui: &mut egui::Ui) {
             .selected_text(crate::i18n::tr(&app.ui.language, &lang))
             .width(170.0)
             .show_ui(ui, |ui| language_menu(app, ui, &lang));
+        crate::widgets::name_combo(ui, "char_language", "char_language");
     });
     // Digits (World-Ready): how the figures 0-9 are drawn (Arabic 0123, Hindi ٠١٢٣, Farsi ۰۱۲۳).
     let digits = c["digits"].as_str().unwrap_or("default").to_string();
@@ -1541,6 +1542,7 @@ pub fn character_panel(app: &mut DesignApp, ui: &mut egui::Ui) {
                 }
             }
         });
+        crate::widgets::name_combo(ui, "char_digits", "char_digits");
     });
     // Two columns: Size, Kerning and Baseline on the left, Leading and Tracking on the right. A
     // column's captions share the width of its widest one and each field takes the rest of the
@@ -1825,6 +1827,7 @@ pub fn paragraph_panel(app: &mut DesignApp, ui: &mut egui::Ui) {
                         }
                     }
                 });
+                crate::widgets::name_combo(ui, ("pbs", label), "pbs");
                 if label == "Shading" {
                     if let Some(v) = number(ui, "pshtint", p["shadingTint"].as_f64().map(|t| t * 100.0), "%", 46.0, 0) {
                         let _ = app.run("type.para", json!({"shadingTint": (v / 100.0).clamp(0.0, 1.0)}));
@@ -1953,6 +1956,7 @@ pub fn stroke_panel(app: &mut DesignApp, ui: &mut egui::Ui) {
                     }
                 }
             });
+        crate::widgets::name_combo(ui, "stype", "stype");
         ui.end_row();
         for (key, label, cur, flip) in [("start", "Start/End:", st.start, true), ("end", "", st.end, false)] {
             caption(ui, crate::i18n::tr(&app.ui.language, label));
@@ -1966,6 +1970,7 @@ pub fn stroke_panel(app: &mut DesignApp, ui: &mut egui::Ui) {
                     });
                 }
             });
+            crate::widgets::name_combo(ui, key, key);
             ui.end_row();
         }
         caption(ui, crate::i18n::tr(&app.ui.language, "Gap Color:"));
@@ -2550,6 +2555,7 @@ pub fn effects_panel(app: &mut DesignApp, ui: &mut egui::Ui) {
                 }
             }
         });
+        crate::widgets::name_combo(ui, "blend", "blend");
         caption(ui, crate::i18n::tr(&app.ui.language, "Opacity"));
         if let Some(v) = number(ui, "eop", Some(it.opacity as f64 * 100.0), "%", 46.0, 0) {
             let _ = app.run("object.opacity", json!({"opacity": (v / 100.0).clamp(0.0, 1.0)}));
@@ -2727,7 +2733,7 @@ fn variable_font_axes(app: &mut DesignApp, ui: &mut egui::Ui, family: &str, styl
             ui.spacing_mut().slider_width = (ui.available_width() - PANEL_FIELD_W - ui.spacing().item_spacing.x * 2.0).max(40.0);
             let (step, decimals) = axis_step(*min, *max);
             // The field beside the slider takes typed values, so the slider's own is hidden.
-            let slider = ui.add(egui::Slider::new(&mut value.1, *min..=*max).step_by(f64::from(step)).show_value(false));
+            let slider = ui.add(egui::Slider::new(&mut value.1, *min..=*max).step_by(f64::from(step)).show_value(false)).accessible_name(name);
             // Only the user's own change counts: the slider also reports one when it snaps a value
             // that is off its steps, which it would then do on every frame.
             let pressed = slider.is_pointer_button_down_on() || slider.dragged();
@@ -3189,15 +3195,21 @@ mod tests {
         assert_eq!(font_style(h.state_mut()), before);
     }
 
+    /// Open the Kerning menu and return its value field: the text field the menu added (the
+    /// accessibility tree nests a menu under its button, so it isn't the last field).
+    fn open_kerning_menu_field<'h>(h: &'h mut Harness<'static, DesignApp>) -> egui_kittest::Node<'h> {
+        let before: Vec<egui::Rect> = h.get_all_by_role(egui::accesskit::Role::TextInput).map(|n| n.rect()).collect();
+        h.get_by_role_and_label(egui::accesskit::Role::ComboBox, "Kerning").click();
+        h.run_steps(2);
+        h.get_all_by_role(egui::accesskit::Role::TextInput).find(|n| !before.contains(&n.rect())).unwrap()
+    }
+
     #[test]
     fn character_panel_has_kerning_and_takes_a_typed_manual_value() {
         let mut h = panel_harness(text_app(), character_panel);
         h.run_steps(3);
         // The caption and the control share the name: click the control.
-        h.get_by_role_and_label(egui::accesskit::Role::ComboBox, "Kerning").click();
-        h.run_steps(2);
-        // The menu's field is drawn after the panel's own fields.
-        let field = h.get_all_by_role(egui::accesskit::Role::TextInput).last().unwrap();
+        let field = open_kerning_menu_field(&mut h);
         field.focus();
         field.type_text("-40");
         h.run_steps(1);
@@ -3213,9 +3225,7 @@ mod tests {
         app.run("text.select", json!({"story": story.0, "anchor": 1, "focus": 1})).unwrap();
         let mut h = panel_harness(app, character_panel);
         h.run_steps(3);
-        h.get_by_role_and_label(egui::accesskit::Role::ComboBox, "Kerning").click();
-        h.run_steps(2);
-        let field = h.get_all_by_role(egui::accesskit::Role::TextInput).last().unwrap();
+        let field = open_kerning_menu_field(&mut h);
         field.focus();
         field.type_text("-80");
         h.run_steps(1);

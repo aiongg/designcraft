@@ -45,6 +45,7 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
                 }
             }
         });
+        crate::widgets::name_combo(ui, "glyph_style", "glyph_style");
     });
     ui.add(
         egui::TextEdit::singleline(&mut st.query)

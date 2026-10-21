@@ -643,7 +643,7 @@ fn legacy_dock_menu_button_opens_the_active_panel_menu() {
     let mut h = harness(app, vec2(1280.0, 800.0));
     assert!(h.state().ui.docking.is_none());
     let tab = h.query_all_by_label("Pages").find(|node| node.rect().height() <= 45.0).unwrap().rect();
-    let dock = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("dock")).unwrap().outer_rect;
+    let dock = crate::panel_outer_rect(&h, "dock").unwrap();
     let at = egui::pos2(dock.right() - 15.0, tab.center().y);
     h.event(Event::PointerMoved(at));
     h.run_steps(1);
@@ -775,7 +775,7 @@ fn pages_keeps_its_panel_menu_in_the_docking_layout() {
     assert!(app.ui.docking.is_some());
     let mut h = harness(app, vec2(1280.0, 800.0));
     let tab = h.query_all_by_label("Pages").find(|node| node.rect().height() <= 45.0).unwrap().rect();
-    let dock = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("shared-panel-dock")).unwrap().outer_rect;
+    let dock = crate::panel_outer_rect(&h, "shared-panel-dock").unwrap();
     click(&mut h, egui::pos2(dock.right() - 12.0, tab.center().y), PointerButton::Primary);
     assert!(egui::Popup::is_any_open(&h.ctx), "the three-line button must open a menu");
     for item in ["Numbering & Section Options…", "Close Tab Group", "Float Panel"] {

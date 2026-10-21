@@ -466,7 +466,7 @@ mod visual_regressions {
                     harness.run_steps(4);
                     let stem = format!("designcraft-dock-{}-{width}-{scale}x", brightness.id());
                     harness.render().unwrap().save(directory.join(format!("{stem}.png"))).unwrap();
-                    let panel = egui::containers::panel::PanelState::load(&harness.ctx, egui::Id::unique("dock")).unwrap().outer_rect;
+                    let panel = crate::panel_outer_rect(&harness, "dock").unwrap();
                     let region = serde_json::json!({
                         "screen": [width, 640.0], "scale": scale,
                         "regions": {"dock-tabs": [panel.left(), panel.top(), panel.width(), 45.0]}
@@ -536,7 +536,7 @@ mod chevron_tests {
 
     /// The » / « chevron painted at the right end of a panel's 11 pt header.
     fn chevron(harness: &Harness<'_, DesignApp>, panel: &str) -> egui::Pos2 {
-        let r = egui::containers::panel::PanelState::load(&harness.ctx, egui::Id::unique(panel)).expect("the panel is laid out").outer_rect;
+        let r = crate::panel_outer_rect(harness, panel).expect("the panel is laid out");
         egui::pos2(r.max.x - 10.0, r.min.y + 5.0)
     }
 

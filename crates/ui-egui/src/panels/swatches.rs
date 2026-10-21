@@ -387,6 +387,7 @@ pub fn color_panel(app: &mut DesignApp, ui: &mut egui::Ui) {
                     ui.selectable_value(&mut mode, ColorMode::Cmyk, "CMYK");
                     ui.selectable_value(&mut mode, ColorMode::Rgb, "RGB");
                 });
+            crate::widgets::name_combo(ui, "color_mode", "color_mode");
         });
     });
     app.ui.stroke_front = stroke;
@@ -408,7 +409,8 @@ pub fn color_panel(app: &mut DesignApp, ui: &mut egui::Ui) {
             // tint is read back from the document every frame) and applies it, clamped, on Enter
             // or when it loses focus.
             ui.spacing_mut().slider_width = (ui.available_width() - 60.0).max(60.0);
-            if ui.add(egui::Slider::new(&mut tint, 0.0..=100.0).integer().show_value(false)).drag_stopped() {
+            let slider = ui.add(egui::Slider::new(&mut tint, 0.0..=100.0).integer().show_value(false));
+            if slider.accessible_name(crate::i18n::tr(&app.ui.language, "Tint")).drag_stopped() {
                 commit = Some(tint);
             }
             if let Some(v) =
@@ -690,6 +692,7 @@ pub fn gradient_panel(app: &mut DesignApp, ui: &mut egui::Ui) {
                             }
                         }
                     });
+                    crate::widgets::name_combo(ui, "grad_type", "grad_type");
                 });
                 ui.horizontal(|ui| {
                     crate::widgets::caption_w(ui, crate::i18n::tr(&lang, "Location:"), 52.0);

@@ -10,6 +10,12 @@ use egui::{Color32, Rect, Response, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 
 use crate::theme::Tokens;
 
+/// Name the combo box shown in `ui` with `id_salt` for accessibility and UI automation, as
+/// [`NumField`]s are named by their id. egui names a combo box only by a visible label.
+pub(crate) fn name_combo(ui: &Ui, id_salt: impl egui::AsIdSalt, name: &str) {
+    ui.ctx().accesskit_node_builder(ui.make_persistent_id(egui::IdSalt::new(id_salt)), |node| node.set_label(name));
+}
+
 /// How the system's region writes and reads numbers (digits, decimal mark, grouping), for
 /// [`craft_ui::localized`] number fields. Read once per process.
 pub(crate) fn locale_numbers() -> &'static craft_ui::localized::LocaleNumbers {
@@ -219,7 +225,8 @@ impl<'a> NumField<'a> {
         if !self.enabled {
             editor_ui.disable();
         }
-        let r = editor_ui.put(value_rect, te);
+        // Accessibility and UI automation name the field by its id.
+        let r = editor_ui.put(value_rect, te).accessible_name(self.id);
         if r.has_focus() {
             // ↑/↓ step the value while typing.
             let (up, down, shift) = ui.input_mut(|i| {

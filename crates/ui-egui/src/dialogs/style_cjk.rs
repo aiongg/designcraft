@@ -164,6 +164,7 @@ fn font_fields(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog, cf: &Char
                     }
                 }
             });
+        crate::widgets::name_combo(ui, ("cjkfam", fam_key), "cjkfam");
     });
     ui.end_row();
     ui.label(tr(lang, "Font Style:"));
@@ -176,6 +177,7 @@ fn font_fields(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog, cf: &Char
                 }
             }
         });
+        crate::widgets::name_combo(ui, ("cjksty", style_key), "cjksty");
     });
     ui.end_row();
 }
@@ -542,6 +544,7 @@ fn kenten(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog, cf: &CharField
                 }
             }
         });
+        crate::widgets::name_combo(ui, "cjkkententype", "cjkkententype");
         ui.end_row();
         font_fields(app, ui, d, cf, ("kentenFont", "kentenFontStyle"), custom);
         ui.label(tr(lang, "Character:"));
@@ -661,6 +664,7 @@ fn para_choice(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, key: &str, current
             }
         }
     });
+    crate::widgets::name_combo(ui, ("cjkp", key), "cjkp");
 }
 
 fn para_check(ui: &mut egui::Ui, d: &mut Dialog, pv: &Value, key: &str, label: &str) {
@@ -744,6 +748,7 @@ fn japanese_composition(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, cf: &Char
                 }
             }
         });
+        crate::widgets::name_combo(ui, "cjkkinsoku", "cjkkinsoku");
         ui.end_row();
         ui.label(crate::i18n::tr(lang, "Kinsoku Type:"));
         let kind = para_value(d, pv, "kinsokuType");
@@ -787,6 +792,7 @@ fn japanese_composition(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, cf: &Char
                 }
             }
         });
+        crate::widgets::name_combo(ui, "cjkmojikumi", "cjkmojikumi");
         ui.end_row();
         ui.label(crate::i18n::tr(lang, "Leading Model:"));
         // Space below (`akiBelow`) measures the leading from the em box top, space above from its
@@ -849,6 +855,7 @@ fn grid_settings(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, pv: &Value) {
                 }
             }
         });
+        crate::widgets::name_combo(ui, "cjkgridalign", "cjkgridalign");
         ui.end_row();
     });
     let mut first = cur == GridAlign::FirstLineOnly;
