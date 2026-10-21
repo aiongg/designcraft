@@ -1638,7 +1638,7 @@ checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 [[package]]
 name = "ecolor"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui?rev=a7bc087cf46779732dd59f4c0c3391e7bc34593c#a7bc087cf46779732dd59f4c0c3391e7bc34593c"
+source = "git+https://github.com/aiongg/egui?rev=a4f9a17f64a6bae61350fb85804c9df0d9865916#a4f9a17f64a6bae61350fb85804c9df0d9865916"
 dependencies = [
  "bytemuck",
  "emath",
@@ -1647,7 +1647,7 @@ dependencies = [
 [[package]]
 name = "eframe"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui?rev=a7bc087cf46779732dd59f4c0c3391e7bc34593c#a7bc087cf46779732dd59f4c0c3391e7bc34593c"
+source = "git+https://github.com/aiongg/egui?rev=a4f9a17f64a6bae61350fb85804c9df0d9865916#a4f9a17f64a6bae61350fb85804c9df0d9865916"
 dependencies = [
  "ahash",
  "bytemuck",
@@ -1682,7 +1682,7 @@ dependencies = [
 [[package]]
 name = "egui"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui?rev=a7bc087cf46779732dd59f4c0c3391e7bc34593c#a7bc087cf46779732dd59f4c0c3391e7bc34593c"
+source = "git+https://github.com/aiongg/egui?rev=a4f9a17f64a6bae61350fb85804c9df0d9865916#a4f9a17f64a6bae61350fb85804c9df0d9865916"
 dependencies = [
  "accesskit",
  "ahash",
@@ -1701,7 +1701,7 @@ dependencies = [
 [[package]]
 name = "egui-wgpu"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui?rev=a7bc087cf46779732dd59f4c0c3391e7bc34593c#a7bc087cf46779732dd59f4c0c3391e7bc34593c"
+source = "git+https://github.com/aiongg/egui?rev=a4f9a17f64a6bae61350fb85804c9df0d9865916#a4f9a17f64a6bae61350fb85804c9df0d9865916"
 dependencies = [
  "ahash",
  "bytemuck",
@@ -1720,7 +1720,7 @@ dependencies = [
 [[package]]
 name = "egui-winit"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui?rev=a7bc087cf46779732dd59f4c0c3391e7bc34593c#a7bc087cf46779732dd59f4c0c3391e7bc34593c"
+source = "git+https://github.com/aiongg/egui?rev=a4f9a17f64a6bae61350fb85804c9df0d9865916#a4f9a17f64a6bae61350fb85804c9df0d9865916"
 dependencies = [
  "accesskit_winit",
  "arboard",
@@ -1744,7 +1744,7 @@ dependencies = [
 [[package]]
 name = "egui_glow"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui?rev=a7bc087cf46779732dd59f4c0c3391e7bc34593c#a7bc087cf46779732dd59f4c0c3391e7bc34593c"
+source = "git+https://github.com/aiongg/egui?rev=a4f9a17f64a6bae61350fb85804c9df0d9865916#a4f9a17f64a6bae61350fb85804c9df0d9865916"
 dependencies = [
  "bytemuck",
  "egui",
@@ -1757,7 +1757,7 @@ dependencies = [
 [[package]]
 name = "egui_kittest"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui?rev=a7bc087cf46779732dd59f4c0c3391e7bc34593c#a7bc087cf46779732dd59f4c0c3391e7bc34593c"
+source = "git+https://github.com/aiongg/egui?rev=a4f9a17f64a6bae61350fb85804c9df0d9865916#a4f9a17f64a6bae61350fb85804c9df0d9865916"
 dependencies = [
  "dify",
  "eframe",
@@ -1783,7 +1783,7 @@ checksum = "252afb9ae5eaa683babdc6a068b3f5726eb19e05070c731f9b2a23a7c3e8ed34"
 [[package]]
 name = "emath"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui?rev=a7bc087cf46779732dd59f4c0c3391e7bc34593c#a7bc087cf46779732dd59f4c0c3391e7bc34593c"
+source = "git+https://github.com/aiongg/egui?rev=a4f9a17f64a6bae61350fb85804c9df0d9865916#a4f9a17f64a6bae61350fb85804c9df0d9865916"
 dependencies = [
  "bytemuck",
 ]
@@ -1832,7 +1832,7 @@ dependencies = [
 [[package]]
 name = "epaint"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui?rev=a7bc087cf46779732dd59f4c0c3391e7bc34593c#a7bc087cf46779732dd59f4c0c3391e7bc34593c"
+source = "git+https://github.com/aiongg/egui?rev=a4f9a17f64a6bae61350fb85804c9df0d9865916#a4f9a17f64a6bae61350fb85804c9df0d9865916"
 dependencies = [
  "ahash",
  "bytemuck",
@@ -1858,7 +1858,7 @@ dependencies = [
 [[package]]
 name = "epaint_default_fonts"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui?rev=a7bc087cf46779732dd59f4c0c3391e7bc34593c#a7bc087cf46779732dd59f4c0c3391e7bc34593c"
+source = "git+https://github.com/aiongg/egui?rev=a4f9a17f64a6bae61350fb85804c9df0d9865916#a4f9a17f64a6bae61350fb85804c9df0d9865916"
 
 [[package]]
 name = "equivalent"
