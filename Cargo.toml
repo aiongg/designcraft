@@ -12,11 +12,11 @@ repository = "https://github.com/storytold/designcraft"
 
 [workspace.dependencies]
 # Shared writer; the immutable revision must be published before this consumer.
-craft-pdf = { git = "https://github.com/aiongg/craft-libs", rev = "0d1f33c291005568b7445650d141eb050f83d878", version = "=0.1.0", default-features = false }
+craft-pdf = { git = "https://github.com/aiongg/craft-libs", rev = "a94e2380660320d621cd1971c5512329d0513184", version = "=0.1.0", default-features = false }
 # Separations, ink coverage and the ink manager; same revision as craft-pdf and the krilla patch.
-craft-prepress = { git = "https://github.com/aiongg/craft-libs", rev = "0d1f33c291005568b7445650d141eb050f83d878", version = "=0.1.0", features = ["flatten"] }
+craft-prepress = { git = "https://github.com/aiongg/craft-libs", rev = "a94e2380660320d621cd1971c5512329d0513184", version = "=0.1.0", features = ["flatten"] }
 # Shared keyboard bindings: chords, overrides, conflicts, egui dispatch, the Keyboard Shortcuts dialog.
-craft-keymap = { git = "https://github.com/aiongg/craft-libs", rev = "0d1f33c291005568b7445650d141eb050f83d878", version = "=0.1.0", features = ["egui", "ui"] }
+craft-keymap = { git = "https://github.com/aiongg/craft-libs", rev = "a94e2380660320d621cd1971c5512329d0513184", version = "=0.1.0", features = ["egui", "ui"] }
 # internal
 designcraft-geom = { path = "crates/geom" }
 designcraft-color = { path = "crates/color" }
@@ -78,18 +78,18 @@ zip = { version = "3", default-features = false, features = ["deflate"] }
 indd = { git = "https://github.com/storytold/indd-utils", branch = "main" }
 
 # Which paths stored in documents may be followed (craft-libs).
-craft-docpath = { version = "0.1.0", git = "https://github.com/aiongg/craft-libs", rev = "0d1f33c291005568b7445650d141eb050f83d878" }
+craft-docpath = { version = "0.1.0", git = "https://github.com/aiongg/craft-libs", rev = "a94e2380660320d621cd1971c5512329d0513184" }
 # Atomic file replacement for saves and exports (craft-libs).
-craft-atomic = { version = "0.1.0", git = "https://github.com/aiongg/craft-libs", rev = "0d1f33c291005568b7445650d141eb050f83d878" }
+craft-atomic = { version = "0.1.0", git = "https://github.com/aiongg/craft-libs", rev = "a94e2380660320d621cd1971c5512329d0513184" }
 # File › Print through the system print spooler (craft-libs).
-craft-print = { version = "0.1.0", git = "https://github.com/aiongg/craft-libs", rev = "0d1f33c291005568b7445650d141eb050f83d878" }
+craft-print = { version = "0.1.0", git = "https://github.com/aiongg/craft-libs", rev = "a94e2380660320d621cd1971c5512329d0513184" }
 
 # ICC colour management: working spaces, transforms, black point compensation (craft-libs).
-craft-cms = { version = "0.1.0", git = "https://github.com/aiongg/craft-libs", rev = "0d1f33c291005568b7445650d141eb050f83d878" }
+craft-cms = { version = "0.1.0", git = "https://github.com/aiongg/craft-libs", rev = "a94e2380660320d621cd1971c5512329d0513184" }
 
 # ui
 # Shared frontend components; keep this dependency above the engine boundary.
-craft-ui = { version = "0.1.0", git = "https://github.com/aiongg/craft-libs", rev = "0d1f33c291005568b7445650d141eb050f83d878", features = ["serde"] }
+craft-ui = { version = "0.1.0", git = "https://github.com/aiongg/craft-libs", rev = "a94e2380660320d621cd1971c5512329d0513184", features = ["serde"] }
 egui = "0.36"
 egui_extras = { version = "0.36", default-features = false, features = ["svg"] }
 eframe = { version = "0.36", default-features = false }
@@ -121,10 +121,10 @@ debug = 0
 # Opt-in cancelable macOS termination on the pinned winit 0.30 line.
 [patch.crates-io]
 winit = { git = "https://github.com/skylartaylor/winit.git", rev = "3d51077fd1a966f84df9ef287839dc84fd5b4ca7" }
-krilla = { git = "https://github.com/aiongg/craft-libs", rev = "0d1f33c291005568b7445650d141eb050f83d878", version = "=0.8.2" }
+krilla = { git = "https://github.com/aiongg/craft-libs", rev = "a94e2380660320d621cd1971c5512329d0513184", version = "=0.8.2" }
 # The hayro crates from craft-libs' vendor/ directory (pdfcraft's patches plus craft-libs'; see its
 # vendor/README.craft-reader.md), at the craft-pdf revision.
-hayro = { git = "https://github.com/aiongg/craft-libs", rev = "0d1f33c291005568b7445650d141eb050f83d878" }
-hayro-interpret = { git = "https://github.com/aiongg/craft-libs", rev = "0d1f33c291005568b7445650d141eb050f83d878" }
-hayro-syntax = { git = "https://github.com/aiongg/craft-libs", rev = "0d1f33c291005568b7445650d141eb050f83d878" }
-hayro-jbig2 = { git = "https://github.com/aiongg/craft-libs", rev = "0d1f33c291005568b7445650d141eb050f83d878" }
+hayro = { git = "https://github.com/aiongg/craft-libs", rev = "a94e2380660320d621cd1971c5512329d0513184" }
+hayro-interpret = { git = "https://github.com/aiongg/craft-libs", rev = "a94e2380660320d621cd1971c5512329d0513184" }
+hayro-syntax = { git = "https://github.com/aiongg/craft-libs", rev = "a94e2380660320d621cd1971c5512329d0513184" }
+hayro-jbig2 = { git = "https://github.com/aiongg/craft-libs", rev = "a94e2380660320d621cd1971c5512329d0513184" }
