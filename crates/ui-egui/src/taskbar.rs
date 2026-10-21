@@ -95,7 +95,7 @@ fn inside(at: egui::Pos2, w: f32, canvas: Rect) -> egui::Pos2 {
 
 fn split_button(ui: &mut Ui, icon: &str, label: &str) -> (egui::Response, egui::Response) {
     let t = Tokens::get(ui.ctx());
-    let g = crate::rtl::plain(ui.ctx(), label, egui::FontId::proportional(11.0), t.text);
+    let g = ui.painter().layout_no_wrap(label.to_owned(), egui::FontId::proportional(11.0), t.text);
     let w = 26.0 + g.size().x + 8.0 + widgets::SEG_W;
     let (r, _) = ui.allocate_exact_size(vec2(w, FIELD_H), Sense::hover());
     let main = Rect::from_min_max(r.min, pos2(r.max.x - widgets::SEG_W, r.max.y));
@@ -121,7 +121,7 @@ fn text_controls(app: &mut DesignApp, ui: &mut Ui, in_text: bool) {
         let (main, seg) = split_button(ui, "fit-text", crate::i18n::tr(&app.ui.language, "Fit Text"));
         if main
             .on_hover_ui(|ui| {
-                crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Fit frame height to text"));
+                ui.label(crate::i18n::tr(&app.ui.language, "Fit frame height to text"));
             })
             .clicked()
         {
@@ -129,7 +129,7 @@ fn text_controls(app: &mut DesignApp, ui: &mut Ui, in_text: bool) {
         }
         egui::Popup::menu(&seg).show(|ui| {
             for (label, v) in [("Off", "off"), ("Height Only", "heightOnly"), ("Width Only", "widthOnly"), ("Height and Width", "heightAndWidth")] {
-                if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, label))).clicked() {
+                if ui.button(crate::i18n::tr(&app.ui.language, label)).clicked() {
                     let _ = app.run("object.textFrameOptions", json!({"autoSize": v}));
                     ui.close();
                 }
@@ -191,7 +191,7 @@ fn text_controls(app: &mut DesignApp, ui: &mut Ui, in_text: bool) {
             ("Justify", "leftJustified"),
             ("Justify All", "fullyJustified"),
         ] {
-            if ui.selectable_label(al == v, crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, label))).clicked() {
+            if ui.selectable_label(al == v, crate::i18n::tr(&app.ui.language, label)).clicked() {
                 let _ = app.run("type.para", json!({"attrs": {"align": v}}));
                 ui.close();
             }
@@ -261,21 +261,21 @@ fn more(app: &mut DesignApp, ui: &mut Ui, at: [f32; 2]) {
         ui.painter().circle_filled(pos2(r.min.x + 4.0 + k as f32 * 7.0, r.center().y), 1.8, t.icon);
     }
     let resp = resp.on_hover_ui(|ui| {
-        crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "More Options"));
+        ui.label(crate::i18n::tr(&app.ui.language, "More Options"));
     });
     egui::Popup::menu(&resp).show(|ui| {
-        if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Hide Bar"))).clicked() {
+        if ui.button(crate::i18n::tr(&app.ui.language, "Hide Bar")).clicked() {
             app.ui.task_bar = false;
             ui.close();
         }
         let pinned = app.ui.task_bar_pin.is_some();
         let pin = crate::i18n::tr(&app.ui.language, "Pin Bar Position");
-        if ui.button(crate::rtl::widget(ui, if pinned { format!("✓ {pin}") } else { format!("   {pin}") })).clicked() {
+        if ui.button(if pinned { format!("✓ {pin}") } else { format!("   {pin}") }).clicked() {
             let params = if pinned { json!({"on": false}) } else { json!({"on": true, "at": at}) };
             let _ = app.run("window.taskBarPin", params);
             ui.close();
         }
-        if ui.add_enabled(pinned, egui::Button::new(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Reset Bar Position")))).clicked() {
+        if ui.add_enabled(pinned, egui::Button::new(crate::i18n::tr(&app.ui.language, "Reset Bar Position"))).clicked() {
             let _ = app.run("window.taskBarReset", json!({}));
             ui.close();
         }

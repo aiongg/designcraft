@@ -192,10 +192,10 @@ pub fn stroke_fields(app: &mut DesignApp, ui: &mut Ui, id: &str, v: &Value) -> O
         ui.end_row();
         caption(ui, tr(&lang, "Type:"));
         let shown = type_label(&lang, &v["type"]);
-        egui::ComboBox::from_id_salt((id, "type")).selected_text(crate::rtl::widget(ui, &shown)).width(140.0).show_ui(ui, |ui| {
+        egui::ComboBox::from_id_salt((id, "type")).selected_text(&shown).width(140.0).show_ui(ui, |ui| {
             for kind in TYPES {
                 let text = tr(&lang, builtin(kind).label());
-                if ui.selectable_label(shown == text, crate::rtl::widget(ui, text)).clicked() {
+                if ui.selectable_label(shown == text, text).clicked() {
                     out = Some(("type", json!(kind)));
                 }
             }

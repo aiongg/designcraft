@@ -35,7 +35,7 @@ fn icon(ui: &mut Ui, group: Rect, x: f32, row: usize, name: &str, tip: &str) {
     let resp = ui.interact(rect, ui.scope_id().with(("caption", name, row)), Sense::hover());
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, tip));
     resp.on_hover_ui(|ui| {
-        crate::rtl::label(ui, tip);
+        ui.label(tip);
     });
 }
 

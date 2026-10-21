@@ -1442,6 +1442,7 @@ dependencies = [
 name = "designcraft-ui-egui"
 version = "0.10.0"
 dependencies = [
+ "craft-i18n",
  "craft-ui",
  "designcraft-color",
  "designcraft-compose",
@@ -1459,9 +1460,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "toml",
- "unicode-bidi",
- "unicode-bidi-mirroring",
- "unicode-segmentation",
  "zip",
 ]
 

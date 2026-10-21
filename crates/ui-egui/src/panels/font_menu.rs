@@ -327,7 +327,7 @@ pub fn font_menu_body(app: &mut DesignApp, ui: &mut Ui, menu: &[FamilyInfo], cur
         .horizontal(|ui| {
             let search = ui.add(
                 egui::TextEdit::singleline(&mut st.query)
-                    .hint_text(crate::rtl::widget(ui, tr("Search fonts")))
+                    .hint_text(tr("Search fonts"))
                     .desired_width(ui.available_width() - 30.0)
                     // Return picks the highlighted row instead of leaving the field.
                     .return_key(None),
@@ -348,7 +348,7 @@ pub fn font_menu_body(app: &mut DesignApp, ui: &mut Ui, menu: &[FamilyInfo], cur
     let sample_key = app.ui.font_sample.clone();
     let size_index = usize::from(app.ui.font_preview_size).min(SIZES.len() - 1);
     ui.horizontal(|ui| {
-        crate::rtl::label(ui, egui::RichText::new(tr("Filters:")).color(t.text));
+        ui.label(egui::RichText::new(tr("Filters:")).color(t.text));
         let class = st.class.map_or_else(|| tr("All Classes").to_string(), |c| tr(c.label()).to_string());
         if ui.selectable_label(st.show_classes, format!("{class} ▾")).clicked() {
             st.show_classes = !st.show_classes;
@@ -402,7 +402,7 @@ pub fn font_menu_body(app: &mut DesignApp, ui: &mut Ui, menu: &[FamilyInfo], cur
     }
     if let Some(like) = st.similar.clone() {
         ui.horizontal(|ui| {
-            crate::rtl::label(ui, egui::RichText::new(tr("Similar to {family}").replace("{family}", &like)).color(t.text_strong));
+            ui.label(egui::RichText::new(tr("Similar to {family}").replace("{family}", &like)).color(t.text_strong));
             if ui.small_button("×").on_hover_text(tr("Clear")).clicked() {
                 st.similar = None;
             }
@@ -521,9 +521,9 @@ pub fn font_menu_body(app: &mut DesignApp, ui: &mut Ui, menu: &[FamilyInfo], cur
         .sum();
     egui::ScrollArea::vertical().max_height(420.0).min_scrolled_height(list_h.clamp(24.0, 420.0)).auto_shrink([false, true]).show(ui, |ui| {
         if loading {
-            crate::rtl::label(ui, egui::RichText::new(tr("Loading fonts…")).color(t.text_dim));
+            ui.label(egui::RichText::new(tr("Loading fonts…")).color(t.text_dim));
         } else if rows.is_empty() {
-            crate::rtl::label(ui, egui::RichText::new(tr("No fonts match")).color(t.text_dim));
+            ui.label(egui::RichText::new(tr("No fonts match")).color(t.text_dim));
         }
         for (i, row) in rows.iter().enumerate() {
             let (family, style, recent) = match row {

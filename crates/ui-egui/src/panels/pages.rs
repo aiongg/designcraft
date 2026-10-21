@@ -380,7 +380,7 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
                     if let Some((_, id)) = row.parent {
                         resp.context_menu(|ui| {
                             let label = crate::i18n::tr(&app.ui.language, "Delete Parent");
-                            if ui.button(crate::rtl::widget(ui, label)).clicked() {
+                            if ui.button(label).clicked() {
                                 if app.run("layout.parents.delete", json!({"id": id.0})).is_ok() {
                                     app.views.clear();
                                 }
@@ -561,8 +561,7 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
     ui.spacing_mut().item_spacing.y = 4.0;
     ui.horizontal(|ui| {
         ui.set_min_height(FOOTER_H - 4.0);
-        crate::rtl::label(
-            ui,
+        ui.label(
             egui::RichText::new(
                 crate::i18n::tr(&app.ui.language, "{pages} Pages in {spreads} Spreads")
                     .replace("{pages}", &doc.page_count().to_string())
@@ -595,13 +594,13 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
                 let current = crate::panels::properties::preset_name(pg.width, pg.height);
                 for (name, w, h) in crate::panels::properties::PAGE_PRESETS {
                     let (w, h) = if landscape { (h, w) } else { (w, h) };
-                    if ui.selectable_label(current == *name, crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, name))).clicked() {
+                    if ui.selectable_label(current == *name, crate::i18n::tr(&app.ui.language, name)).clicked() {
                         let _ = app.run("layout.pageSize", json!({"pages": [cur + 1], "width": w, "height": h}));
                         ui.close();
                     }
                 }
                 ui.separator();
-                if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Custom Page Size…"))).clicked() {
+                if ui.button(crate::i18n::tr(&app.ui.language, "Custom Page Size…")).clicked() {
                     app.ui.dialog =
                         Some(crate::dialogs::Dialog::new("cmd:layout.pageSize", json!({"pages": [cur + 1], "width": pg.width, "height": pg.height})));
                     ui.close();
@@ -644,7 +643,7 @@ pub fn panel_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
 fn empty_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
     let lang = app.ui.language.clone();
     let cur = crate::canvas::current_page(app).unwrap_or(0);
-    let item = |ui: &mut egui::Ui, label: &str| ui.button(crate::rtl::widget(ui, crate::i18n::tr(&lang, label))).clicked();
+    let item = |ui: &mut egui::Ui, label: &str| ui.button(crate::i18n::tr(&lang, label)).clicked();
     if item(ui, "Insert Pages…") {
         app.ui.dialog = Some(crate::dialogs::Dialog::new("cmd:layout.pages.insert", json!({"after": cur, "count": 1})));
         ui.close();
@@ -677,7 +676,7 @@ fn page_menu(app: &mut DesignApp, ui: &mut egui::Ui, doc: &designcraft_doc::Docu
     let lang = app.ui.language.clone();
     let tr = |s: &str| crate::i18n::tr(&lang, s).to_owned();
     let pages_in_spread = doc.spreads.get(si).map_or(1, |sp| sp.pages.len());
-    let item = |ui: &mut egui::Ui, label: &str| ui.button(crate::rtl::widget(ui, tr(label))).clicked();
+    let item = |ui: &mut egui::Ui, label: &str| ui.button(tr(label)).clicked();
     // InDesign's order: pages, parents, layouts and numbering, shuffling.
     if item(ui, "Insert Pages…") {
         app.ui.dialog = Some(crate::dialogs::Dialog::new("cmd:layout.pages.insert", json!({"after": abs, "count": 1})));
@@ -709,8 +708,8 @@ fn page_menu(app: &mut DesignApp, ui: &mut egui::Ui, doc: &designcraft_doc::Docu
         crate::menus::activate(app, "layout.parents.new", &serde_json::Value::Null);
         ui.close();
     }
-    crate::menus::menu_button(ui, crate::rtl::widget(ui, tr("Apply Parent to Pages")), |ui| {
-        if ui.button(crate::rtl::widget(ui, tr("[None]"))).clicked() {
+    crate::menus::menu_button(ui, tr("Apply Parent to Pages"), |ui| {
+        if ui.button(tr("[None]")).clicked() {
             let _ = app.run("layout.pages.applyParent", json!({"pages": [abs], "parent": null}));
             ui.close();
         }
@@ -726,9 +725,9 @@ fn page_menu(app: &mut DesignApp, ui: &mut egui::Ui, doc: &designcraft_doc::Docu
         let _ = app.run("layout.overrideParentItems", json!({"page": abs}));
         ui.close();
     }
-    crate::menus::menu_button(ui, crate::rtl::widget(ui, tr("Parent Pages")), |ui| {
+    crate::menus::menu_button(ui, tr("Parent Pages"), |ui| {
         for (id, label) in [("layout.removeOverrides", "Remove All Local Overrides"), ("layout.detachAll", "Detach All Objects from Parent")] {
-            if ui.button(crate::rtl::widget(ui, tr(label))).clicked() {
+            if ui.button(tr(label)).clicked() {
                 let _ = app.run(id, json!({"page": abs}));
                 ui.close();
             }
@@ -745,16 +744,16 @@ fn page_menu(app: &mut DesignApp, ui: &mut egui::Ui, doc: &designcraft_doc::Docu
     }
     ui.separator();
     let mut shuffle = doc.spreads.get(si).is_none_or(|sp| sp.allow_shuffle);
-    if ui.checkbox(&mut shuffle, crate::rtl::widget(ui, tr("Allow Selected Spread to Shuffle"))).clicked() {
+    if ui.checkbox(&mut shuffle, tr("Allow Selected Spread to Shuffle")).clicked() {
         let _ = app.run("layout.spreadShuffle", json!({"spread": si, "allow": shuffle}));
         ui.close();
     }
     // Not in InDesign's menu (it drags pages into spreads): kept for spreads of up to 10 pages.
     if si > 0
         && ui
-            .button(crate::rtl::widget(ui, tr("Add to Previous Spread")))
+            .button(tr("Add to Previous Spread"))
             .on_hover_ui(|ui| {
-                crate::rtl::label(ui, tr("Spreads of up to 10 pages"));
+                ui.label(tr("Spreads of up to 10 pages"));
             })
             .clicked()
     {

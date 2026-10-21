@@ -1063,7 +1063,7 @@ pub fn button(ui: &mut egui::Ui, name: &str, size: f32, selected: bool, tip: &st
         resp
     } else {
         resp.on_hover_ui(|ui| {
-            crate::rtl::label(ui, tip);
+            ui.label(tip);
         })
     }
 }

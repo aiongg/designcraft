@@ -160,17 +160,17 @@ impl Offered {
 
 pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
     if super::text_attrs(app).is_none() {
-        crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Select text or a text frame."));
+        ui.label(crate::i18n::tr(&app.ui.language, "Select text or a text frame."));
         return;
     }
     let offered = offered(app);
     if offered.features.is_empty() && offered.sets.is_empty() {
-        crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "The selected fonts have no OpenType features."));
+        ui.label(crate::i18n::tr(&app.ui.language, "The selected fonts have no OpenType features."));
         return;
     }
     let lang = app.ui.language.clone();
     let mut changes = Changes::default();
-    crate::rtl::label(ui, egui::RichText::new(crate::i18n::tr(&lang, "Typography")).strong());
+    ui.label(egui::RichText::new(crate::i18n::tr(&lang, "Typography")).strong());
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         section(ui, &lang, "Ligatures", |ui| switches(ui, &lang, &offered, LIGATURES, &mut changes));
         section(ui, &lang, "Alternates", |ui| switches(ui, &lang, &offered, ALTERNATES, &mut changes));
@@ -201,7 +201,7 @@ fn tri_checkbox(ui: &mut egui::Ui, text: &str, feature: Feature) -> Option<bool>
     if feature.available == Covered::Some {
         label = label.italics();
     }
-    let response = ui.add(egui::Checkbox::new(&mut on, crate::rtl::widget(ui, label)).indeterminate(feature.applied == Covered::Some));
+    let response = ui.add(egui::Checkbox::new(&mut on, label).indeterminate(feature.applied == Covered::Some));
     response.clicked().then_some(feature.applied != Covered::All)
 }
 

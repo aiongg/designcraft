@@ -2681,7 +2681,7 @@ pub fn menu_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
         menus.reverse();
     }
     for (menu, entries) in menus {
-        menu_button(ui, crate::rtl::widget(ui, crate::i18n::tr(&lang, menu)), |ui| menu_column(app, ui, &[(menu, entries)]));
+        menu_button(ui, crate::i18n::tr(&lang, menu), |ui| menu_column(app, ui, &[(menu, entries)]));
     }
 }
 
@@ -2701,7 +2701,7 @@ fn menu_column<P: AsRef<str>>(app: &mut DesignApp, ui: &mut egui::Ui, runs: &[(P
         }
         if hidden > 0 && !app.ui.show_full_menus {
             ui.separator();
-            if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&lang, "Show All Menu Items"))).clicked() {
+            if ui.button(crate::i18n::tr(&lang, "Show All Menu Items")).clicked() {
                 app.ui.show_full_menus = true;
             }
         }
@@ -2875,7 +2875,7 @@ fn menu_items(app: &mut DesignApp, ui: &mut egui::Ui, items: &[Item], path: &str
             Item::Sub(name, children) => {
                 let sub = format!("{path}/{name}");
                 let shown = crate::i18n::tr(&app.ui.language, name).to_owned();
-                menu_button(ui, crate::rtl::widget(ui, shown), |ui| {
+                menu_button(ui, shown, |ui| {
                     if sub == OPEN_RECENT {
                         recent_menu_items(app, ui);
                     }
@@ -2896,7 +2896,7 @@ fn menu_items(app: &mut DesignApp, ui: &mut egui::Ui, items: &[Item], path: &str
                     Some(false) => format!("   {label}"),
                     None => label.to_owned(),
                 };
-                let mut b = egui::Button::new(crate::rtl::widget(ui, text));
+                let mut b = egui::Button::new(text);
                 if let Some(sc) = shortcut_of(app, id) {
                     b = b.shortcut_text(shortcut_text(&sc));
                 }
@@ -2946,7 +2946,7 @@ fn recent_menu_items(app: &mut DesignApp, ui: &mut egui::Ui) {
                 if !crate::chrome::recent_file_stat(ui.ctx(), &path).exists {
                     text = text.color(dim);
                 }
-                if ui.button(crate::rtl::widget(ui, text)).on_hover_text(&path).clicked() {
+                if ui.button(text).on_hover_text(&path).clicked() {
                     activate(app, &id, &params);
                     ui.close();
                 }
@@ -3119,7 +3119,7 @@ pub fn palette(app: &mut DesignApp, ctx: &egui::Context) {
         ui.set_width(480.0);
         let r = ui.add(
             egui::TextEdit::singleline(&mut q)
-                .hint_text(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Search styles and commands…")))
+                .hint_text(crate::i18n::tr(&app.ui.language, "Search styles and commands…"))
                 .desired_width(f32::INFINITY),
         );
         r.request_focus();

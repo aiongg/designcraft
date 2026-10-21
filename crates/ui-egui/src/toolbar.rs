@@ -243,7 +243,7 @@ fn fill_stroke_proxy(app: &mut DesignApp, ui: &mut egui::Ui, width: f32, cols: u
     if ui
         .interact(def, ui.scope_id().with("proxy_default"), Sense::click())
         .on_hover_ui(|ui| {
-            crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Default Fill and Stroke (D)"));
+            ui.label(crate::i18n::tr(&app.ui.language, "Default Fill and Stroke (D)"));
         })
         .clicked()
     {
@@ -254,7 +254,7 @@ fn fill_stroke_proxy(app: &mut DesignApp, ui: &mut egui::Ui, width: f32, cols: u
     if ui
         .interact(swap, ui.scope_id().with("proxy_swap_btn"), Sense::click())
         .on_hover_ui(|ui| {
-            crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Swap Fill and Stroke (Shift+X)"));
+            ui.label(crate::i18n::tr(&app.ui.language, "Swap Fill and Stroke (Shift+X)"));
         })
         .clicked()
     {
@@ -298,12 +298,12 @@ fn fill_stroke_proxy(app: &mut DesignApp, ui: &mut egui::Ui, width: f32, cols: u
     }
     let fill_tip = crate::i18n::tr(&app.ui.language, "Fill (X)");
     let fresp = ui.interact(fill_r, ui.scope_id().with("proxy_fill"), Sense::click()).on_hover_ui(|ui| {
-        crate::rtl::label(ui, fill_tip);
+        ui.label(fill_tip);
     });
     fresp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, fill_tip));
     let stroke_tip = crate::i18n::tr(&app.ui.language, "Stroke (X)");
     let sresp = ui.interact(stroke_r.translate(vec2(0.0, 0.0)), ui.scope_id().with("proxy_stroke"), Sense::click()).on_hover_ui(|ui| {
-        crate::rtl::label(ui, stroke_tip);
+        ui.label(stroke_tip);
     });
     sresp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, stroke_tip));
     if fresp.clicked() || sresp.clicked() {
@@ -336,7 +336,7 @@ fn fill_stroke_proxy(app: &mut DesignApp, ui: &mut egui::Ui, width: f32, cols: u
         if ui
             .interact(r, ui.scope_id().with(("proxy_fmt", k)), Sense::click())
             .on_hover_ui(|ui| {
-                crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, tip));
+                ui.label(crate::i18n::tr(&app.ui.language, tip));
             })
             .clicked()
         {
@@ -381,7 +381,7 @@ fn fill_stroke_proxy(app: &mut DesignApp, ui: &mut egui::Ui, width: f32, cols: u
             paint_kind(ui.painter(), r, k);
             if resp
                 .on_hover_ui(|ui| {
-                    crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, tip));
+                    ui.label(crate::i18n::tr(&app.ui.language, tip));
                 })
                 .clicked()
             {
@@ -394,7 +394,7 @@ fn fill_stroke_proxy(app: &mut DesignApp, ui: &mut egui::Ui, width: f32, cols: u
         let resp = ui.interact(well, ui.scope_id().with("proxy_apply"), Sense::click());
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, crate::i18n::tr(&app.ui.language, tip)));
         let resp = resp.on_hover_ui(|ui| {
-            crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, tip));
+            ui.label(crate::i18n::tr(&app.ui.language, tip));
         });
         ui.painter().rect(well, 2.0, t.well, Stroke::new(1.0, t.well_rim), StrokeKind::Outside);
         paint_kind(ui.painter(), well, front_kind);
@@ -404,7 +404,7 @@ fn fill_stroke_proxy(app: &mut DesignApp, ui: &mut egui::Ui, width: f32, cols: u
         }
         egui::Popup::context_menu(&resp).show(|ui| {
             for (tip, id) in applies {
-                if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, tip))).clicked() {
+                if ui.button(crate::i18n::tr(&app.ui.language, tip)).clicked() {
                     let _ = app.run(id, json!({}));
                     ui.close();
                 }
@@ -434,7 +434,7 @@ fn fill_stroke_proxy(app: &mut DesignApp, ui: &mut egui::Ui, width: f32, cols: u
                 let label = VIEW_OPTIONS[k];
                 let sc = crate::menus::ui_label(id).and_then(|c| c.1).unwrap_or("");
                 let text = format!("{}  {}", if on { "✓" } else { "   " }, crate::i18n::tr(&app.ui.language, label));
-                if ui.add(egui::Button::new(crate::rtl::widget(ui, &text)).shortcut_text(sc)).clicked() {
+                if ui.add(egui::Button::new(&text).shortcut_text(sc)).clicked() {
                     let _ = app.run(id, json!({}));
                     ui.close();
                 }
@@ -473,7 +473,7 @@ fn fill_stroke_proxy(app: &mut DesignApp, ui: &mut egui::Ui, width: f32, cols: u
         }
         egui::Popup::context_menu(&resp).show(|ui| {
             for (label, m) in modes {
-                if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, label))).clicked() {
+                if ui.button(crate::i18n::tr(&app.ui.language, label)).clicked() {
                     let _ = app.run("view.screenMode", json!({"mode": m}));
                     ui.close();
                 }
@@ -493,14 +493,14 @@ fn fill_stroke_proxy(app: &mut DesignApp, ui: &mut egui::Ui, width: f32, cols: u
     );
     flyout_triangle(ui.painter(), well, t.icon);
     let resp = resp.on_hover_ui(|ui| {
-        crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, if preview { "Preview (W)" } else { "Normal (W)" }));
+        ui.label(crate::i18n::tr(&app.ui.language, if preview { "Preview (W)" } else { "Normal (W)" }));
     });
     if resp.clicked() {
         let _ = app.run("view.togglePreview", json!({}));
     }
     egui::Popup::context_menu(&resp).show(|ui| {
         for (label, mode) in std::iter::once(("Normal", "normal")).chain(modes) {
-            if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, label))).clicked() {
+            if ui.button(crate::i18n::tr(&app.ui.language, label)).clicked() {
                 let _ = app.run("view.screenMode", json!({"mode": mode}));
                 ui.close();
             }
@@ -552,7 +552,7 @@ fn tool_button(ui: &mut egui::Ui, icon: &str, active: bool, tip: &str) -> egui::
     let enabled = ui.is_enabled();
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, tip));
     resp.on_hover_ui(|ui| {
-        crate::rtl::label(ui, tip);
+        ui.label(tip);
     })
 }
 

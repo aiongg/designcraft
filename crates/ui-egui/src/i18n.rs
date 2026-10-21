@@ -4415,6 +4415,13 @@ pub fn is_rtl(lang: &str) -> bool {
     lang == "ar"
 }
 
+/// A user-provided name isolated for embedding in interface text, so a Latin product name or
+/// suffix beside it can't change the name's internal reading order. Names without right-to-left
+/// letters stay as they are.
+pub fn isolate(text: &str) -> String {
+    if text.chars().any(designcraft_fonts::is_rtl) { craft_i18n::isolate(text) } else { text.to_owned() }
+}
+
 /// A Japanese, Chinese or Korean interface language (`zh-tw` included): CJK features are shown by
 /// default (see [`crate::cjk_features`]).
 pub fn is_cjk(lang: &str) -> bool {
@@ -5131,5 +5138,23 @@ mod tests {
                 assert_ne!(tr(code, key), key, "{code}: {key}");
             }
         }
+    }
+
+    /// egui lays interface text out in bidi order itself: an isolated Arabic document name keeps
+    /// its internal right-to-left order beside the Latin app name and the zoom suffix.
+    #[test]
+    fn isolated_arabic_names_keep_their_order_in_latin_chrome() {
+        let ctx = egui::Context::default();
+        ctx.begin_pass(egui::RawInput::default());
+        let name = isolate("ملف (PDF 123) جديد");
+        // (text, a Latin letter beside the name, whether it sits left of the name)
+        for (text, latin, left) in [(format!("DesignCraft — {name}"), 'D', true), (format!("{name} @ 89%"), '@', false)] {
+            let galley = ctx.fonts_mut(|f| f.layout_no_wrap(text.clone(), egui::FontId::proportional(15.0), egui::Color32::WHITE));
+            let glyphs: Vec<_> = galley.rows.iter().flat_map(|row| &row.glyphs).collect();
+            let x = |c| glyphs.iter().find(|g| g.chr == c).map(|g| g.pos.x).unwrap();
+            assert!(x('ج') < x('P') && x('P') < x('ف'), "{text}");
+            assert_eq!(x(latin) < x('ج'), left, "{text}");
+        }
+        let _ = ctx.end_pass();
     }
 }

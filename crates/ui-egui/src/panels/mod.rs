@@ -261,8 +261,7 @@ pub fn swatch_menu_row(ui: &mut egui::Ui, doc: &designcraft_doc::Document, name:
     crate::widgets::paint_chip(ui.painter(), chip, c, g);
     // A name too long for the list is cut at the row's end.
     let text = ui.painter().with_clip_rect(ui.clip_rect().intersect(row.shrink2(vec2(2.0, 0.0))));
-    crate::rtl::paint(
-        &text,
+    (&text).text(
         row.min + vec2(SWATCH_MENU_TEXT_X, SWATCH_MENU_ROW_H / 2.0),
         egui::Align2::LEFT_CENTER,
         name,
@@ -425,9 +424,9 @@ pub fn para_style_picker(app: &mut DesignApp, ui: &mut egui::Ui, current: &str, 
     let mut pick = None;
     let shown = crate::i18n::style_name(&app.ui.language, current);
     let label = if overridden { format!("{shown}+") } else { shown.to_string() };
-    egui::ComboBox::from_id_salt("para_style").selected_text(crate::rtl::widget(ui, label)).width(width).show_ui(ui, |ui| {
+    egui::ComboBox::from_id_salt("para_style").selected_text(label).width(width).show_ui(ui, |ui| {
         for n in names.iter().filter(|n| *n != designcraft_doc::NO_PARA_STYLE) {
-            if ui.selectable_label(n == current, crate::rtl::widget(ui, crate::i18n::style_name(&app.ui.language, n))).clicked() {
+            if ui.selectable_label(n == current, crate::i18n::style_name(&app.ui.language, n)).clicked() {
                 pick = Some(n.clone());
             }
         }

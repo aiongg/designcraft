@@ -26,9 +26,9 @@ pub fn hyperlinks(app: &mut DesignApp, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         ui.add(egui::TextEdit::singleline(&mut url).desired_width(170.0));
         if ui
-            .add_enabled(has_target, egui::Button::new(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "New"))))
+            .add_enabled(has_target, egui::Button::new(crate::i18n::tr(&app.ui.language, "New")))
             .on_hover_ui(|ui| {
-                crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Hyperlink from the selected text or frames"));
+                ui.label(crate::i18n::tr(&app.ui.language, "Hyperlink from the selected text or frames"));
             })
             .clicked()
         {
@@ -42,14 +42,10 @@ pub fn hyperlinks(app: &mut DesignApp, ui: &mut egui::Ui) {
     ui.separator();
     let list = app.session.execute("hyperlink.list", &json!({})).ok().and_then(|v| v.as_array().cloned()).unwrap_or_default();
     if list.is_empty() {
-        crate::rtl::label(
-            ui,
-            crate::rtl::widget(
-                ui,
-                egui::RichText::new(crate::i18n::tr(&app.ui.language, "No hyperlinks. Select text or a frame, type a URL and click New."))
-                    .size(11.0)
-                    .color(t.text_dim),
-            ),
+        ui.label(
+            egui::RichText::new(crate::i18n::tr(&app.ui.language, "No hyperlinks. Select text or a frame, type a URL and click New."))
+                .size(11.0)
+                .color(t.text_dim),
         );
     }
     for h in list {
@@ -60,7 +56,7 @@ pub fn hyperlinks(app: &mut DesignApp, ui: &mut egui::Ui) {
                 let _ = app.run("hyperlink.goToSource", json!({"id": hid}));
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.small_button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Delete"))).clicked() {
+                if ui.small_button(crate::i18n::tr(&app.ui.language, "Delete")).clicked() {
                     let _ = app.run("hyperlink.delete", json!({"id": hid}));
                 }
             });
@@ -70,20 +66,14 @@ pub fn hyperlinks(app: &mut DesignApp, ui: &mut egui::Ui) {
 
 pub fn bookmarks(app: &mut DesignApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
-    if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "New Bookmark for This Page"))).clicked() {
+    if ui.button(crate::i18n::tr(&app.ui.language, "New Bookmark for This Page")).clicked() {
         let page = crate::canvas::current_page(app).unwrap_or(0) + 1;
         let _ = app.run("bookmark.add", json!({"page": page}));
     }
     ui.separator();
     let list = app.session.execute("bookmark.list", &json!({})).ok().and_then(|v| v.as_array().cloned()).unwrap_or_default();
     if list.is_empty() {
-        crate::rtl::label(
-            ui,
-            crate::rtl::widget(
-                ui,
-                egui::RichText::new(crate::i18n::tr(&app.ui.language, "No bookmarks. They become the PDF outline.")).size(11.0).color(t.text_dim),
-            ),
-        );
+        ui.label(egui::RichText::new(crate::i18n::tr(&app.ui.language, "No bookmarks. They become the PDF outline.")).size(11.0).color(t.text_dim));
     }
     for (i, b) in list.iter().enumerate() {
         let page = b["page"].as_u64().unwrap_or(0) as usize;
@@ -96,7 +86,7 @@ pub fn bookmarks(app: &mut DesignApp, ui: &mut egui::Ui) {
                 crate::canvas::go_to_page(app, page);
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.small_button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Delete"))).clicked() {
+                if ui.small_button(crate::i18n::tr(&app.ui.language, "Delete")).clicked() {
                     let _ = app.run("bookmark.delete", json!({"index": i}));
                 }
             });
@@ -108,19 +98,13 @@ pub fn bookmarks(app: &mut DesignApp, ui: &mut egui::Ui) {
 pub fn articles(app: &mut DesignApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     let has_sel = app.session.active().is_some_and(|d| !d.selection.items.is_empty());
-    if ui.add_enabled(has_sel, egui::Button::new(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "New Article from Selection")))).clicked() {
+    if ui.add_enabled(has_sel, egui::Button::new(crate::i18n::tr(&app.ui.language, "New Article from Selection"))).clicked() {
         let _ = app.run("article.new", json!({}));
     }
     ui.separator();
     let list = app.session.execute("article.list", &json!({})).ok().and_then(|v| v.as_array().cloned()).unwrap_or_default();
     if list.is_empty() {
-        crate::rtl::label(
-            ui,
-            crate::rtl::widget(
-                ui,
-                egui::RichText::new(crate::i18n::tr(&app.ui.language, "No articles: exports follow page order.")).size(11.0).color(t.text_dim),
-            ),
-        );
+        ui.label(egui::RichText::new(crate::i18n::tr(&app.ui.language, "No articles: exports follow page order.")).size(11.0).color(t.text_dim));
     }
     for a in list {
         let name = a["name"].as_str().unwrap_or("").to_string();
@@ -129,27 +113,26 @@ pub fn articles(app: &mut DesignApp, ui: &mut egui::Ui) {
             if ui
                 .checkbox(&mut export, "")
                 .on_hover_ui(|ui| {
-                    crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Include when exporting"));
+                    ui.label(crate::i18n::tr(&app.ui.language, "Include when exporting"));
                 })
                 .changed()
             {
                 let _ = app.run("article.options", json!({"name": name, "export": export}));
             }
-            crate::rtl::label(ui, egui::RichText::new(&name).strong());
-            crate::rtl::label(
-                ui,
+            ui.label(egui::RichText::new(&name).strong());
+            ui.label(
                 egui::RichText::new(crate::i18n::count_label(&app.ui.language, "objects", a["items"].as_array().map_or(0, Vec::len)))
                     .size(10.5)
                     .color(t.text_dim),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.small_button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Delete"))).clicked() {
+                if ui.small_button(crate::i18n::tr(&app.ui.language, "Delete")).clicked() {
                     let _ = app.run("article.delete", json!({"name": name}));
                 }
                 if ui
-                    .add_enabled(has_sel, egui::Button::new(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Add"))).small())
+                    .add_enabled(has_sel, egui::Button::new(crate::i18n::tr(&app.ui.language, "Add")).small())
                     .on_hover_ui(|ui| {
-                        crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Add the selection"));
+                        ui.label(crate::i18n::tr(&app.ui.language, "Add the selection"));
                     })
                     .clicked()
                 {
@@ -171,12 +154,8 @@ pub fn tags(app: &mut DesignApp, ui: &mut egui::Ui) {
     let id = egui::Id::unique("new_tag_name");
     let mut name: String = ui.data(|d| d.get_temp(id)).unwrap_or_default();
     ui.horizontal(|ui| {
-        ui.add(
-            egui::TextEdit::singleline(&mut name)
-                .hint_text(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "New tag")))
-                .desired_width(140.0),
-        );
-        if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "New"))).clicked() && !name.trim().is_empty() {
+        ui.add(egui::TextEdit::singleline(&mut name).hint_text(crate::i18n::tr(&app.ui.language, "New tag")).desired_width(140.0));
+        if ui.button(crate::i18n::tr(&app.ui.language, "New")).clicked() && !name.trim().is_empty() {
             match app.run("xml.newTag", json!({"name": name.trim()})) {
                 Ok(_) => name.clear(),
                 Err(e) => app.status_error("Tags", e),
@@ -195,30 +174,30 @@ pub fn tags(app: &mut DesignApp, ui: &mut egui::Ui) {
             if ui
                 .add_enabled(has_sel || text_sel, egui::Button::new(&n).frame(false))
                 .on_hover_ui(|ui| {
-                    crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Tag the selection"));
+                    ui.label(crate::i18n::tr(&app.ui.language, "Tag the selection"));
                 })
                 .clicked()
             {
                 let _ = if text_sel { app.run("xml.tagText", json!({"tag": n})) } else { app.run("xml.tag", json!({"tag": n})) };
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.small_button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Delete"))).clicked() {
+                if ui.small_button(crate::i18n::tr(&app.ui.language, "Delete")).clicked() {
                     let _ = app.run("xml.deleteTag", json!({"name": n}));
                 }
             });
         });
     }
-    if (has_sel || text_sel) && ui.small_button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Untag Selection"))).clicked() {
+    if (has_sel || text_sel) && ui.small_button(crate::i18n::tr(&app.ui.language, "Untag Selection")).clicked() {
         let _ = if text_sel { app.run("xml.tagText", json!({"tag": null})) } else { app.run("xml.tag", json!({"tag": null})) };
     }
     let mut markers = app.ui.tag_markers;
-    if ui.checkbox(&mut markers, crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Show Tag Markers"))).changed() {
+    if ui.checkbox(&mut markers, crate::i18n::tr(&app.ui.language, "Show Tag Markers")).changed() {
         let _ = app.run("view.tagMarkers", json!({"on": markers}));
     }
     ui.separator();
-    crate::rtl::label(ui, egui::RichText::new(crate::i18n::tr(&app.ui.language, "Structure")).strong());
+    ui.label(egui::RichText::new(crate::i18n::tr(&app.ui.language, "Structure")).strong());
     let st = app.session.execute("xml.structure", &json!({})).unwrap_or_default();
-    crate::rtl::label(ui, egui::RichText::new(st["root"].as_str().unwrap_or("Root")).size(11.0).color(t.text_dim));
+    ui.label(egui::RichText::new(st["root"].as_str().unwrap_or("Root")).size(11.0).color(t.text_dim));
     for el in st["elements"].as_array().cloned().unwrap_or_default() {
         let text = el["text"].as_str().unwrap_or("").chars().take(40).collect::<String>();
         let label = format!("  <{}> {}", el["tag"].as_str().unwrap_or(""), text);
@@ -230,7 +209,7 @@ pub fn tags(app: &mut DesignApp, ui: &mut egui::Ui) {
     let vid = egui::Id::unique("dtd_problems");
     let mut problems: Option<Vec<String>> = ui.data(|d| d.get_temp(vid));
     ui.horizontal(|ui| {
-        if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Load DTD…"))).clicked()
+        if ui.button(crate::i18n::tr(&app.ui.language, "Load DTD…")).clicked()
             && let Some(path) = app.services.pick_open.as_mut().and_then(|f| f("dtd"))
         {
             match app.run("xml.loadDtd", json!({"path": path})) {
@@ -239,7 +218,7 @@ pub fn tags(app: &mut DesignApp, ui: &mut egui::Ui) {
             }
         }
         let has_dtd = info["dtd"].as_bool().unwrap_or(false);
-        if ui.add_enabled(has_dtd, egui::Button::new(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Validate")))).clicked()
+        if ui.add_enabled(has_dtd, egui::Button::new(crate::i18n::tr(&app.ui.language, "Validate"))).clicked()
             && let Ok(v) = app.session.execute("xml.validate", &json!({}))
         {
             problems = Some(
@@ -251,18 +230,18 @@ pub fn tags(app: &mut DesignApp, ui: &mut egui::Ui) {
                     .collect(),
             );
         }
-        if has_dtd && ui.small_button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Delete DTD"))).clicked() {
+        if has_dtd && ui.small_button(crate::i18n::tr(&app.ui.language, "Delete DTD")).clicked() {
             let _ = app.run("xml.deleteDtd", json!({}));
             problems = None;
         }
     });
     match &problems {
         Some(list) if list.is_empty() => {
-            crate::rtl::label(ui, egui::RichText::new(crate::i18n::tr(&app.ui.language, "The structure is valid.")).size(11.0).color(t.text_dim));
+            ui.label(egui::RichText::new(crate::i18n::tr(&app.ui.language, "The structure is valid.")).size(11.0).color(t.text_dim));
         }
         Some(list) => {
             for p in list {
-                crate::rtl::label(ui, egui::RichText::new(format!("⚠ {p}")).size(11.0));
+                ui.label(egui::RichText::new(format!("⚠ {p}")).size(11.0));
             }
         }
         None => {}
@@ -277,10 +256,10 @@ pub fn tags(app: &mut DesignApp, ui: &mut egui::Ui) {
     });
     ui.separator();
     ui.horizontal(|ui| {
-        if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Export XML…"))).clicked() {
+        if ui.button(crate::i18n::tr(&app.ui.language, "Export XML…")).clicked() {
             let _ = app.run("app.exportXml", json!({}));
         }
-        if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Import XML…"))).clicked()
+        if ui.button(crate::i18n::tr(&app.ui.language, "Import XML…")).clicked()
             && let Some(path) = app.services.pick_open.as_mut().and_then(|f| f("xml"))
             && let Err(e) = app.run("file.importXml", json!({"path": path}))
         {
@@ -296,21 +275,12 @@ pub fn states(app: &mut DesignApp, ui: &mut egui::Ui) {
     let info = app.session.execute("states.list", &json!({})).ok();
     let list = info.as_ref().and_then(|i| i["states"].as_array().cloned()).unwrap_or_default();
     if list.is_empty() {
-        crate::rtl::label(
-            ui,
-            crate::rtl::widget(
-                ui,
-                egui::RichText::new(crate::i18n::tr(&app.ui.language, "Select two or more objects (or a group) to make a multi-state object."))
-                    .size(11.0)
-                    .color(t.text_dim),
-            ),
+        ui.label(
+            egui::RichText::new(crate::i18n::tr(&app.ui.language, "Select two or more objects (or a group) to make a multi-state object."))
+                .size(11.0)
+                .color(t.text_dim),
         );
-        if ui
-            .add_enabled(
-                n > 0,
-                egui::Button::new(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Convert Selection to Multi-State Object"))),
-            )
-            .clicked()
+        if ui.add_enabled(n > 0, egui::Button::new(crate::i18n::tr(&app.ui.language, "Convert Selection to Multi-State Object"))).clicked()
             && let Err(e) = app.run("states.create", json!({}))
         {
             app.status_error("Object States", e);
@@ -324,7 +294,7 @@ pub fn states(app: &mut DesignApp, ui: &mut egui::Ui) {
         }
     }
     ui.separator();
-    if ui.small_button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Release to Objects"))).clicked() {
+    if ui.small_button(crate::i18n::tr(&app.ui.language, "Release to Objects")).clicked() {
         let _ = app.run("states.release", json!({}));
     }
 }
@@ -333,13 +303,7 @@ pub fn states(app: &mut DesignApp, ui: &mut egui::Ui) {
 pub fn buttons(app: &mut DesignApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     let Some(id) = app.session.active().and_then(|d| d.selection.items.first().copied()) else {
-        crate::rtl::label(
-            ui,
-            crate::rtl::widget(
-                ui,
-                egui::RichText::new(crate::i18n::tr(&app.ui.language, "Select an object to make it a button.")).size(11.0).color(t.text_dim),
-            ),
-        );
+        ui.label(egui::RichText::new(crate::i18n::tr(&app.ui.language, "Select an object to make it a button.")).size(11.0).color(t.text_dim));
         return;
     };
     let cur = app.session.active().and_then(|d| d.doc.item(id)).and_then(|it| it.button.clone());
@@ -364,12 +328,12 @@ pub fn buttons(app: &mut DesignApp, ui: &mut egui::Ui) {
     ];
     let mut pick = None;
     ui.horizontal(|ui| {
-        crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "On Release"));
+        ui.label(crate::i18n::tr(&app.ui.language, "On Release"));
         egui::ComboBox::from_id_salt("button_action")
-            .selected_text(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, labels.iter().find(|l| l.0 == kind).map_or("", |l| l.1))))
+            .selected_text(crate::i18n::tr(&app.ui.language, labels.iter().find(|l| l.0 == kind).map_or("", |l| l.1)))
             .show_ui(ui, |ui| {
                 for (k, l) in labels {
-                    if ui.selectable_label(k == kind, crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, l))).clicked() {
+                    if ui.selectable_label(k == kind, crate::i18n::tr(&app.ui.language, l)).clicked() {
                         pick = Some(k);
                     }
                 }
@@ -383,7 +347,7 @@ pub fn buttons(app: &mut DesignApp, ui: &mut egui::Ui) {
         let total = app.session.active().map_or(1, |d| d.doc.page_count());
         let mut n = page + 1;
         ui.horizontal(|ui| {
-            crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Page"));
+            ui.label(crate::i18n::tr(&app.ui.language, "Page"));
             if ui.add(egui::DragValue::new(&mut n).range(1..=total)).changed() {
                 params = Some(json!({"action": "page", "page": n - 1}));
             }
@@ -403,13 +367,7 @@ pub fn buttons(app: &mut DesignApp, ui: &mut egui::Ui) {
     {
         app.status_error("Buttons", e);
     }
-    crate::rtl::label(
-        ui,
-        crate::rtl::widget(
-            ui,
-            egui::RichText::new(crate::i18n::tr(&app.ui.language, "Buttons act in interactive PDF export.")).size(10.5).color(t.text_dim),
-        ),
-    );
+    ui.label(egui::RichText::new(crate::i18n::tr(&app.ui.language, "Buttons act in interactive PDF export.")).size(10.5).color(t.text_dim));
     // Form field.
     ui.separator();
     let ff = app.session.active().and_then(|d| d.doc.item(id)).and_then(|it| it.form_field.clone());
@@ -424,12 +382,12 @@ pub fn buttons(app: &mut DesignApp, ui: &mut egui::Ui) {
     ];
     let cur = ff.as_ref().map(|f| f.kind);
     ui.horizontal(|ui| {
-        crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Form Field"));
+        ui.label(crate::i18n::tr(&app.ui.language, "Form Field"));
         egui::ComboBox::from_id_salt("form_kind")
-            .selected_text(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, kinds.iter().find(|k| k.0 == cur).map_or("", |k| k.1))))
+            .selected_text(crate::i18n::tr(&app.ui.language, kinds.iter().find(|k| k.0 == cur).map_or("", |k| k.1)))
             .show_ui(ui, |ui| {
                 for (k, l) in kinds {
-                    if ui.selectable_label(k == cur, crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, l))).clicked() {
+                    if ui.selectable_label(k == cur, crate::i18n::tr(&app.ui.language, l)).clicked() {
                         let _ = match k {
                             Some(k) => app.run("form.set", json!({"kind": k})),
                             None => app.run("form.clear", json!({})),
@@ -444,38 +402,38 @@ pub fn buttons(app: &mut DesignApp, ui: &mut egui::Ui) {
             ui.data(|d| d.get_temp(key)).unwrap_or((f.name.clone(), f.value.clone(), f.options.join(", ")));
         let mut commit = false;
         ui.horizontal(|ui| {
-            crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Name"));
+            ui.label(crate::i18n::tr(&app.ui.language, "Name"));
             commit |= ui.text_edit_singleline(&mut name).lost_focus();
         });
         if f.kind == K::CheckBox {
             let mut on = !f.value.is_empty() && f.value != "Off";
-            if ui.checkbox(&mut on, crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Checked by default"))).changed() {
+            if ui.checkbox(&mut on, crate::i18n::tr(&app.ui.language, "Checked by default")).changed() {
                 let _ = app.run("form.set", json!({"kind": f.kind, "value": if on { "On" } else { "" }}));
             }
         } else if f.kind != K::Signature {
             ui.horizontal(|ui| {
-                crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Default"));
+                ui.label(crate::i18n::tr(&app.ui.language, "Default"));
                 commit |= ui.text_edit_singleline(&mut value).lost_focus();
             });
         }
         if matches!(f.kind, K::ComboBox | K::ListBox) {
             ui.horizontal(|ui| {
-                crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Choices"));
+                ui.label(crate::i18n::tr(&app.ui.language, "Choices"));
                 commit |= ui
                     .text_edit_singleline(&mut opts)
                     .on_hover_ui(|ui| {
-                        crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Separated by commas"));
+                        ui.label(crate::i18n::tr(&app.ui.language, "Separated by commas"));
                     })
                     .lost_focus();
             });
         }
         let mut req = f.required;
-        if ui.checkbox(&mut req, crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Required"))).changed() {
+        if ui.checkbox(&mut req, crate::i18n::tr(&app.ui.language, "Required")).changed() {
             let _ = app.run("form.set", json!({"kind": f.kind, "required": req}));
         }
         if f.kind == K::TextField {
             let mut ml = f.multiline;
-            if ui.checkbox(&mut ml, crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Multiline"))).changed() {
+            if ui.checkbox(&mut ml, crate::i18n::tr(&app.ui.language, "Multiline")).changed() {
                 let _ = app.run("form.set", json!({"kind": f.kind, "multiline": ml}));
             }
         }
@@ -525,7 +483,7 @@ pub fn liquid(app: &mut DesignApp, ui: &mut egui::Ui) {
     let lang = app.ui.language.clone();
     // The Page tool's page, the page in view, or (before the canvas lays out) the first.
     let Some(page) = app.session.active().map(|s| s.selection.page.or_else(|| crate::canvas::current_page(app)).unwrap_or(0)) else {
-        crate::rtl::label(ui, egui::RichText::new(crate::i18n::tr(&lang, "No document.")).size(11.0).color(t.text_dim));
+        ui.label(egui::RichText::new(crate::i18n::tr(&lang, "No document.")).size(11.0).color(t.text_dim));
         return;
     };
     let Some(d) = app.session.active().map(|d| d.doc.clone()) else { return };
@@ -537,16 +495,13 @@ pub fn liquid(app: &mut DesignApp, ui: &mut egui::Ui) {
             crate::widgets::caption(ui, &format!("{} {}", crate::i18n::tr(&lang, "Page:"), d.page_name(page)));
         });
     });
-    egui::ComboBox::from_id_salt("liquid_rule")
-        .selected_text(crate::rtl::widget(ui, crate::i18n::tr(&lang, liquid_rule_label(pg.liquid))))
-        .width(190.0)
-        .show_ui(ui, |ui| {
-            for (r, label) in LIQUID_RULES {
-                if ui.selectable_label(pg.liquid == r, crate::rtl::widget(ui, crate::i18n::tr(&lang, label))).clicked() && r != pg.liquid {
-                    let _ = app.run("liquid.pageRule", json!({"rule": r, "pages": [page + 1]}));
-                }
+    egui::ComboBox::from_id_salt("liquid_rule").selected_text(crate::i18n::tr(&lang, liquid_rule_label(pg.liquid))).width(190.0).show_ui(ui, |ui| {
+        for (r, label) in LIQUID_RULES {
+            if ui.selectable_label(pg.liquid == r, crate::i18n::tr(&lang, label)).clicked() && r != pg.liquid {
+                let _ = app.run("liquid.pageRule", json!({"rule": r, "pages": [page + 1]}));
             }
-        });
+        }
+    });
     ui.separator();
     // The selected object (one on this page).
     let item = app
@@ -560,7 +515,7 @@ pub fn liquid(app: &mut DesignApp, ui: &mut egui::Ui) {
     let graphic = item.and_then(|it| if let designcraft_doc::Content::Graphic(g) = &it.content { Some(g.auto_fit) } else { None });
     let mut auto = graphic.is_some_and(|f| f != designcraft_doc::Fitting::None);
     ui.indent("liquid_content", |ui| {
-        let r = ui.add_enabled(graphic.is_some(), egui::Checkbox::new(&mut auto, crate::rtl::widget(ui, crate::i18n::tr(&lang, "Auto-Fit"))));
+        let r = ui.add_enabled(graphic.is_some(), egui::Checkbox::new(&mut auto, crate::i18n::tr(&lang, "Auto-Fit")));
         if r.changed() {
             let _ = app.run("object.fittingOptions", json!({"autoFit": auto}));
         }
@@ -588,7 +543,7 @@ pub fn liquid(app: &mut DesignApp, ui: &mut egui::Ui) {
                     for row in grid_boxes {
                         for (label, key, value) in row {
                             let mut v = value;
-                            if ui.checkbox(&mut v, crate::rtl::widget(ui, crate::i18n::tr(&lang, label))).changed() {
+                            if ui.checkbox(&mut v, crate::i18n::tr(&lang, label)).changed() {
                                 let _ = app.run("liquid.object", json!({key: v}));
                             }
                         }
@@ -600,7 +555,7 @@ pub fn liquid(app: &mut DesignApp, ui: &mut egui::Ui) {
     });
     if !pg.guides.is_empty() {
         ui.separator();
-        crate::rtl::label(ui, egui::RichText::new(crate::i18n::tr(&lang, "Liquid guides")).size(11.0).color(t.text_dim));
+        ui.label(egui::RichText::new(crate::i18n::tr(&lang, "Liquid guides")).size(11.0).color(t.text_dim));
         for (gi, g) in pg.guides.iter().enumerate() {
             let mut on = g.liquid;
             let label = format!("{:?} at {:.1}", g.orientation, g.position);
@@ -615,44 +570,34 @@ pub fn liquid(app: &mut DesignApp, ui: &mut egui::Ui) {
 pub fn media(app: &mut DesignApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     let Ok(m) = app.session.execute("media.get", &json!({})) else {
-        crate::rtl::label(
-            ui,
-            crate::rtl::widget(
-                ui,
-                egui::RichText::new(crate::i18n::tr(&app.ui.language, "Select a placed video or sound (File › Place a .mp4, .mov, .mp3, .wav …)."))
-                    .size(11.0)
-                    .color(t.text_dim),
-            ),
+        ui.label(
+            egui::RichText::new(crate::i18n::tr(&app.ui.language, "Select a placed video or sound (File › Place a .mp4, .mov, .mp3, .wav …)."))
+                .size(11.0)
+                .color(t.text_dim),
         );
         return;
     };
-    crate::rtl::label(ui, egui::RichText::new(format!("{} — {}", m["kind"].as_str().unwrap_or(""), m["name"].as_str().unwrap_or(""))).strong());
+    ui.label(egui::RichText::new(format!("{} — {}", m["kind"].as_str().unwrap_or(""), m["name"].as_str().unwrap_or(""))).strong());
     for (key, label) in [("playOnPageLoad", "Play on Page Load"), ("loop", "Loop"), ("controls", "Show Controls")] {
         let mut on = m[key].as_bool().unwrap_or(false);
-        if ui.checkbox(&mut on, crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, label))).changed() {
+        if ui.checkbox(&mut on, crate::i18n::tr(&app.ui.language, label)).changed() {
             let _ = app.run("media.options", json!({key: on}));
         }
     }
     ui.horizontal(|ui| {
-        crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Poster"));
-        if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Choose Image…"))).clicked()
+        ui.label(crate::i18n::tr(&app.ui.language, "Poster"));
+        if ui.button(crate::i18n::tr(&app.ui.language, "Choose Image…")).clicked()
             && let Some(path) = app.services.pick_open.as_mut().and_then(|f| f("place"))
             && let Err(e) = app.run("media.options", json!({"poster": {"path": path}}))
         {
             app.status_error("Media", e);
         }
-        if !m["poster"].is_null() && ui.small_button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "None"))).clicked() {
+        if !m["poster"].is_null() && ui.small_button(crate::i18n::tr(&app.ui.language, "None")).clicked() {
             let _ = app.run("media.options", json!({"poster": null}));
         }
     });
-    crate::rtl::label(
-        ui,
-        crate::rtl::widget(
-            ui,
-            egui::RichText::new(crate::i18n::tr(&app.ui.language, "Plays in EPUB export; print and PDF show the poster."))
-                .size(10.5)
-                .color(t.text_dim),
-        ),
+    ui.label(
+        egui::RichText::new(crate::i18n::tr(&app.ui.language, "Plays in EPUB export; print and PDF show the poster.")).size(10.5).color(t.text_dim),
     );
 }
 
@@ -664,31 +609,28 @@ pub fn transitions(app: &mut DesignApp, ui: &mut egui::Ui) {
     let Some((si, _)) = d.page_loc(page) else { return };
     let cur = d.spreads[si].pages.first().and_then(|p| p.transition);
     use designcraft_doc::TransitionKind as K;
-    crate::rtl::label(ui, egui::RichText::new(format!("{} {}", crate::i18n::tr(&app.ui.language, "Spread"), si + 1)).strong());
+    ui.label(egui::RichText::new(format!("{} {}", crate::i18n::tr(&app.ui.language, "Spread"), si + 1)).strong());
     let mut kind = cur.map(|c| c.kind);
-    egui::ComboBox::from_id_salt("transition_kind")
-        .selected_text(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, kind.map_or("None", K::label))))
-        .show_ui(ui, |ui| {
-            ui.selectable_value(&mut kind, None, crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "None")));
+    egui::ComboBox::from_id_salt("transition_kind").selected_text(crate::i18n::tr(&app.ui.language, kind.map_or("None", K::label))).show_ui(
+        ui,
+        |ui| {
+            ui.selectable_value(&mut kind, None, crate::i18n::tr(&app.ui.language, "None"));
             for k in K::ALL {
-                ui.selectable_value(&mut kind, Some(k), crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, k.label())));
+                ui.selectable_value(&mut kind, Some(k), crate::i18n::tr(&app.ui.language, k.label()));
             }
-        });
+        },
+    );
     let mut duration = cur.map_or(1.0, |c| c.duration);
     let mut horizontal = cur.is_some_and(|c| c.horizontal);
     let mut changed = kind != cur.map(|c| c.kind);
     if kind.is_some() {
         ui.horizontal(|ui| {
-            crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Speed"));
+            ui.label(crate::i18n::tr(&app.ui.language, "Speed"));
             changed |= ui.add(egui::DragValue::new(&mut duration).range(0.1..=10.0).speed(0.1).suffix(" s")).changed();
         });
         if matches!(kind, Some(K::Blinds | K::Box | K::Split)) {
-            changed |= ui
-                .checkbox(
-                    &mut horizontal,
-                    crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, if kind == Some(K::Box) { "Inward" } else { "Horizontal" })),
-                )
-                .changed();
+            changed |=
+                ui.checkbox(&mut horizontal, crate::i18n::tr(&app.ui.language, if kind == Some(K::Box) { "Inward" } else { "Horizontal" })).changed();
         }
     }
     let params = |all: bool| {
@@ -702,17 +644,13 @@ pub fn transitions(app: &mut DesignApp, ui: &mut egui::Ui) {
     if changed {
         let _ = app.run("page.transition", params(false));
     }
-    if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Apply to All Spreads"))).clicked() {
+    if ui.button(crate::i18n::tr(&app.ui.language, "Apply to All Spreads")).clicked() {
         let _ = app.run("page.transition", params(true));
     }
-    crate::rtl::label(
-        ui,
-        crate::rtl::widget(
-            ui,
-            egui::RichText::new(crate::i18n::tr(&app.ui.language, "Transitions play in interactive PDF (full-screen mode)."))
-                .size(10.5)
-                .color(t.text_dim),
-        ),
+    ui.label(
+        egui::RichText::new(crate::i18n::tr(&app.ui.language, "Transitions play in interactive PDF (full-screen mode)."))
+            .size(10.5)
+            .color(t.text_dim),
     );
 }
 
@@ -721,13 +659,13 @@ pub fn track_changes(app: &mut DesignApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     let Some(on) = app.session.active().map(|d| d.doc.settings.track_changes) else { return };
     let mut track = on;
-    if ui.checkbox(&mut track, crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Track Changes in All Stories"))).changed() {
+    if ui.checkbox(&mut track, crate::i18n::tr(&app.ui.language, "Track Changes in All Stories")).changed() {
         let _ = app.run("changes.track", json!({"on": track}));
     }
     let list = app.session.execute("changes.list", &json!({})).ok().and_then(|v| v.as_array().cloned()).unwrap_or_default();
     ui.separator();
     if list.is_empty() {
-        crate::rtl::label(ui, egui::RichText::new(crate::i18n::tr(&app.ui.language, "No changes.")).size(11.0).color(t.text_dim));
+        ui.label(egui::RichText::new(crate::i18n::tr(&app.ui.language, "No changes.")).size(11.0).color(t.text_dim));
         return;
     }
     egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
@@ -746,7 +684,7 @@ pub fn track_changes(app: &mut DesignApp, ui: &mut egui::Ui) {
                 if ui
                     .selectable_label(false, label)
                     .on_hover_ui(|ui| {
-                        crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Show in the text"));
+                        ui.label(crate::i18n::tr(&app.ui.language, "Show in the text"));
                     })
                     .clicked()
                 {
@@ -754,10 +692,10 @@ pub fn track_changes(app: &mut DesignApp, ui: &mut egui::Ui) {
                     let _ = app.run("text.select", json!({"story": story, "anchor": start, "focus": end}));
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.small_button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Reject"))).clicked() {
+                    if ui.small_button(crate::i18n::tr(&app.ui.language, "Reject")).clicked() {
                         let _ = app.run("changes.reject", json!({"story": story, "start": start}));
                     }
-                    if ui.small_button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Accept"))).clicked() {
+                    if ui.small_button(crate::i18n::tr(&app.ui.language, "Accept")).clicked() {
                         let _ = app.run("changes.accept", json!({"story": story, "start": start}));
                     }
                 });
@@ -766,10 +704,10 @@ pub fn track_changes(app: &mut DesignApp, ui: &mut egui::Ui) {
     });
     ui.separator();
     ui.horizontal(|ui| {
-        if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Accept All"))).clicked() {
+        if ui.button(crate::i18n::tr(&app.ui.language, "Accept All")).clicked() {
             let _ = app.run("changes.acceptAll", json!({}));
         }
-        if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Reject All"))).clicked() {
+        if ui.button(crate::i18n::tr(&app.ui.language, "Reject All")).clicked() {
             let _ = app.run("changes.rejectAll", json!({}));
         }
     });

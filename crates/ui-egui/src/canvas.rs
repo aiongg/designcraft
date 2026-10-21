@@ -2076,7 +2076,7 @@ fn ruler_units_menu(app: &mut DesignApp, ui: &mut egui::Ui, which: RulerMenu, cu
     let tr = |s: &str| crate::i18n::tr(&lang, s).to_string();
     if which == RulerMenu::Both {
         let label = tr(if locked { "Unlock Zero Point" } else { "Lock Zero Point" });
-        if ui.button(crate::rtl::widget(ui, format!("   {label}"))).clicked() {
+        if ui.button(format!("   {label}")).clicked() {
             let _ = app.run("view.lockZeroPoint", json!({"on": !locked}));
             ui.close();
         }
@@ -2087,7 +2087,7 @@ fn ruler_units_menu(app: &mut DesignApp, ui: &mut egui::Ui, which: RulerMenu, cu
     for u in RULER_UNITS.into_iter().chain(extra) {
         let label = tr(u.label());
         let text = if Some(u) == cur { format!("✓ {label}") } else { format!("   {label}") };
-        if ui.button(crate::rtl::widget(ui, text)).clicked() {
+        if ui.button(text).clicked() {
             let p = match which {
                 RulerMenu::Horizontal => json!({"horizontalUnits": u}),
                 RulerMenu::Vertical => json!({"verticalUnits": u}),
@@ -2099,14 +2099,11 @@ fn ruler_units_menu(app: &mut DesignApp, ui: &mut egui::Ui, which: RulerMenu, cu
     }
     ui.separator();
     let hide = format!("   {}", tr("Hide Rulers"));
-    if ui
-        .add(egui::Button::new(crate::rtl::widget(ui, hide)).shortcut_text(crate::menus::shortcut_of(app, "view.rulers").unwrap_or_default()))
-        .clicked()
-    {
+    if ui.add(egui::Button::new(hide).shortcut_text(crate::menus::shortcut_of(app, "view.rulers").unwrap_or_default())).clicked() {
         let _ = app.run("view.rulers", json!({}));
         ui.close();
     }
-    if which == RulerMenu::Horizontal && ui.button(crate::rtl::widget(ui, format!("   {}", tr("Delete All Guides on Spread")))).clicked() {
+    if which == RulerMenu::Horizontal && ui.button(format!("   {}", tr("Delete All Guides on Spread"))).clicked() {
         crate::menus::activate(app, "app.deleteAllGuides", &Value::Null);
         ui.close();
     }

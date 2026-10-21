@@ -628,16 +628,16 @@ pub(crate) fn panel_menu(app: &mut DesignApp, ui: &mut egui::Ui, panel: &str) {
     tab_commands(app, ui, panel);
     ui.separator();
     let language = app.ui.language.clone();
-    if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&language, "Float Panel"))).clicked() {
+    if ui.button(crate::i18n::tr(&language, "Float Panel")).clicked() {
         if let Err(error) = app.run("window.panel.float", json!({"panel": panel})) {
             app.status(error);
         }
         ui.close();
     }
-    ui.menu_button(crate::rtl::widget(ui, crate::i18n::tr(&language, "Group with")), |ui| {
+    ui.menu_button(crate::i18n::tr(&language, "Group with"), |ui| {
         egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
             for (anchor, label, _) in crate::dock::DOCK_TABS.iter().chain(crate::dock::ICON_PANELS) {
-                if *anchor != panel && ui.button(crate::rtl::widget(ui, crate::i18n::tr(&language, label))).clicked() {
+                if *anchor != panel && ui.button(crate::i18n::tr(&language, label)).clicked() {
                     // A closed icon panel is made visible before becoming the destination.
                     let result = app
                         .run("window.panel.activate", json!({"panel": anchor}))
@@ -683,10 +683,10 @@ impl craft_ui::docking::DockContent<String> for PanelContent<'_> {
         }
     }
     fn label(&mut self, ui: &egui::Ui, _: &String, logical: &str, font: &egui::FontId, color: egui::Color32) -> egui::WidgetText {
-        egui::WidgetText::Galley(crate::rtl::plain(ui.ctx(), logical, font.clone(), color))
+        ui.painter().layout_no_wrap(logical.to_owned(), font.clone(), color).into()
     }
     fn action_label(&mut self, ui: &egui::Ui, logical: &str, font: &egui::FontId, color: egui::Color32) -> egui::WidgetText {
-        egui::WidgetText::Galley(crate::rtl::plain(ui.ctx(), logical, font.clone(), color))
+        ui.painter().layout_no_wrap(logical.to_owned(), font.clone(), color).into()
     }
 }
 
@@ -713,19 +713,19 @@ fn tab_commands(app: &mut DesignApp, ui: &mut egui::Ui, panel: &'static str) {
         }
         ui.close();
     };
-    if ui.button(crate::rtl::widget(ui, tr("Close"))).clicked() {
+    if ui.button(tr("Close")).clicked() {
         run(app, ui, "window.panel.close", json!({"panel": panel}));
     }
-    if ui.button(crate::rtl::widget(ui, tr("Close Tab Group"))).clicked() {
+    if ui.button(tr("Close Tab Group")).clicked() {
         run(app, ui, "window.panel.closeGroup", json!({"panel": panel}));
     }
     let layout = app.ui.docking.clone().unwrap_or_else(|| legacy(app));
     let minimizable = open_in_stack(&layout, panel);
-    if ui.add_enabled(minimizable, egui::Button::new(crate::rtl::widget(ui, tr("Minimize")))).clicked() {
+    if ui.add_enabled(minimizable, egui::Button::new(tr("Minimize"))).clicked() {
         run(app, ui, "window.panel.layout", json!({"action": {"SetStackOpen": {"panel": panel, "open": false}}}));
     }
     ui.separator();
-    if ui.add_enabled(app.ui.dock_expanded, egui::Button::new(crate::rtl::widget(ui, tr("Collapse to Icons")))).clicked() {
+    if ui.add_enabled(app.ui.dock_expanded, egui::Button::new(tr("Collapse to Icons"))).clicked() {
         run(app, ui, "window.collapseToIcons", json!({}));
     }
 }

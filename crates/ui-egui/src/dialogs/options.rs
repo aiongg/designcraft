@@ -91,7 +91,7 @@ fn color_json(c: Color) -> Value {
 }
 
 fn caption(ui: &mut egui::Ui, lang: &str, s: &str) {
-    crate::rtl::label(ui, tr(lang, s));
+    ui.label(tr(lang, s));
 }
 
 fn channel(ui: &mut egui::Ui, d: &mut Dialog, key: &str, label: &str, max: f64, suffix: &str) {
@@ -126,10 +126,10 @@ pub fn swatch_options(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
                     caption(ui, lang, "Color Type:");
                     let cur = d.s("colorType");
                     egui::ComboBox::from_id_salt("swatch_color_type")
-                        .selected_text(crate::rtl::widget(ui, tr(lang, if cur == "spot" { "Spot" } else { "Process" })))
+                        .selected_text(tr(lang, if cur == "spot" { "Spot" } else { "Process" }))
                         .show_ui(ui, |ui| {
                             for (v, l) in [("process", "Process"), ("spot", "Spot")] {
-                                if ui.selectable_label(cur == v, crate::rtl::widget(ui, tr(lang, l))).clicked() {
+                                if ui.selectable_label(cur == v, tr(lang, l)).clicked() {
                                     d.fields.insert("colorType".into(), json!(v));
                                 }
                             }
@@ -143,9 +143,9 @@ pub fn swatch_options(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
                     "gray" => "Gray",
                     _ => "CMYK",
                 };
-                egui::ComboBox::from_id_salt("swatch_color_mode").selected_text(crate::rtl::widget(ui, tr(lang, label(&cur)))).show_ui(ui, |ui| {
+                egui::ComboBox::from_id_salt("swatch_color_mode").selected_text(tr(lang, label(&cur))).show_ui(ui, |ui| {
                     for m in ["cmyk", "rgb", "gray"] {
-                        if ui.selectable_label(cur == m, crate::rtl::widget(ui, tr(lang, label(m)))).clicked()
+                        if ui.selectable_label(cur == m, tr(lang, label(m))).clicked()
                             && cur != m
                             && let Some(c) = dialog_color(&d.fields)
                         {
@@ -199,7 +199,7 @@ fn status(ui: &mut egui::Ui, d: &Dialog) {
     let s = d.s("status");
     if !s.is_empty() {
         ui.add_space(6.0);
-        crate::rtl::label(ui, egui::RichText::new(s).color(crate::theme::Tokens::get(ui.ctx()).text_strong));
+        ui.label(egui::RichText::new(s).color(crate::theme::Tokens::get(ui.ctx()).text_strong));
     }
 }
 
@@ -273,20 +273,17 @@ pub fn layer_options(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
         ui.end_row();
         caption(ui, lang, "Color:");
         ui.horizontal(|ui| {
-            egui::ComboBox::from_id_salt("layer_color")
-                .selected_text(crate::rtl::widget(ui, tr(lang, named.unwrap_or("Custom"))))
-                .width(140.0)
-                .show_ui(ui, |ui| {
-                    for (n, c) in designcraft_doc::LAYER_COLORS {
-                        let swatch = egui::RichText::new("■ ").color(egui::Color32::from_rgb(c[0], c[1], c[2]));
-                        let mut job = egui::text::LayoutJob::default();
-                        swatch.append_to(&mut job, ui.style(), egui::FontSelection::Default, egui::Align::Center);
-                        egui::RichText::new(tr(lang, n)).append_to(&mut job, ui.style(), egui::FontSelection::Default, egui::Align::Center);
-                        if ui.selectable_label(named == Some(*n), job).clicked() {
-                            d.fields.insert("rgb".into(), json!(c));
-                        }
+            egui::ComboBox::from_id_salt("layer_color").selected_text(tr(lang, named.unwrap_or("Custom"))).width(140.0).show_ui(ui, |ui| {
+                for (n, c) in designcraft_doc::LAYER_COLORS {
+                    let swatch = egui::RichText::new("■ ").color(egui::Color32::from_rgb(c[0], c[1], c[2]));
+                    let mut job = egui::text::LayoutJob::default();
+                    swatch.append_to(&mut job, ui.style(), egui::FontSelection::Default, egui::Align::Center);
+                    egui::RichText::new(tr(lang, n)).append_to(&mut job, ui.style(), egui::FontSelection::Default, egui::Align::Center);
+                    if ui.selectable_label(named == Some(*n), job).clicked() {
+                        d.fields.insert("rgb".into(), json!(c));
                     }
-                });
+                }
+            });
             super::color_field(ui, d, "rgb");
         });
         ui.end_row();

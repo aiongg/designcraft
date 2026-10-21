@@ -91,7 +91,7 @@ fn caption(ui: &mut Ui, rtl: bool, text: &str) {
     let layout = if rtl { Layout::left_to_right(Align::Center) } else { Layout::right_to_left(Align::Center) };
     ui.allocate_ui_with_layout(vec2(LABEL_W, 22.0), layout, |ui| {
         ui.set_width(LABEL_W);
-        crate::rtl::label(ui, text);
+        ui.label(text);
     });
 }
 
@@ -116,7 +116,7 @@ fn style_menu(ui: &mut Ui, d: &mut Dialog, key: &str) {
 
 fn checkbox(ui: &mut Ui, d: &mut Dialog, key: &str, label: &str) {
     let mut on = d.b(key);
-    if ui.checkbox(&mut on, crate::rtl::widget(ui, label)).changed() {
+    if ui.checkbox(&mut on, label).changed() {
         d.fields.insert(key.into(), json!(on));
     }
 }
@@ -126,7 +126,7 @@ fn group(ui: &mut Ui, rtl: bool, title: &str, add: impl FnOnce(&mut Ui)) {
     let t = Tokens::get(ui.ctx());
     row(ui, rtl, |ui| {
         ui.add_space(6.0);
-        crate::rtl::label(ui, egui::RichText::new(title).color(t.text_strong));
+        ui.label(egui::RichText::new(title).color(t.text_strong));
     });
     egui::Frame::NONE.stroke(egui::Stroke::new(1.0, t.divider)).corner_radius(3.0).inner_margin(egui::Margin::symmetric(10, 8)).show(ui, |ui| {
         ui.set_width(ui.available_width());
@@ -152,12 +152,12 @@ pub(crate) fn body(app: &DesignApp, ui: &mut Ui, d: &mut Dialog) {
         egui::Frame::NONE.inner_margin(egui::Margin { left: start, right: end, top: 0, bottom: 0 }).show(ui, |ui| {
             let automatic = d.b("automatic");
             row(ui, rtl, |ui| {
-                if ui.radio(automatic, crate::rtl::widget(ui, tr("Automatic Page Numbering"))).clicked() {
+                if ui.radio(automatic, tr("Automatic Page Numbering")).clicked() {
                     d.fields.insert("automatic".into(), json!(true));
                 }
             });
             row(ui, rtl, |ui| {
-                if ui.radio(!automatic, crate::rtl::widget(ui, tr("Start Page Numbering at:"))).clicked() {
+                if ui.radio(!automatic, tr("Start Page Numbering at:")).clicked() {
                     d.fields.insert("automatic".into(), json!(false));
                 }
                 ui.add_enabled_ui(!automatic, |ui| text(ui, d, "startNumber", FIELD_W));
@@ -185,7 +185,7 @@ pub(crate) fn body(app: &DesignApp, ui: &mut Ui, d: &mut Dialog) {
     let book = d.fields.get("book").and_then(Value::as_str).map(str::to_string);
     group(ui, rtl, tr("Document Chapter Numbering"), |ui| {
         row(ui, rtl, |ui| {
-            crate::rtl::label(ui, tr("Style:"));
+            ui.label(tr("Style:"));
             style_menu(ui, d, "chapterStyle");
         });
         for (value, label, enabled) in [
@@ -195,7 +195,7 @@ pub(crate) fn body(app: &DesignApp, ui: &mut Ui, d: &mut Dialog) {
         ] {
             row(ui, rtl, |ui| {
                 ui.add_enabled_ui(enabled, |ui| {
-                    if ui.radio(source == value, crate::rtl::widget(ui, tr(label))).clicked() {
+                    if ui.radio(source == value, tr(label)).clicked() {
                         d.fields.insert("chapterSource".into(), json!(value));
                     }
                 });
@@ -205,8 +205,8 @@ pub(crate) fn body(app: &DesignApp, ui: &mut Ui, d: &mut Dialog) {
             });
         }
         row(ui, rtl, |ui| {
-            let name = book.as_deref().map_or_else(|| tr("N/A").to_string(), crate::rtl::isolate);
-            crate::rtl::label(ui, format!("{} {name}", tr("Book Name:")));
+            let name = book.as_deref().map_or_else(|| tr("N/A").to_string(), crate::i18n::isolate);
+            ui.label(format!("{} {name}", tr("Book Name:")));
         });
     });
 }
@@ -216,7 +216,7 @@ pub(crate) fn actions(app: &DesignApp, ui: &mut Ui) -> Option<bool> {
     let t = Tokens::get(ui.ctx());
     let size = vec2(ACTIONS_W - 8.0, 26.0);
     let mut out = None;
-    let ok = egui::Button::new(crate::rtl::widget(ui, egui::RichText::new(crate::i18n::tr(&app.ui.language, "OK")).color(egui::Color32::WHITE)))
+    let ok = egui::Button::new(egui::RichText::new(crate::i18n::tr(&app.ui.language, "OK")).color(egui::Color32::WHITE))
         .fill(t.accent_strong)
         .corner_radius(13.0)
         .min_size(size);
@@ -224,7 +224,7 @@ pub(crate) fn actions(app: &DesignApp, ui: &mut Ui) -> Option<bool> {
         out = Some(true);
     }
     ui.add_space(4.0);
-    if ui.add(egui::Button::new(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Cancel"))).corner_radius(13.0).min_size(size)).clicked() {
+    if ui.add(egui::Button::new(crate::i18n::tr(&app.ui.language, "Cancel")).corner_radius(13.0).min_size(size)).clicked() {
         out = Some(false);
     }
     out

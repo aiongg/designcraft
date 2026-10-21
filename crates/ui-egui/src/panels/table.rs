@@ -11,12 +11,9 @@ use crate::widgets::{caption, divider, measure, number};
 pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     let Ok(info) = app.session.execute("table.get", &json!({})) else {
-        ui.label(crate::rtl::widget(
-            ui,
-            egui::RichText::new(crate::i18n::tr(&app.ui.language, "Place the insertion point in a table, or create one.")).color(t.text_dim),
-        ));
+        ui.label(egui::RichText::new(crate::i18n::tr(&app.ui.language, "Place the insertion point in a table, or create one.")).color(t.text_dim));
         ui.add_space(6.0);
-        if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Create Table…"))).clicked() {
+        if ui.button(crate::i18n::tr(&app.ui.language, "Create Table…")).clicked() {
             let _ = app.run("app.insertTableDialog", json!({}));
         }
         return;
@@ -33,12 +30,12 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
     };
     ui.horizontal(|ui| {
         caption(ui, crate::i18n::tr(&app.ui.language, "Cell Type"));
-        if ui.small_button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Graphic…"))).clicked()
+        if ui.small_button(crate::i18n::tr(&app.ui.language, "Graphic…")).clicked()
             && let Err(e) = app.run("app.graphicCell", json!({}))
         {
             app.status_error("Table", e);
         }
-        if ui.small_button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Text"))).clicked() {
+        if ui.small_button(crate::i18n::tr(&app.ui.language, "Text")).clicked() {
             let _ = app.run("table.textCell", json!({}));
         }
     });
@@ -52,7 +49,7 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
             ("Col ←", "table.moveColumn", c0, c0.saturating_sub(1), c0 > 0),
             ("Col →", "table.moveColumn", c0, c0 + 1, c0 + 1 < nc),
         ] {
-            if ui.add_enabled(ok, egui::Button::new(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, label))).small()).clicked()
+            if ui.add_enabled(ok, egui::Button::new(crate::i18n::tr(&app.ui.language, label)).small()).clicked()
                 && let Err(e) = app.run(id, json!({"from": from, "to": to}))
             {
                 app.status_error("Table", e);
@@ -126,12 +123,11 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
         let exactly = row["mode"] == "exactly";
         caption(ui, crate::i18n::tr(&app.ui.language, "Row Height"));
         egui::ComboBox::from_id_salt("tp_rowmode")
-            .selected_text(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, if exactly { "Exactly" } else { "At Least" })))
+            .selected_text(crate::i18n::tr(&app.ui.language, if exactly { "Exactly" } else { "At Least" }))
             .width(70.0)
             .show_ui(ui, |ui| {
                 for (label, mode) in [("At Least", "atLeast"), ("Exactly", "exactly")] {
-                    if ui.selectable_label((mode == "exactly") == exactly, crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, label))).clicked()
-                    {
+                    if ui.selectable_label((mode == "exactly") == exactly, crate::i18n::tr(&app.ui.language, label)).clicked() {
                         run(app, "table.setRowHeight", json!({"mode": mode}));
                     }
                 }
@@ -148,7 +144,7 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
         ui.end_row();
     });
     if ui
-        .button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Distribute Rows Evenly")))
+        .button(crate::i18n::tr(&app.ui.language, "Distribute Rows Evenly"))
         .on_hover_text(crate::i18n::tr(&app.ui.language, "Equal fixed heights for the selected rows; cell text may become overset."))
         .clicked()
         && let Err(e) = app.run("table.distributeRows", json!({}))
@@ -159,7 +155,7 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
     caption(ui, crate::i18n::tr(&app.ui.language, "Cell Text"));
     ui.horizontal(|ui| {
         for (label, vj) in [("Top", "top"), ("Center", "center"), ("Bottom", "bottom"), ("Justify", "justify")] {
-            if ui.selectable_label(cell["vj"] == vj, crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, label))).clicked() {
+            if ui.selectable_label(cell["vj"] == vj, crate::i18n::tr(&app.ui.language, label)).clicked() {
                 run(app, "table.setCell", json!({"vj": vj}));
             }
         }
@@ -183,26 +179,26 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
     });
     divider(ui);
     ui.horizontal(|ui| {
-        if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Merge Cells"))).clicked() {
+        if ui.button(crate::i18n::tr(&app.ui.language, "Merge Cells")).clicked() {
             run(app, "table.merge", json!({}));
         }
-        if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Unmerge"))).clicked() {
+        if ui.button(crate::i18n::tr(&app.ui.language, "Unmerge")).clicked() {
             run(app, "table.unmerge", json!({}));
         }
     });
     ui.horizontal(|ui| {
-        if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Insert Row"))).clicked() {
+        if ui.button(crate::i18n::tr(&app.ui.language, "Insert Row")).clicked() {
             run(app, "table.insertRowBelow", json!({}));
         }
-        if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Insert Column"))).clicked() {
+        if ui.button(crate::i18n::tr(&app.ui.language, "Insert Column")).clicked() {
             run(app, "table.insertColumnRight", json!({}));
         }
     });
     ui.horizontal(|ui| {
-        if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Delete Row"))).clicked() {
+        if ui.button(crate::i18n::tr(&app.ui.language, "Delete Row")).clicked() {
             run(app, "table.deleteRow", json!({}));
         }
-        if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Delete Column"))).clicked() {
+        if ui.button(crate::i18n::tr(&app.ui.language, "Delete Column")).clicked() {
             run(app, "table.deleteColumn", json!({}));
         }
     });
@@ -212,18 +208,18 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         caption(ui, crate::i18n::tr(&app.ui.language, "Direction"));
         for (on, label, dir) in [(!rtl, "Left to Right", "leftToRight"), (rtl, "Right to Left", "rightToLeft")] {
-            if ui.selectable_label(on, crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, label))).clicked() && !on {
+            if ui.selectable_label(on, crate::i18n::tr(&app.ui.language, label)).clicked() && !on {
                 run(app, "table.options", json!({"direction": dir}));
             }
         }
     });
     let mut alt = !info["options"]["altRows"].is_null();
-    if ui.checkbox(&mut alt, crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Alternating Row Fills"))).changed() {
+    if ui.checkbox(&mut alt, crate::i18n::tr(&app.ui.language, "Alternating Row Fills")).changed() {
         let v = if alt { json!({"first": 1, "firstColor": "[Black]", "firstTint": 0.1, "next": 1, "nextColor": "[None]"}) } else { Value::Null };
         run(app, "table.options", json!({"altRows": v}));
     }
     let mut rep = info["options"]["repeatHeader"].as_bool().unwrap_or(true);
-    if ui.checkbox(&mut rep, crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Repeat Header Rows"))).changed() {
+    if ui.checkbox(&mut rep, crate::i18n::tr(&app.ui.language, "Repeat Header Rows")).changed() {
         run(app, "table.options", json!({"repeatHeader": rep}));
     }
     ui.horizontal(|ui| {

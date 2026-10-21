@@ -400,15 +400,8 @@ fn card(ui: &mut Ui, c: &Card, units: Unit, selected: bool) -> egui::Response {
     }
     let page = Rect::from_center_size(pos2(r.center().x, r.top() + 56.0), vec2(72.0, 72.0));
     paint_page(ui.painter(), page, &c.nd, c.custom, if selected { t.text_strong } else { t.icon });
-    crate::rtl::paint(ui.painter(), pos2(r.center().x, r.top() + 114.0), Align2::CENTER_CENTER, &c.label, semibold(12.0), t.text_strong);
-    crate::rtl::paint(
-        ui.painter(),
-        pos2(r.center().x, r.top() + 132.0),
-        Align2::CENTER_CENTER,
-        &size_text(&c.nd, units),
-        FontId::proportional(11.0),
-        t.text_dim,
-    );
+    ui.painter().text(pos2(r.center().x, r.top() + 114.0), Align2::CENTER_CENTER, &c.label, semibold(12.0), t.text_strong);
+    ui.painter().text(pos2(r.center().x, r.top() + 132.0), Align2::CENTER_CENTER, &size_text(&c.nd, units), FontId::proportional(11.0), t.text_dim);
     resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, selected, &c.label));
     resp
 }
@@ -440,7 +433,7 @@ fn tabs(app: &DesignApp, ui: &mut Ui, d: &mut Dialog) {
             }
             let anchor = if rtl { Align2::RIGHT_CENTER } else { Align2::LEFT_CENTER };
             let x = if rtl { start } else { start + icon_w };
-            crate::rtl::paint(ui.painter(), pos2(x, r.center().y - 1.0), anchor, text, font, color);
+            ui.painter().text(pos2(x, r.center().y - 1.0), anchor, text, font, color);
             if on {
                 ui.painter().rect_filled(
                     Rect::from_min_max(pos2(r.left() + 6.0, r.bottom() - 2.0), pos2(r.right() - 6.0, r.bottom())),
@@ -484,8 +477,7 @@ fn presets(app: &mut DesignApp, ui: &mut Ui, d: &mut Dialog) -> bool {
         _ => "Blank Document Presets",
     };
     row(ui, rtl, |ui| {
-        crate::rtl::label(
-            ui,
+        ui.label(
             egui::RichText::new(format!("{} ({})", crate::i18n::tr(&lang, heading).to_uppercase(), list.len()))
                 .font(semibold(11.5))
                 .color(t.text_dim),
@@ -509,7 +501,7 @@ fn presets(app: &mut DesignApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             }
             if tab == "saved" && c.key != DEFAULT_CARD {
                 resp.context_menu(|ui| {
-                    if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&lang, "Delete Preset"))).clicked() {
+                    if ui.button(crate::i18n::tr(&lang, "Delete Preset")).clicked() {
                         delete = Some(c.nd.title.clone());
                         ui.close();
                     }
@@ -620,7 +612,7 @@ fn cell_w<R>(ui: &mut Ui, rtl: bool, width: f32, caption: &str, add: impl FnOnce
         ui.set_width(width);
         ui.spacing_mut().item_spacing.y = 3.0;
         let t = Tokens::get(ui.ctx());
-        crate::rtl::label(ui, egui::RichText::new(caption).size(11.5).color(t.text));
+        ui.label(egui::RichText::new(caption).size(11.5).color(t.text));
         add(ui)
     })
     .inner
@@ -634,7 +626,7 @@ fn check_cell(ui: &mut Ui, rtl: bool, d: &mut Dialog, key: &str, caption: &str) 
         ui.spacing_mut().item_spacing.y = 3.0;
         let t = Tokens::get(ui.ctx());
         let mut on = d.b(key);
-        let label = ui.add(egui::Label::new(crate::rtl::widget(ui, egui::RichText::new(caption).size(11.5).color(t.text))).sense(Sense::click()));
+        let label = ui.add(egui::Label::new(egui::RichText::new(caption).size(11.5).color(t.text)).sense(Sense::click()));
         let boxed = ui.add_sized(vec2(FIELD_H, FIELD_H), egui::Checkbox::without_text(&mut on));
         if label.clicked() {
             on = !on;
@@ -726,7 +718,7 @@ fn details(app: &mut DesignApp, ui: &mut Ui, d: &mut Dialog) {
     let rtl = crate::i18n::is_rtl(&lang);
     ui.spacing_mut().item_spacing.y = 8.0;
     row(ui, rtl, |ui| {
-        crate::rtl::label(ui, egui::RichText::new(tr("Preset Details").to_uppercase()).font(semibold(11.5)).color(t.text_dim));
+        ui.label(egui::RichText::new(tr("Preset Details").to_uppercase()).font(semibold(11.5)).color(t.text_dim));
     });
     // Document name, and Save Document Preset.
     row(ui, rtl, |ui| {
@@ -742,7 +734,7 @@ fn details(app: &mut DesignApp, ui: &mut Ui, d: &mut Dialog) {
         // It holds a text field: clicks inside it don't close it.
         egui::Popup::menu(&save).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
             ui.set_min_width(220.0);
-            crate::rtl::label(ui, tr("Save Document Preset As:"));
+            ui.label(tr("Save Document Preset As:"));
             let mut preset = d.s("presetName");
             let field = ui.add(egui::TextEdit::singleline(&mut preset).hint_text(tr("Custom")).desired_width(200.0));
             field.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, tr("Preset Name")));
@@ -755,7 +747,7 @@ fn details(app: &mut DesignApp, ui: &mut Ui, d: &mut Dialog) {
             }
             // Enter in the name saves the preset (the dialog ignores keys while a popup is open).
             let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if ui.button(crate::rtl::widget(ui, tr("Save Preset"))).clicked() || enter {
+            if ui.button(tr("Save Preset")).clicked() || enter {
                 let name = if preset.trim().is_empty() { tr("Custom").to_string() } else { preset };
                 match save_preset(app, d, &name) {
                     Ok(()) => ui.close(),
@@ -769,10 +761,10 @@ fn details(app: &mut DesignApp, ui: &mut Ui, d: &mut Dialog) {
     row(ui, rtl, |ui| {
         cell(ui, rtl, tr("Width"), |ui| spin(ui, d, "width", COLUMN_W - 8.0, Step::Measure(1.0)));
         cell(ui, rtl, tr("Units"), |ui| {
-            egui::ComboBox::from_id_salt("nd_units").selected_text(crate::rtl::widget(ui, tr(u.label()))).width(COLUMN_W - 8.0).show_ui(ui, |ui| {
+            egui::ComboBox::from_id_salt("nd_units").selected_text(tr(u.label())).width(COLUMN_W - 8.0).show_ui(ui, |ui| {
                 // InDesign's eight; a preset in another unit keeps it on the list.
                 for v in NEW_DOCUMENT_UNITS.into_iter().chain((!NEW_DOCUMENT_UNITS.contains(&u)).then_some(u)) {
-                    if ui.selectable_label(v == u, crate::rtl::widget(ui, tr(v.label()))).clicked() && v != u {
+                    if ui.selectable_label(v == u, tr(v.label())).clicked() && v != u {
                         set_units(d, v);
                     }
                 }
@@ -811,24 +803,24 @@ fn details(app: &mut DesignApp, ui: &mut Ui, d: &mut Dialog) {
         cell(ui, rtl, tr("Column Gutter"), |ui| spin(ui, d, "gutter", COLUMN_W - 8.0, Step::Measure(0.0)));
     });
     section_rule(ui);
-    egui::CollapsingHeader::new(crate::rtl::widget(ui, egui::RichText::new(tr("Margins")).size(12.0).color(t.text)))
+    egui::CollapsingHeader::new(egui::RichText::new(tr("Margins")).size(12.0).color(t.text))
         .id_salt("nd_margins")
         .default_open(true)
         .show(ui, |ui| edges(ui, &lang, d, "margin"));
     section_rule(ui);
-    egui::CollapsingHeader::new(crate::rtl::widget(ui, egui::RichText::new(tr("Bleed and Slug")).size(12.0).color(t.text)))
-        .id_salt("nd_bleed_slug")
-        .default_open(true)
-        .show(ui, |ui| {
+    egui::CollapsingHeader::new(egui::RichText::new(tr("Bleed and Slug")).size(12.0).color(t.text)).id_salt("nd_bleed_slug").default_open(true).show(
+        ui,
+        |ui| {
             row(ui, rtl, |ui| {
-                crate::rtl::label(ui, egui::RichText::new(tr("Bleed")).size(11.5).color(t.text_dim));
+                ui.label(egui::RichText::new(tr("Bleed")).size(11.5).color(t.text_dim));
             });
             edges(ui, &lang, d, "bleed");
             row(ui, rtl, |ui| {
-                crate::rtl::label(ui, egui::RichText::new(tr("Slug")).size(11.5).color(t.text_dim));
+                ui.label(egui::RichText::new(tr("Slug")).size(11.5).color(t.text_dim));
             });
             edges(ui, &lang, d, "slug");
-        });
+        },
+    );
 }
 
 /// The window's body; true when a card was double-clicked (create the document now).

@@ -49,11 +49,11 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
             let _ = app.run("app.colorGroupOptionsDialog", json!({"name": g.name}));
         }
         resp.context_menu(|ui| {
-            if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Color Group Options…"))).clicked() {
+            if ui.button(crate::i18n::tr(&app.ui.language, "Color Group Options…")).clicked() {
                 let _ = app.run("app.colorGroupOptionsDialog", json!({"name": g.name}));
                 ui.close();
             }
-            if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Ungroup Color Group"))).clicked() {
+            if ui.button(crate::i18n::tr(&app.ui.language, "Ungroup Color Group")).clicked() {
                 let _ = app.run("swatch.ungroupColorGroup", json!({"name": g.name}));
                 ui.close();
             }
@@ -91,28 +91,25 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
             }
             crate::menus::menu_button(ui, "☰", |ui| {
                 let current = fill_cur.as_deref().filter(|n| doc.swatch(n).is_some_and(|w| !w.hidden));
-                if ui
-                    .add_enabled(current.is_some(), egui::Button::new(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Swatch Options…"))))
-                    .clicked()
-                {
+                if ui.add_enabled(current.is_some(), egui::Button::new(crate::i18n::tr(&app.ui.language, "Swatch Options…"))).clicked() {
                     let _ = app.run("app.swatchOptionsDialog", json!({"name": current}));
                     ui.close();
                 }
-                if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Color Theme…"))).clicked() {
+                if ui.button(crate::i18n::tr(&app.ui.language, "Color Theme…")).clicked() {
                     crate::menus::activate(app, "swatch.addColorTheme", &serde_json::Value::Null);
                     ui.close();
                 }
-                crate::menus::menu_button(ui, crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Ink Manager")), |ui| {
+                crate::menus::menu_button(ui, crate::i18n::tr(&app.ui.language, "Ink Manager"), |ui| {
                     let Ok(l) = app.session.execute("ink.list", &json!({})) else { return };
                     let mut all = l["allToProcess"].as_bool().unwrap_or(false);
-                    if ui.checkbox(&mut all, crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "All Spots to Process"))).changed() {
+                    if ui.checkbox(&mut all, crate::i18n::tr(&app.ui.language, "All Spots to Process")).changed() {
                         let _ = app.run("ink.options", json!({"allToProcess": all}));
                         ui.close();
                     }
                     ui.separator();
                     let inks = l["inks"].as_array().cloned().unwrap_or_default();
                     if inks.is_empty() {
-                        crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "No spot inks"));
+                        ui.label(crate::i18n::tr(&app.ui.language, "No spot inks"));
                     }
                     for ink in inks {
                         let name = ink["name"].as_str().unwrap_or("").to_string();
@@ -125,15 +122,15 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
                         });
                     }
                 });
-                if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "New Color Group"))).clicked() {
+                if ui.button(crate::i18n::tr(&app.ui.language, "New Color Group")).clicked() {
                     let _ = app.run("swatch.newColorGroup", json!({}));
                     ui.close();
                 }
-                if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Load Swatches…"))).clicked() {
+                if ui.button(crate::i18n::tr(&app.ui.language, "Load Swatches…")).clicked() {
                     let _ = app.run("app.loadSwatches", json!({}));
                     ui.close();
                 }
-                if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Save Swatches for Exchange…"))).clicked() {
+                if ui.button(crate::i18n::tr(&app.ui.language, "Save Swatches for Exchange…")).clicked() {
                     let _ = app.run("app.saveSwatches", json!({}));
                     ui.close();
                 }
@@ -180,7 +177,7 @@ fn header(app: &mut DesignApp, ui: &mut egui::Ui, doc: &designcraft_doc::Documen
         paint(stroke_front);
         if resp
             .on_hover_ui(|ui| {
-                crate::rtl::label(ui, tip);
+                ui.label(tip);
             })
             .clicked()
         {
@@ -228,7 +225,7 @@ fn folder_button(ui: &mut egui::Ui, tip: &str) -> egui::Response {
     ui.painter().rect_stroke(f, 1.5, egui::Stroke::new(1.2, t.icon), egui::StrokeKind::Inside);
     ui.painter().line_segment([f.left_top() + vec2(1.0, 3.0), f.right_top() + vec2(-1.0, 3.0)], egui::Stroke::new(1.0, t.icon));
     resp.on_hover_ui(|ui| {
-        crate::rtl::label(ui, tip);
+        ui.label(tip);
     })
 }
 
@@ -294,17 +291,17 @@ fn swatch_row(
         let _ = app.run("app.swatchOptionsDialog", json!({"name": sw.name}));
     }
     resp.context_menu(|ui| {
-        if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Swatch Options…"))).clicked() {
+        if ui.button(crate::i18n::tr(&app.ui.language, "Swatch Options…")).clicked() {
             let _ = app.run("app.swatchOptionsDialog", json!({"name": sw.name}));
             ui.close();
         }
-        if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Apply to Stroke"))).clicked() {
+        if ui.button(crate::i18n::tr(&app.ui.language, "Apply to Stroke")).clicked() {
             let _ = super::apply_swatch(app, true, &sw.name, None);
             ui.close();
         }
         if !sw.locked {
-            crate::menus::menu_button(ui, crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Move to Color Group")), |ui| {
-                if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "(Top Level)"))).clicked() {
+            crate::menus::menu_button(ui, crate::i18n::tr(&app.ui.language, "Move to Color Group"), |ui| {
+                if ui.button(crate::i18n::tr(&app.ui.language, "(Top Level)")).clicked() {
                     let _ = app.run("swatch.moveToGroup", json!({"swatches": [sw.name], "group": null}));
                     ui.close();
                 }
@@ -315,12 +312,12 @@ fn swatch_row(
                     }
                 }
             });
-            if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "New Color Group with Swatch"))).clicked() {
+            if ui.button(crate::i18n::tr(&app.ui.language, "New Color Group with Swatch")).clicked() {
                 let _ = app.run("swatch.newColorGroup", json!({"swatches": [sw.name]}));
                 ui.close();
             }
             ui.separator();
-            if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Delete Swatch"))).clicked() {
+            if ui.button(crate::i18n::tr(&app.ui.language, "Delete Swatch")).clicked() {
                 let _ = app.run("swatch.delete", json!({"name": sw.name}));
                 ui.close();
             }
@@ -341,10 +338,7 @@ pub enum ColorMode {
 pub fn color_panel(app: &mut DesignApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     let Some((fill, fill_tint, stroke_sw, stroke_tint)) = super::color_target(app) else {
-        ui.label(crate::rtl::widget(
-            ui,
-            egui::RichText::new(crate::i18n::tr(&app.ui.language, "Select an object or text to color its fill or stroke.")).color(t.text_dim),
-        ));
+        ui.label(egui::RichText::new(crate::i18n::tr(&app.ui.language, "Select an object or text to color its fill or stroke.")).color(t.text_dim));
         return;
     };
     let text = super::colors_affect_text(app);
@@ -399,10 +393,7 @@ pub fn color_panel(app: &mut DesignApp, ui: &mut egui::Ui) {
     ui.data_mut(|d| d.insert_temp(mode_id, mode));
     let sw = doc.swatch(&name).cloned();
     let Some(c) = doc.resolve_color(&name, 1.0) else {
-        ui.label(crate::rtl::widget(
-            ui,
-            egui::RichText::new(crate::i18n::tr(&app.ui.language, "[None] — choose a colour on the ramp.")).color(t.text_dim),
-        ));
+        ui.label(egui::RichText::new(crate::i18n::tr(&app.ui.language, "[None] — choose a colour on the ramp.")).color(t.text_dim));
         spectrum(app, ui, target);
         return;
     };
@@ -467,7 +458,7 @@ pub fn color_panel(app: &mut DesignApp, ui: &mut egui::Ui) {
     spectrum(app, ui, target);
     ui.horizontal(|ui| {
         let unnamed = sw.as_ref().is_some_and(|w| w.hidden);
-        if ui.add_enabled(unnamed, egui::Button::new(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Add to Swatches")))).clicked() {
+        if ui.add_enabled(unnamed, egui::Button::new(crate::i18n::tr(&app.ui.language, "Add to Swatches"))).clicked() {
             let _ = app.run("swatch.addToSwatches", json!({"swatch": name, "target": target}));
         }
     });
@@ -692,9 +683,9 @@ pub fn gradient_panel(app: &mut DesignApp, ui: &mut egui::Ui) {
                 ui.horizontal(|ui| {
                     crate::widgets::caption_w(ui, crate::i18n::tr(&lang, "Type:"), 52.0);
                     let shown = if is_gradient { crate::i18n::tr(&lang, g.kind.label()) } else { "" };
-                    egui::ComboBox::from_id_salt("grad_type").selected_text(crate::rtl::widget(ui, shown)).width(104.0).show_ui(ui, |ui| {
+                    egui::ComboBox::from_id_salt("grad_type").selected_text(shown).width(104.0).show_ui(ui, |ui| {
                         for (k, v) in [("Linear", "linear"), ("Radial", "radial")] {
-                            if ui.selectable_label(is_gradient && g.kind.label() == k, crate::rtl::widget(ui, crate::i18n::tr(&lang, k))).clicked() {
+                            if ui.selectable_label(is_gradient && g.kind.label() == k, crate::i18n::tr(&lang, k)).clicked() {
                                 send = Some(json!({"kind": v}));
                             }
                         }

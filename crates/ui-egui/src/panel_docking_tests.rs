@@ -144,7 +144,7 @@ fn capture_custom_panel_docking_visual_fixtures() {
                             if app.ui.language == "ar" {
                                 ui.label("Shaped action references:");
                                 for action in ["Float Panel", "Group with", "Close Panel"] {
-                                    crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, action));
+                                    ui.label(crate::i18n::tr(&app.ui.language, action));
                                 }
                             }
                         });
@@ -438,7 +438,7 @@ fn shaped_panel_label_keeps_the_logical_accessibility_text() {
     let logical = "خصائص Pages";
     crate::theme::install_fonts(&ctx, "ar");
     let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-        let galley = crate::rtl::plain(ui.ctx(), logical, egui::FontId::proportional(12.0), egui::Color32::WHITE);
+        let galley = ui.painter().layout_no_wrap(logical.to_owned(), egui::FontId::proportional(12.0), egui::Color32::WHITE);
         assert_eq!(galley.job.text, logical);
     });
     output.textures_delta.clear();
@@ -574,7 +574,7 @@ fn capture_legacy_panel_menu_visual_fixture() {
             egui::CentralPanel::default().show(ui, |ui| {
                 ui.label("Shaped legacy menu references:");
                 for label in ["Float Panel", "Layers"] {
-                    crate::rtl::label(ui, crate::i18n::tr("ar", label));
+                    ui.label(crate::i18n::tr("ar", label));
                 }
             });
         },

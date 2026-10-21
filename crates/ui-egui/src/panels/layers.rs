@@ -81,10 +81,10 @@ fn eye_lock(
         icons::paint(ui.painter(), Rect::from_center_size(lock.center(), vec2(13.0, 13.0)), "lock", col);
     }
     let e = ui.interact(eye, ui.scope_id().with(("eye", key)), Sense::click()).on_hover_ui(|ui| {
-        crate::rtl::label(ui, crate::i18n::tr(language, if visible { "Hide" } else { "Show" }));
+        ui.label(crate::i18n::tr(language, if visible { "Hide" } else { "Show" }));
     });
     let l = ui.interact(lock, ui.scope_id().with(("lock", key)), Sense::click()).on_hover_ui(|ui| {
-        crate::rtl::label(ui, crate::i18n::tr(language, if locked { "Unlock" } else { "Lock" }));
+        ui.label(crate::i18n::tr(language, if locked { "Unlock" } else { "Lock" }));
     });
     (e.clicked(), l.clicked())
 }
@@ -111,7 +111,7 @@ fn selection_square(
     }
     let tip = if selected && !small { "Select; drag to move the selection to another layer" } else { "Select" };
     resp.on_hover_ui(|ui| {
-        crate::rtl::label(ui, crate::i18n::tr(language, tip));
+        ui.label(crate::i18n::tr(language, tip));
     })
 }
 
@@ -448,21 +448,21 @@ pub fn show(app: &mut DesignApp, ui: &mut Ui) {
         }
         resp.context_menu(|ui| {
             let options = crate::i18n::tr(&language, "Layer Options for \"{name}\"…").replace("{name}", &l.name);
-            if ui.button(crate::rtl::widget(ui, options)).clicked() {
+            if ui.button(options).clicked() {
                 cmds.push(("app.layerOptionsDialog", json!({"id": l.id.0})));
                 ui.close();
             }
             ui.separator();
-            if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&language, "Delete Layer"))).clicked() {
+            if ui.button(crate::i18n::tr(&language, "Delete Layer")).clicked() {
                 cmds.push(("layer.delete", json!({"id": l.id.0})));
                 ui.close();
             }
-            if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&language, "Move Selection Here"))).clicked() {
+            if ui.button(crate::i18n::tr(&language, "Move Selection Here")).clicked() {
                 cmds.push(("object.setLayer", json!({"layer": l.id.0})));
                 ui.close();
             }
             ui.separator();
-            if active != l.id && ui.button(crate::rtl::widget(ui, crate::i18n::tr(&language, "Merge into Active Layer"))).clicked() {
+            if active != l.id && ui.button(crate::i18n::tr(&language, "Merge into Active Layer")).clicked() {
                 cmds.push(("layer.merge", json!({"ids": [active.0, l.id.0], "into": active.0})));
                 ui.close();
             }
@@ -472,12 +472,12 @@ pub fn show(app: &mut DesignApp, ui: &mut Ui) {
                 ("Show All Layers", json!({"id": l.id.0, "show": true})),
                 ("Unlock All Layers", json!({"id": l.id.0, "unlock": true})),
             ] {
-                if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&language, label))).clicked() {
+                if ui.button(crate::i18n::tr(&language, label)).clicked() {
                     cmds.push(("layer.others", params));
                     ui.close();
                 }
             }
-            if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&language, "Delete Unused Layers"))).clicked() {
+            if ui.button(crate::i18n::tr(&language, "Delete Unused Layers")).clicked() {
                 cmds.push(("layer.deleteUnused", json!({})));
                 ui.close();
             }
