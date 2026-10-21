@@ -4451,22 +4451,25 @@ fn language_picks_localized_forms_through_the_word_cache() {
 
 #[test]
 fn chinese_and_japanese_take_their_localized_forms() {
-    // Noto Sans CJK SC (craft-fonts) draws 直 differently for Japanese (`locl`).
-    let Some(noto) = designcraft_fonts::CRAFT_FONTS.iter().find(|f| f.family == "Noto Sans CJK SC") else { return };
-    FontDb::global().add_font(noto.bytes.to_vec());
+    // Noto Sans CJK SC draws 直 differently for Japanese (`locl`). craft-fonts has it, but
+    // DesignCraft doesn't embed it: the test reads it from the checkout `CRAFT_FONTS_DIR` names.
+    const NOTO: &str = "Noto Sans CJK SC";
+    let Some(dir) = std::env::var_os("CRAFT_FONTS_DIR") else { return };
+    let Ok(bytes) = std::fs::read(std::path::Path::new(&dir).join("fonts/noto-sans-cjk-sc/NotoSansCJKsc-Regular.otf")) else { return };
+    FontDb::global().add_font(bytes);
     let gid = |language: &str| {
         let (mut d, sid, _) = doc_with("直", Rect::new(36.0, 36.0, 300.0, 100.0), ParaAttrs::default());
         d.story_mut(sid).unwrap().format_chars(0.."直".len(), |f| {
-            f.over.font_family = Some(noto.family.into());
+            f.over.font_family = Some(NOTO.into());
             f.over.language = Some(language.into());
         });
         let cs = compose_story(&d, sid, &ComposeOptions::default());
         let g = &all_lines(&cs)[0].glyphs[0];
-        assert_eq!(g.face.family, noto.family);
+        assert_eq!(g.face.family, NOTO);
         g.gid
     };
     let chinese = gid("Chinese: Simplified");
-    assert_eq!(chinese, FontDb::global().face(noto.family, noto.style).glyph_for('直'));
+    assert_eq!(chinese, FontDb::global().face(NOTO, "Regular").glyph_for('直'));
     assert_ne!(gid("Japanese"), chinese, "Japanese 直");
 }
 
