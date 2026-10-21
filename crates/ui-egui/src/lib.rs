@@ -706,11 +706,10 @@ pub struct DesignApp {
     /// (no native menu: without it the paste keys produce no paste event), or what it held then
     /// (native menu). It is never pasted as text: Paste with it pastes the copied objects.
     object_clip_text: Option<String>,
-    /// The marked text the system IME last sent (`None` once it commits or clears). When the
-    /// composition ends some other way (a click, a tool switch), the IME is told to drop it.
-    pub(crate) ime_marked: Option<String>,
-    /// UTF-8 bytes before and after the marked or selected text that the IME's next commit
-    /// replaces (`ImeEvent::DeleteSurroundingBytes`, sent just before the commit).
+    /// The input method at the text caret: marked text, commits and the keys it uses.
+    pub(crate) ime: craft_ui::ime::Composer,
+    /// UTF-8 bytes before and after the selected text that the IME's next commit replaces
+    /// (`Edit::DeleteSurroundingBytes`, sent just before the commit), so both are one undo step.
     pub(crate) ime_around: [usize; 2],
     /// The system IME must drop its marked text (see [`Self::take_ime_discard`]).
     pub(crate) ime_discard: bool,
@@ -792,7 +791,7 @@ impl DesignApp {
             egui_ctx: None,
             in_control: false,
             object_clip_text: None,
-            ime_marked: None,
+            ime: craft_ui::ime::Composer::new(),
             ime_around: [0, 0],
             ime_discard: false,
             canvas_ime: false,

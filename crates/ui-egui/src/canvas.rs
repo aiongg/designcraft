@@ -2522,35 +2522,26 @@ fn handle_input(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, r
     // Keyboard for the active tool. A field focused when the frame began keeps this frame's keys.
     let field_id = field_focused_id(ui.ctx());
     let field = ui.ctx().text_edit_focused() || ui.data(|d| d.get_temp::<bool>(field_id)).unwrap_or(false);
-    if menu_open || modal_open(app) || (field && !resp.has_focus()) || !keyboard_pane(app) {
+    if !keyboard_pane(app) {
         return;
     }
-    // Keys of a frame that began composing are the IME's too (a Backspace that empties the marked
-    // text must not delete the character before it).
-    let composing_at_start = app.session.tool_composing();
-    let evs = ui.input(|i| i.events.clone());
-    for e in evs {
-        let composing = composing_at_start || app.session.tool_composing();
+    let ctx = ui.ctx().clone();
+    let blocked = menu_open || modal_open(app) || (field && !resp.has_focus());
+    let editing = !blocked && app.session.wants_text();
+    // The composer takes the events the IME uses; while editing, its edits are the text tool's
+    // keyboard, in the order the platform sent them.
+    sync_composer(app, &ctx);
+    let edits = app.ime.update(&ctx, editing);
+    let plain_paste = ui.input(|i| i.modifiers.shift);
+    if editing || app.session.tool_composing() {
+        type_text(app, edits, plain_paste);
+    }
+    app.ime_discard |= app.ime.interrupted();
+    if blocked || editing {
+        return;
+    }
+    for e in ui.input(|i| i.events.clone()) {
         match e {
-            egui::Event::Ime(ime) if wants_text => ime_event(app, ime, vi),
-            // Keys the IME passes through come as text only while nothing is marked.
-            egui::Event::Text(t) if wants_text && !composing => {
-                let _ = app.run("text.insert", json!({"text": t}));
-            }
-            // The IME owns the keyboard until it commits: no typing, clipboard or editing keys.
-            egui::Event::Text(_) | egui::Event::Paste(_) | egui::Event::Copy | egui::Event::Cut | egui::Event::Key { .. } if composing => {}
-            egui::Event::Paste(t) if wants_text => {
-                // Formatted when the system clipboard still holds what was copied here;
-                // Shift (⇧⌘V) pastes without formatting.
-                let plain = ui.input(|i| i.modifiers.shift);
-                let id = if plain { "edit.pasteWithoutFormatting" } else { "edit.paste" };
-                let _ = app.run(id, json!({"text": t}));
-            }
-            egui::Event::Copy | egui::Event::Cut if wants_text => {
-                // `run` puts the copied text on the system clipboard.
-                let id = if matches!(e, egui::Event::Cut) { "edit.cut" } else { "edit.copy" };
-                let _ = app.run(id, json!({}));
-            }
             // Without a native menu bar the copy and paste keys arrive only as these events.
             egui::Event::Copy | egui::Event::Cut | egui::Event::Paste(_) if !app.native_menu => {
                 let (id, params) = match e {
@@ -2563,30 +2554,7 @@ fn handle_input(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, r
                     crate::menus::activate(app, id, &params);
                 }
             }
-            egui::Event::Key { key, pressed: true, modifiers, .. } => {
-                let k = match key {
-                    egui::Key::ArrowLeft => Some(ToolKey::Left),
-                    egui::Key::ArrowRight => Some(ToolKey::Right),
-                    egui::Key::ArrowUp => Some(ToolKey::Up),
-                    egui::Key::ArrowDown => Some(ToolKey::Down),
-                    egui::Key::Enter => Some(ToolKey::Enter),
-                    egui::Key::Escape => Some(ToolKey::Escape),
-                    egui::Key::Backspace => Some(ToolKey::Backspace),
-                    egui::Key::Delete => Some(ToolKey::Delete),
-                    egui::Key::Tab => Some(ToolKey::Tab),
-                    egui::Key::Home => Some(ToolKey::Home),
-                    egui::Key::End => Some(ToolKey::End),
-                    _ => None,
-                };
-                if let Some(k) = k {
-                    let m = Mods { shift: modifiers.shift, alt: modifiers.alt, cmd: modifiers.command, ctrl: modifiers.ctrl, space: false };
-                    let handled = app.session.tool_key(k, m, vi).unwrap_or(false);
-                    if !handled && k == ToolKey::Escape {
-                        let _ = app.run("edit.deselectAll", json!({}));
-                    }
-                    app.after_engine();
-                }
-            }
+            egui::Event::Key { key, pressed: true, modifiers, .. } => tool_key(app, key, modifiers, vi),
             _ => {}
         }
     }
@@ -2605,40 +2573,92 @@ fn keyboard_pane(app: &DesignApp) -> bool {
     app.pane == app.focus_pane
 }
 
-/// One input method event for the text caret: marked text previews in the story, a commit types.
-fn ime_event(app: &mut DesignApp, e: egui::ImeEvent, vi: designcraft_engine::ViewInfo) {
-    let r = match e {
-        egui::ImeEvent::Preedit { text, active_range_chars } => {
-            app.ime_marked = Some(text.clone()).filter(|t| !t.is_empty());
-            app.session.tool_preedit(&text, active_range_chars, vi).map_err(|e| e.to_string())
-        }
-        // A bare line break confirms the composition (Enter with some IMEs): the marked text, not
-        // a new paragraph.
-        egui::ImeEvent::Commit(t) if t == "\n" || t == "\r" => {
-            keep_marked_text(app);
-            Ok(())
-        }
-        egui::ImeEvent::Commit(t) => {
-            app.ime_marked = None;
-            app.session.tool_ime_replace(&t, std::mem::take(&mut app.ime_around), vi).map_err(|e| e.to_string())
-        }
-        // Text the commit that follows replaces (macOS press-and-hold accents, Wayland): deleted
-        // with it, in the same undo step.
-        egui::ImeEvent::DeleteSurroundingBytes { before_bytes, after_bytes } => {
-            app.ime_around = [before_bytes, after_bytes];
-            Ok(())
-        }
-        // The web text agent's corrections and mobile Backspace: characters around the caret go.
-        egui::ImeEvent::DeleteSurrounding { before_chars, after_chars } if !app.session.tool_composing() => {
-            delete_surrounding(app, before_chars, after_chars)
-        }
-        // `Enabled` and `Disabled` carry nothing: the IME is on while `ime_output` sets `ime`.
-        _ => Ok(()),
+/// A key for the active tool (caret movement, nudging, Backspace); Escape it leaves alone
+/// deselects.
+fn tool_key(app: &mut DesignApp, key: egui::Key, modifiers: egui::Modifiers, vi: designcraft_engine::ViewInfo) {
+    let k = match key {
+        egui::Key::ArrowLeft => ToolKey::Left,
+        egui::Key::ArrowRight => ToolKey::Right,
+        egui::Key::ArrowUp => ToolKey::Up,
+        egui::Key::ArrowDown => ToolKey::Down,
+        egui::Key::Enter => ToolKey::Enter,
+        egui::Key::Escape => ToolKey::Escape,
+        egui::Key::Backspace => ToolKey::Backspace,
+        egui::Key::Delete => ToolKey::Delete,
+        egui::Key::Tab => ToolKey::Tab,
+        egui::Key::Home => ToolKey::Home,
+        egui::Key::End => ToolKey::End,
+        _ => return,
     };
-    if let Err(e) = r {
-        app.status(e);
+    let m = Mods { shift: modifiers.shift, alt: modifiers.alt, cmd: modifiers.command, ctrl: modifiers.ctrl, space: false };
+    let handled = app.session.tool_key(k, m, vi).unwrap_or(false);
+    if !handled && k == ToolKey::Escape {
+        let _ = app.run("edit.deselectAll", json!({}));
     }
     app.after_engine();
+}
+
+/// The composer's edits at the text caret: marked text previews in the story, a commit types
+/// (with the text the IME replaces around it, as one undo step), keys go to the tool.
+fn type_text(app: &mut DesignApp, edits: Vec<craft_ui::ime::Edit>, plain_paste: bool) {
+    use craft_ui::ime::Edit;
+    let vi = app.view_info();
+    for edit in edits {
+        if !matches!(edit, Edit::Preedit { .. } | Edit::Insert(_) | Edit::DeleteSurroundingBytes { .. }) {
+            app.ime_around = [0, 0];
+        }
+        let r = match edit {
+            Edit::Preedit { text, active } => app.session.tool_preedit(&text, active, vi).map_err(|e| e.to_string()),
+            Edit::Insert(text) => {
+                let pending = std::mem::take(&mut app.ime_around);
+                let around = whole_chars_around(app, pending);
+                app.session.tool_ime_replace(&text, around, vi).map_err(|e| e.to_string())
+            }
+            Edit::DeleteSurroundingBytes { before_bytes, after_bytes } => {
+                app.ime_around = [before_bytes, after_bytes];
+                Ok(())
+            }
+            Edit::Key { key, modifiers, .. } => {
+                tool_key(app, key, modifiers, vi);
+                Ok(())
+            }
+            Edit::LineBreak { modifiers } => {
+                tool_key(app, egui::Key::Enter, modifiers, vi);
+                Ok(())
+            }
+            // Formatted when the system clipboard still holds what was copied here; Shift (⇧⌘V)
+            // pastes without formatting.
+            Edit::Paste(text) => {
+                let id = if plain_paste { "edit.pasteWithoutFormatting" } else { "edit.paste" };
+                app.run(id, json!({"text": text})).map(drop)
+            }
+            // `run` puts the copied text on the system clipboard.
+            Edit::Copy => app.run("edit.copy", json!({})).map(drop),
+            Edit::Cut => app.run("edit.cut", json!({})).map(drop),
+            Edit::DeleteSurrounding { before_chars, after_chars } => delete_surrounding(app, before_chars, after_chars),
+        };
+        if let Err(e) = r {
+            app.status(e);
+        }
+    }
+    app.after_engine();
+}
+
+/// The bytes of the whole characters inside `around` (UTF-8 bytes before and after the selected
+/// text): a character a count ends inside stays.
+fn whole_chars_around(app: &DesignApp, around: [usize; 2]) -> [usize; 2] {
+    if around == [0, 0] {
+        return around;
+    }
+    let Some((text, r)) = app.session.active().and_then(|d| {
+        let t = d.selection.text?;
+        Some((d.doc.text_story(t.story, t.cell)?.text.as_str(), t.range()))
+    }) else {
+        return [0, 0];
+    };
+    let (Some(before), Some(after)) = (text.get(..r.start), text.get(r.end..)) else { return [0, 0] };
+    let (b, a) = craft_ui::ime::surrounding_chars(before, after, around[0], around[1]);
+    [before.chars().rev().take(b).map(char::len_utf8).sum(), after.chars().take(a).map(char::len_utf8).sum()]
 }
 
 /// Delete `before` characters before the caret and `after` after it (sizes come from the browser:
@@ -2652,18 +2672,12 @@ fn delete_surrounding(app: &mut DesignApp, before: usize, after: usize) -> Resul
     Ok(())
 }
 
-/// End a composition outside the IME (a click away, the canvas losing the keyboard): the marked
-/// text stays as typed, and the system IME is told to drop its copy.
-pub(crate) fn keep_marked_text(app: &mut DesignApp) {
-    app.ime_around = [0, 0];
-    if app.ime_marked.take().is_some() {
-        app.ime_discard = true;
-    }
-    if app.session.tool_composing() {
-        if let Err(e) = app.session.end_composition() {
-            app.status(e.to_string());
-        }
-        app.after_engine();
+/// The engine ends a composition on its own (a click in the canvas, a tool switch, a command),
+/// keeping the marked text as typed: the composer drops its copy and tells the IME to.
+fn sync_composer(app: &mut DesignApp, ctx: &egui::Context) {
+    if app.ime.is_composing() && !app.session.tool_composing() {
+        app.ime.discard(ctx);
+        app.ime_around = [0, 0];
     }
 }
 
@@ -2674,25 +2688,24 @@ fn ime_output(app: &mut DesignApp, ctx: &egui::Context, xf: &Xf) {
     if !keyboard_pane(app) {
         return;
     }
+    sync_composer(app, ctx);
     // A text field, dialog or Quick Apply has the keyboard: egui's own text editing serves the IME.
     let ours = app.session.wants_text() && !ctx.text_edit_focused() && !modal_open(app);
     let caret = if ours { app.session.tool_ime_caret(app.view_info()) } else { None };
-    let Some((a, b)) = caret else {
-        // The IME goes away with its marked text: keep that text as typed, like a click away.
-        keep_marked_text(app);
-        return;
-    };
-    let r = Rect::from_two_pos(xf.to_screen(a), xf.to_screen(b)).expand(1.0);
-    // The composition ended outside the IME (a click, a command): the IME drops what it has marked.
-    let interrupt = app.ime_marked.is_some() && !app.session.tool_composing();
-    if interrupt {
-        app.ime_marked = None;
-        app.ime_discard = true;
+    match caret {
+        Some((a, b)) => {
+            app.ime.set_caret(ctx, Rect::from_two_pos(xf.to_screen(a), xf.to_screen(b)).expand(1.0));
+            app.canvas_ime = true;
+        }
+        None => {
+            // The editing ended in this pass: the IME goes now, its marked text kept as typed.
+            let edits = app.ime.update(ctx, false);
+            if app.session.tool_composing() {
+                type_text(app, edits, false);
+            }
+        }
     }
-    app.canvas_ime = true;
-    ctx.output_mut(|o| {
-        o.ime = Some(egui::output::IMEOutput { purpose: egui::IMEPurpose::Normal, rect: r, cursor_rect: r, should_interrupt_composition: interrupt });
-    });
+    app.ime_discard |= app.ime.interrupted();
 }
 
 /// View → Show Hidden Characters: ¶ paragraph ends, » tabs, · spaces, ¬ forced line breaks, # end of story.
@@ -5070,6 +5083,10 @@ mod tests {
         assert!(!h.state().session.tool_composing());
         assert!(h.output().platform_output.ime.as_ref().is_some_and(|i| i.should_interrupt_composition));
         assert!(h.state_mut().take_ime_discard());
+        // The input method's late commit of the accent it was told to drop isn't typed again.
+        h.event(egui::Event::Ime(egui::ImeEvent::Commit("˜".into())));
+        h.run_steps(2);
+        assert_eq!(text(&h), "Tí˜");
         // Another tool takes no text: the input method is off.
         h.state_mut().run("tool.select", json!({"tool": "selection"})).unwrap();
         h.run_steps(2);
@@ -5091,13 +5108,13 @@ mod tests {
         h.event(egui::Event::Ime(egui::ImeEvent::Commit("è".into())));
         h.run_steps(2);
         assert_eq!(text(&h), "ẫè");
-        // A count that ends inside a character takes the whole character.
-        h.event(egui::Event::Ime(egui::ImeEvent::DeleteSurroundingBytes { before_bytes: 1, after_bytes: 0 }));
+        h.state_mut().run("edit.undo", json!({})).unwrap();
+        assert_eq!(text(&h), "ẫe", "the deletion and the commit undo together");
+        // Only whole characters inside the count go: one it ends inside stays.
+        h.event(egui::Event::Ime(egui::ImeEvent::DeleteSurroundingBytes { before_bytes: 2, after_bytes: 0 }));
         h.event(egui::Event::Ime(egui::ImeEvent::Commit("o".into())));
         h.run_steps(2);
         assert_eq!(text(&h), "ẫo");
-        h.state_mut().run("edit.undo", json!({})).unwrap();
-        assert_eq!(text(&h), "ẫè", "the deletion and the commit undo together");
     }
 
     #[test]
@@ -5403,6 +5420,25 @@ mod tests {
         assert!(!app.session.tool_composing());
         let typed = story_text(&mut app, &sid);
         assert!(typed.contains("がく") && typed.contains("しょうこ") && !typed.contains('\n'), "{typed:?}");
+    }
+
+    /// The Enter that confirms a word is the input method's: it doesn't also start a paragraph.
+    /// The next Enter does.
+    #[test]
+    fn the_enter_that_confirms_a_composition_types_no_return() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        let ctx = egui::Context::default();
+        let sid = typing_app(&mut app, &ctx, "");
+        let enter = |pressed| egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed, repeat: false, modifiers: Default::default() };
+        ime_frame(&mut app, &ctx, vec![preedit("にほん", 3)]);
+        ime_frame(&mut app, &ctx, vec![preedit("", 0), egui::Event::Ime(egui::ImeEvent::Commit("日本".into())), enter(true), enter(false)]);
+        assert_eq!(story_text(&mut app, &sid), "日本");
+        crate::menus::activate(&mut app, "edit.undo", &Value::Null);
+        assert_eq!(story_text(&mut app, &sid), "", "one Undo takes back the committed word");
+        crate::menus::activate(&mut app, "edit.redo", &Value::Null);
+        ime_frame(&mut app, &ctx, vec![]);
+        ime_frame(&mut app, &ctx, vec![enter(true), enter(false)]);
+        assert!(story_text(&mut app, &sid).starts_with("日本\n"), "{:?}", story_text(&mut app, &sid));
     }
 
     #[test]
