@@ -3155,7 +3155,7 @@ const TABLE: &[(&str, [&str; 5])] = &[
     ("Graphic…", ["Graphic…", "Graphique…", "Graphic…", "Graphic…", "图形…"]),
     ("Home", ["Home", "Accueil", "Home", "Home", "主页"]),
     ("Join:", ["Join:", "Sommet :", "Join:", "Join:", "连接："]),
-    ("Language", ["Language", "Langue", "Language", "Language", "语言"]),
+    ("Language", ["Sprache", "Langue", "Idioma", "言語", "语言"]),
     ("Last Spread", ["Last Spread", "Dernière planche", "Last Spread", "Last Spread", "最后一个跨页"]),
     ("Load DTD…", ["Load DTD…", "Charger la DTD…", "Load DTD…", "Load DTD…", "载入 DTD…"]),
     ("Location:", ["Location:", "Emplacement :", "Location:", "Location:", "位置："]),

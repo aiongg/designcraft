@@ -2286,6 +2286,9 @@ pub enum AppMenuItem {
         command: &'static str,
     },
     Sep,
+    /// Interface language: a submenu with each UI language in its own name, the current one
+    /// checked (`app.language {lang}`).
+    Language,
     Services,
     Hide,
     HideOthers,
@@ -2298,6 +2301,7 @@ pub const MAC_APP_MENU: &[AppMenuItem] = &[
     AppMenuItem::Cmd { id: "dc-discord", label: "Join the ArtCraft Discord…", command: "help.discord" },
     AppMenuItem::Sep,
     AppMenuItem::Cmd { id: "dc-settings", label: "Settings…", command: "app.preferences" },
+    AppMenuItem::Language,
     AppMenuItem::Sep,
     AppMenuItem::Services,
     AppMenuItem::Sep,
@@ -3081,9 +3085,10 @@ pub fn shortcuts(app: &mut DesignApp, ctx: &egui::Context) {
             }
         }
         if let Some((id, exact)) = fired {
-            // The native menu's accelerator fires only for the shortcut's own key and modifiers; the
-            // Plus key standing in for = never reaches it.
-            if exact && app.native_shortcuts.contains(&id) && !app.ui.shortcuts.contains_key(&id) {
+            // The native menu bar carries the shortcuts in effect, the user's included, and its
+            // accelerator fires only for the shortcut's own key and modifiers; the Plus key standing
+            // in for = never reaches it.
+            if exact && app.native_shortcuts.contains(&id) {
                 continue; // The native menu handles it.
             }
             // The key press belongs to the shortcut: what it opens (Quick Apply's list, a dialog's
@@ -4506,6 +4511,19 @@ mod tests {
             let z = app.view().unwrap().zoom;
             assert_eq!(z > z0, zooms_in, "native menu, {k:?} {m:?}: {z0} -> {z}");
         }
+        // A shortcut the user set runs here until the native menu bar carries it as its key
+        // equivalent; then only the bar runs it, once.
+        run_ui(&mut app, "window.setShortcut", &json!({"id": "view.zoomOut", "shortcut": "Cmd+9"})).unwrap().unwrap();
+        for (native, zooms_out) in [(false, true), (true, false)] {
+            if native {
+                app.native_shortcuts.insert("view.zoomOut".to_string());
+            }
+            let z0 = app.view().unwrap().zoom;
+            frame(&mut app, key(egui::Key::Num9, egui::Modifiers::COMMAND));
+            frame(&mut app, vec![]);
+            let z = app.view().unwrap().zoom;
+            assert_eq!(z < z0, zooms_out, "native {native}: {z0} -> {z}");
+        }
     }
 
     #[test]
@@ -5552,7 +5570,12 @@ mod tests {
         let (Some(about), Some(settings)) = (pos("help.about"), pos("app.preferences")) else { panic!("About and Settings are in the app menu") };
         assert!(about < settings);
         assert_eq!(MAC_APP_MENU.get(settings - 1), Some(&AppMenuItem::Sep));
-        assert_eq!(MAC_APP_MENU.get(settings + 1), Some(&AppMenuItem::Sep));
+        // Language follows Settings, as in the suite's other apps, titled in the interface language.
+        assert_eq!(MAC_APP_MENU.get(settings + 1), Some(&AppMenuItem::Language));
+        assert_eq!(MAC_APP_MENU.get(settings + 2), Some(&AppMenuItem::Sep));
+        for (code, _) in crate::i18n::LANGUAGES.iter().filter(|(c, _)| !c.is_empty()) {
+            assert_ne!(crate::i18n::tr(code, "Language"), "Language", "{code}");
+        }
         let label = |command: &str| {
             MAC_APP_MENU.iter().find_map(|m| match m {
                 AppMenuItem::Cmd { label, command: c, .. } if *c == command => Some(*label),
