@@ -3111,17 +3111,17 @@ pub fn shortcuts(app: &mut DesignApp, ctx: &egui::Context) {
     let active = craft_keymap::Active { panel: None, contexts, typing };
     let hits = ctx.input_mut(|i| {
         let native = &app.native_shortcuts;
-        let overrides = app.keymap.overrides();
         // Presses the dispatcher leaves alone: Clear (the active tool deletes) and the keys the
-        // native menu's accelerators already handled. An accelerator holds the command's default
-        // keys and fires only for them exactly: the Plus key standing in for = never reaches it.
+        // native menu's accelerators already handled. An accelerator holds the command's shortcut
+        // in effect, the user's included, and fires only for it exactly: the Plus key standing in
+        // for = never reaches it.
         // Copy, Cut and Paste stay too (the dispatcher's default): the canvas and text tools
         // handle them, and Paste carries the text.
         let accept = |hit: &craft_keymap::egui::Hit| {
             let c = &hit.command;
             let leave = hit.exact
                 && hit.cycle.is_empty()
-                && (c.id == "edit.clear" || (c.params.is_null() && native.contains(&c.id) && overrides.get(&c.id).is_none()));
+                && (c.id == "edit.clear" || (c.params.is_null() && native.contains(&c.id)));
             !leave
         };
         app.key_dispatcher.dispatch_filtered(i, &app.keymap, &active, accept)
@@ -4677,6 +4677,19 @@ mod tests {
             frame(&mut app, vec![]);
             let z = app.view().unwrap().zoom;
             assert_eq!(z > z0, zooms_in, "native menu, {k:?} {m:?}: {z0} -> {z}");
+        }
+        // A shortcut the user set runs here until the native menu bar carries it as its key
+        // equivalent; then only the bar runs it, once.
+        run_ui(&mut app, "window.setShortcut", &json!({"id": "view.zoomOut", "shortcut": "Cmd+9"})).unwrap().unwrap();
+        for (native, zooms_out) in [(false, true), (true, false)] {
+            if native {
+                app.native_shortcuts.insert("view.zoomOut".to_string());
+            }
+            let z0 = app.view().unwrap().zoom;
+            frame(&mut app, key(egui::Key::Num9, egui::Modifiers::COMMAND));
+            frame(&mut app, vec![]);
+            let z = app.view().unwrap().zoom;
+            assert_eq!(z < z0, zooms_out, "native {native}: {z0} -> {z}");
         }
     }
 
