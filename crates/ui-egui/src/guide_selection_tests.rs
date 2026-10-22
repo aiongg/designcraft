@@ -243,7 +243,8 @@ fn dragging_one_of_several_selected_guides_previews_them_all() {
     let mut h = with_guides();
     h.state_mut().run("guide.select", json!({"guides": [{"page": 0, "index": 0}, {"page": 0, "index": 2}]})).unwrap();
     let (a, b) = (screen_of(&h, 200.0, 600.0), screen_of(&h, 250.0, 620.0));
-    let g = GuideDrag { orientation: designcraft_doc::Orientation::Vertical, from: Some((SpreadRef::Doc(0), 0, 0)), at: Some(b) };
+    let g =
+        GuideDrag { orientation: designcraft_doc::Orientation::Vertical, from: Some((SpreadRef::Doc(0), 0, 0)), at: Some(b), mods: Modifiers::NONE };
     let press = GuidePress { origin: a, shift: false };
     let app = h.state();
     let xf = Xf::new(app.canvas_rect.unwrap(), app.view().unwrap());
@@ -253,6 +254,79 @@ fn dragging_one_of_several_selected_guides_previews_them_all() {
     moved.sort_unstable();
     assert_eq!(moved, [0, 2]);
     // The drop moves them by the same amounts.
-    let (dx, dy) = guide_drag_delta(app, &xf, &g, a, b).unwrap();
+    let (dx, dy) = guide_drag_delta(app, &xf, &g, a).unwrap();
     assert_eq!((dx, dy), (m.dx, m.dy));
+}
+
+/// Spread points per screen pixel at the harness's view.
+fn pt_per_px(h: &Harness<'_, DesignApp>) -> f64 {
+    let app = h.state();
+    1.0 / Xf::new(app.canvas_rect.unwrap(), app.view().unwrap()).zoom
+}
+
+/// A letter page with two columns: the left column's right side.
+fn with_columns() -> (Harness<'static, DesignApp>, f64) {
+    let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+    app.run("file.new", json!({"preset": "Letter", "columns": 2, "gutter": 18, "margins": 54})).unwrap();
+    app.run("guide.add", json!({"orientation": "vertical", "position": 200.0})).unwrap();
+    let side = app.session.doc().unwrap().doc.spreads[0].pages[0].column_rects()[0].x1;
+    (harness(app), side)
+}
+
+/// A dragged guide snaps to a column guide as a moved object does (#1221).
+#[test]
+fn a_dragged_guide_snaps_to_a_column_guide() {
+    let (mut h, side) = with_columns();
+    let near = side + 1.5 * pt_per_px(&h);
+    let (a, b) = (screen_of(&h, 200.0, 600.0), screen_of(&h, near, 600.0));
+    drag(&mut h, a, b);
+    assert_eq!(positions(&h), [side]);
+}
+
+/// Snap to Guides and Smart Guides off: the guide goes where the pointer is.
+#[test]
+fn with_snapping_off_a_dragged_guide_stays_at_the_pointer() {
+    let (mut h, side) = with_columns();
+    h.state_mut().ui.snap_to_guides = false;
+    h.state_mut().ui.smart_guides = false;
+    let near = side + 1.5 * pt_per_px(&h);
+    let (a, b) = (screen_of(&h, 200.0, 600.0), screen_of(&h, near, 600.0));
+    drag(&mut h, a, b);
+    let p = positions(&h);
+    assert!((p[0] - near).abs() < 0.1 && p[0] != side, "{p:?} vs {near}");
+}
+
+/// A frame's edge catches a dragged guide, and the preview shows the alignment mark.
+#[test]
+fn a_dragged_guide_snaps_to_a_frame_edge_with_a_smart_guide() {
+    let mut h = with_guides();
+    h.state_mut().run("frame.create", json!({"rect": [400, 100, 500, 200]})).unwrap();
+    h.state_mut().run("edit.deselectAll", json!({})).unwrap();
+    let near = 400.0 + 1.5 * pt_per_px(&h);
+    let (a, b) = (screen_of(&h, 200.0, 600.0), screen_of(&h, near, 600.0));
+    let g =
+        GuideDrag { orientation: designcraft_doc::Orientation::Vertical, from: Some((SpreadRef::Doc(0), 0, 0)), at: Some(b), mods: Modifiers::NONE };
+    {
+        let app = h.state();
+        let xf = Xf::new(app.canvas_rect.unwrap(), app.view().unwrap());
+        let spot = guide_spot(app, &xf, &g).unwrap();
+        assert_eq!(spot.sp.x, 400.0);
+        assert!(spot.marks.iter().any(|m| matches!(m, Overlay::Guide { .. })), "{:?}", spot.marks);
+        // Command suspends snapping.
+        let spot = guide_spot(app, &xf, &GuideDrag { mods: Modifiers::COMMAND, ..g.clone() }).unwrap();
+        assert!((spot.sp.x - near).abs() < 0.1 && spot.marks.is_empty());
+    }
+    drag(&mut h, a, b);
+    assert_eq!(positions(&h), [400.0, 300.0, 400.0]);
+}
+
+/// A new guide dragged out of a ruler snaps too: here to the horizontal guide at y 400.
+#[test]
+fn a_guide_dragged_out_of_a_ruler_snaps() {
+    let mut h = with_guides();
+    let rect = h.state().canvas_rect.unwrap();
+    let ruler = pos2(rect.min.x + 200.0, rect.min.y - RULER / 2.0);
+    let dest = screen_of(&h, 250.0, 400.0 + 1.5 * pt_per_px(&h));
+    drag(&mut h, ruler, dest);
+    assert_eq!(positions(&h), [200.0, 300.0, 400.0, 400.0]);
 }

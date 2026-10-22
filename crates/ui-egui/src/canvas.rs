@@ -539,10 +539,18 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
             && let Some(p) = g.at
         {
             let col = Color32::from_rgb(74, 227, 255);
+            let spot = guide_spot(app, &xf, &g);
+            let line = spot.as_ref().map_or(p, |s| s.screen);
             let (a, b) = match g.orientation {
-                designcraft_doc::Orientation::Horizontal => (pos2(rect.min.x, p.y), pos2(rect.max.x, p.y)),
-                designcraft_doc::Orientation::Vertical => (pos2(p.x, rect.min.y), pos2(p.x, rect.max.y)),
+                designcraft_doc::Orientation::Horizontal => (pos2(rect.min.x, line.y), pos2(rect.max.x, line.y)),
+                designcraft_doc::Orientation::Vertical => (pos2(line.x, rect.min.y), pos2(line.x, rect.max.y)),
             };
+            // What caught it, as for a moved object.
+            for mark in spot.iter().flat_map(|s| &s.marks) {
+                if let Overlay::Guide { a, b } = mark {
+                    painter.line_segment([xf.to_screen(*a), xf.to_screen(*b)], Stroke::new(1.0, t.smart_guide));
+                }
+            }
             // A new guide from the rulers with the Page tool is a liquid guide: dashed.
             if g.from.is_none() && app.session.tool_id() == "page" {
                 dashed(&painter, a, b, Stroke::new(1.0, col), 6.0, 3.0);
@@ -2881,6 +2889,9 @@ struct GuideDrag {
     from: Option<(designcraft_doc::SpreadRef, usize, usize)>,
     /// Pointer position (screen).
     at: Option<Pos2>,
+    /// Modifiers held at the pointer's last move: Shift snaps to the ruler's ticks, Command
+    /// suspends snapping.
+    mods: egui::Modifiers,
 }
 
 const GUIDE_PRESS: &str = "canvas_guide_press";
@@ -2921,10 +2932,12 @@ fn guide_measure(app: &DesignApp, xf: &Xf, g: &GuideDrag) -> Option<(&'static st
     let p = g.at?;
     let st = app.session.active()?;
     let layout = CanvasLayout::new(&st.doc, st.editing_parents);
-    let c = xf.to_canvas(p);
-    // Measured on the spread under the pointer, which the guide is dropped on (`guide_drag`),
-    // as the rulers measure that spread: not the one in the middle of the view.
-    let slot = layout.spread_at(c).and_then(|(r, _)| layout.slot(r)).or_else(|| current_slot(app, &layout).and_then(|i| layout.slots.get(i)))?;
+    // Measured where the guide is dropped (`guide_drag`): its snapped spot, on the spread under
+    // the pointer, as the rulers measure that spread, not the one in the middle of the view.
+    let (c, slot) = match guide_spot(app, xf, g) {
+        Some(spot) => (layout.to_canvas(spot.spread, spot.sp), layout.slot(spot.spread)?),
+        None => (xf.to_canvas(p), current_slot(app, &layout).and_then(|i| layout.slots.get(i))?),
+    };
     // An existing guide moves only on its own spread (`guide_drag`): over another, dropping it
     // leaves it where it was, so there is no place to show.
     if g.from.is_some_and(|(r, _, _)| r != slot.spread) {
@@ -2941,6 +2954,119 @@ fn guide_measure(app: &DesignApp, xf: &Xf, g: &GuideDrag) -> Option<(&'static st
         designcraft_doc::Orientation::Horizontal => ("Y", c.y - first.2.y, st.doc.settings.vertical_units),
     };
     value.is_finite().then_some((label, value, unit))
+}
+
+/// Where a dragged ruler guide is (#1221).
+struct GuideSpot {
+    /// The spread under the pointer.
+    spread: SpreadRef,
+    /// The pointer in that spread's coordinates.
+    pointer: Point,
+    /// [`Self::pointer`] with the guide's axis snapped.
+    sp: Point,
+    /// [`Self::sp`] on screen, where the preview line goes.
+    screen: Pos2,
+    /// Alignment marks (canvas coordinates) when an object or page edge or center caught it.
+    marks: Vec<Overlay>,
+}
+
+/// Where the guide of drag `g` is: its axis (x for a vertical guide, y for a horizontal one)
+/// snapped as a moved object's is, to ruler guides, margins, columns, bleed, the document grid and
+/// smart-guide targets (not the baseline grid, which would catch a horizontal guide almost
+/// anywhere). Shift snaps to the ruler's ticks instead and Command suspends snapping. The guides
+/// being dragged are not targets. An existing guide over another spread, where it
+/// can't be dropped, stays at the pointer. The preview, the readout and the drop all read it.
+/// `None` with no spread under the pointer.
+fn guide_spot(app: &DesignApp, xf: &Xf, g: &GuideDrag) -> Option<GuideSpot> {
+    let p = g.at?;
+    let st = app.session.active()?;
+    let layout = CanvasLayout::new(&st.doc, st.editing_parents);
+    let (r, pointer) = layout.spread_at(xf.to_canvas(p))?;
+    let spot = |sp: Point, marks: Vec<Overlay>| GuideSpot { spread: r, pointer, sp, screen: xf.to_screen(layout.to_canvas(r, sp)), marks };
+    if g.mods.command || g.from.is_some_and(|(from, _, _)| from != r) {
+        return Some(GuideSpot { spread: r, pointer, sp: pointer, screen: p, marks: Vec::new() });
+    }
+    let vertical = matches!(g.orientation, designcraft_doc::Orientation::Vertical);
+    let place = |v: f64| if vertical { Point::new(v, pointer.y) } else { Point::new(pointer.x, v) };
+    if g.mods.shift {
+        let slot = layout.slot(r)?;
+        let at = ruler_tick_of(&st.doc, slot, g.orientation, xf.zoom, pointer).map_or(pointer, place);
+        return Some(spot(at, Vec::new()));
+    }
+    let spread = st.doc.spread(r)?;
+    // Not targets: the dragged guide, and the others of a selected group, which move with it.
+    let exclude: Vec<GuideSel> = match g.from {
+        Some((sr, pi, gi)) if drags_group(app, GuideSel { spread: sr, page: pi, index: gi }) => st.selection.guides.to_vec(),
+        Some((sr, pi, gi)) => vec![GuideSel { spread: sr, page: pi, index: gi }],
+        None => Vec::new(),
+    };
+    // How far the guide reaches across its axis: its page, or the whole spread.
+    let page = match g.from {
+        Some((_, pi, gi)) => spread.pages.get(pi).filter(|pg| pg.guides.get(gi).is_some_and(|guide| !guide.spread)),
+        None => spread.pages.iter().find(|pg| pg.bounds().contains(pointer)),
+    };
+    let reach = page.map_or_else(|| spread.bounds(), |pg| pg.bounds());
+    let (at, rect, x_edges, y_edges) = if vertical {
+        (pointer.x, DRect::new(pointer.x, reach.y0, pointer.x, reach.y1), [true; 3], [false; 3])
+    } else {
+        (pointer.y, DRect::new(reach.x0, pointer.y, reach.x1, pointer.y), [false; 3], [true; 3])
+    };
+    let cx = designcraft_tools::ToolContext {
+        doc: &st.doc,
+        selection: &st.selection,
+        cache: &app.session.cache,
+        layout: &layout,
+        zoom: xf.zoom.max(1e-6),
+        layer: st.active_layer,
+        snap: app.ui.snap_view(),
+        unit: app.ui.units,
+        stroke_in_front: false,
+    };
+    let s = designcraft_tools::snap::snap(
+        &cx,
+        designcraft_tools::SnapRequest {
+            spread: r,
+            gesture: designcraft_tools::Gesture::Guide,
+            rect,
+            x_edges,
+            y_edges,
+            exclude: &[],
+            exclude_guides: &exclude,
+            copying: false,
+            lengths: [None, None],
+            angle: None,
+            radius: 0.0,
+            pointer,
+        },
+    );
+    let snapped = at + if vertical { s.delta.x } else { s.delta.y };
+    Some(if snapped.is_finite() { spot(place(snapped), s.guides) } else { spot(pointer, Vec::new()) })
+}
+
+/// The nearest ruler tick to spread point `sp` along a guide of `orientation`'s axis, in spread
+/// coordinates: the horizontal ruler's (the piece under the point) where that axis runs across the
+/// screen, else the vertical ruler's. `None` when the ruler has no ticks there.
+fn ruler_tick_of(doc: &Document, slot: &SpreadSlot, orientation: designcraft_doc::Orientation, zoom: f64, sp: Point) -> Option<f64> {
+    let vertical = matches!(orientation, designcraft_doc::Orientation::Vertical);
+    // A quarter-turned spread runs its x axis down the screen.
+    let across = vertical == slot.rotation.is_multiple_of(2);
+    let c = slot.to_canvas(sp);
+    let pieces = ruler_pieces_of(doc, slot, doc.zero_point());
+    let step = |unit: designcraft_geom::Unit| {
+        let (major, sub) = unit.ruler_ticks(zoom);
+        let step = major / f64::from(sub.max(1));
+        (step.is_finite() && step > 0.0).then_some(step)
+    };
+    let tick = |v: f64, o: f64, step: f64| o + ((v - o) / step).round() * step;
+    let c = if across {
+        let &(_, _, o) = pieces.iter().find(|(from, to, _)| *from <= c.x && c.x < *to).or(pieces.first())?;
+        Point::new(tick(c.x, o.x, step(doc.settings.horizontal_units)?), c.y)
+    } else {
+        let o = pieces.first()?.2;
+        Point::new(c.x, tick(c.y, o.y, step(doc.settings.vertical_units)?))
+    };
+    let s = slot.to_spread(c);
+    Some(if vertical { s.x } else { s.y }).filter(|v| v.is_finite())
 }
 
 /// The guide under a screen point (within 3 px), as (spread, page, index, orientation).
@@ -2994,7 +3120,7 @@ fn guide_drag(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, rec
                 None
             };
             if let Some(orientation) = orientation {
-                drag = Some(GuideDrag { orientation, from: None, at: Some(o) });
+                drag = Some(GuideDrag { orientation, from: None, at: Some(o), mods: egui::Modifiers::NONE });
             }
         } else if rect.contains(o)
             && matches!(app.session.tool_id(), "selection" | "directSelection")
@@ -3007,13 +3133,14 @@ fn guide_drag(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, rec
                 let _ = app.run("guide.select", json!({"spread": r, "page": pi, "index": gi}));
             }
             ui.data_mut(|d| d.insert_temp(egui::Id::new(GUIDE_PRESS), GuidePress { origin: o, shift }));
-            drag = Some(GuideDrag { orientation, from: Some((r, pi, gi)), at: Some(o) });
+            drag = Some(GuideDrag { orientation, from: Some((r, pi, gi)), at: Some(o), mods: egui::Modifiers::NONE });
         }
     }
     let Some(mut g) = drag else { return false };
     if let Some(p) = latest {
         g.at = Some(p);
     }
+    g.mods = ui.input(|i| i.modifiers);
     if !released {
         ui.ctx().set_cursor_icon(match g.orientation {
             designcraft_doc::Orientation::Horizontal => egui::CursorIcon::ResizeVertical,
@@ -3041,12 +3168,11 @@ fn guide_drag(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, rec
     // Dragging one of several selected guides moves (or deletes) them all.
     let group = g.from.is_some_and(|(spread, page, index)| drags_group(app, GuideSel { spread, page, index }));
     let on_canvas = rect.contains(p);
-    let target = app.session.active().and_then(|st| {
-        let layout = CanvasLayout::new(&st.doc, st.editing_parents);
-        let (r, sp) = layout.spread_at(xf.to_canvas(p))?;
-        let spread = st.doc.spread(r)?;
-        let on_page = spread.pages.iter().position(|pg| pg.bounds().contains(sp));
-        Some((r, sp, on_page))
+    // Placed where the preview showed it (snapped); the page under the pointer owns a new guide.
+    let target = guide_spot(app, xf, &g).and_then(|spot| {
+        let spread = app.session.active()?.doc.spread(spot.spread)?;
+        let on_page = spread.pages.iter().position(|pg| pg.bounds().contains(spot.pointer));
+        Some((spot.spread, spot.sp, on_page))
     });
     let pos_of = |sp: Point| match g.orientation {
         designcraft_doc::Orientation::Horizontal => sp.y,
@@ -3065,7 +3191,7 @@ fn guide_drag(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, rec
             let _ = app.run("guide.delete", json!({"spread": r, "page": pi, "index": gi}));
         }
         (Some((r, _, _)), true, Some((tr, _, _))) if tr == r && group => {
-            if let Some((dx, dy)) = press.and_then(|press| guide_drag_delta(app, xf, &g, press.origin, p)) {
+            if let Some((dx, dy)) = press.and_then(|press| guide_drag_delta(app, xf, &g, press.origin)) {
                 let _ = app.run("guide.moveBy", json!({"dx": dx, "dy": dy}));
             }
         }
@@ -3093,18 +3219,19 @@ fn drags_group(app: &DesignApp, from: GuideSel) -> bool {
     app.session.active().is_some_and(|st| st.selection.guides.len() > 1 && st.selection.guides.contains(&from))
 }
 
-/// How far a drag of the existing guide `g.from`, pressed at `origin` and now at `p` (screen),
-/// moves guides, in spread coordinates: the dragged guide goes to the pointer, the other selected
-/// guides as far along their own axis as the pointer moved. `None` while the pointer is not over
-/// the guide's own spread, where a drop leaves it in place.
-fn guide_drag_delta(app: &DesignApp, xf: &Xf, g: &GuideDrag, origin: Pos2, p: Pos2) -> Option<(f64, f64)> {
+/// How far a drag of the existing guide `g.from`, pressed at `origin` (screen), moves guides, in
+/// spread coordinates: the dragged guide goes to its [`guide_spot`], the other selected guides as
+/// far along their own axis as it moved. `None` while the pointer is not over the guide's own
+/// spread, where a drop leaves it in place.
+fn guide_drag_delta(app: &DesignApp, xf: &Xf, g: &GuideDrag, origin: Pos2) -> Option<(f64, f64)> {
     let (r, pi, gi) = g.from?;
-    let st = app.session.active()?;
-    let layout = CanvasLayout::new(&st.doc, st.editing_parents);
-    let (tr, sp) = layout.spread_at(xf.to_canvas(p))?;
-    if tr != r {
+    let spot = guide_spot(app, xf, g)?;
+    if spot.spread != r {
         return None;
     }
+    let sp = spot.sp;
+    let st = app.session.active()?;
+    let layout = CanvasLayout::new(&st.doc, st.editing_parents);
     let start = layout.slot(r)?.to_spread(xf.to_canvas(origin));
     let at = st.doc.spread(r)?.pages.get(pi)?.guides.get(gi)?.position;
     let (dx, dy) = match g.orientation {
@@ -3130,7 +3257,7 @@ fn moving_guides(app: &DesignApp, xf: &Xf, rect: Rect, g: &GuideDrag, press: Gui
     if !rect.contains(p) || (p - press.origin).length() <= GUIDE_CLICK_SLOP {
         return None;
     }
-    let (dx, dy) = guide_drag_delta(app, xf, g, press.origin, p)?;
+    let (dx, dy) = guide_drag_delta(app, xf, g, press.origin)?;
     let from = GuideSel { spread, page, index };
     let guides = if drags_group(app, from) { app.session.active()?.selection.guides.iter().copied().collect() } else { [from].into_iter().collect() };
     Some(MovingGuides { guides, dx, dy })
@@ -4231,7 +4358,7 @@ mod tests {
         for (orientation, label, want) in
             [(designcraft_doc::Orientation::Vertical, "X", at.x - 100.0), (designcraft_doc::Orientation::Horizontal, "Y", at.y - 50.0)]
         {
-            let g = GuideDrag { orientation, from: None, at: Some(dest) };
+            let g = GuideDrag { orientation, from: None, at: Some(dest), mods: egui::Modifiers::NONE };
             let (l, v, _) = guide_measure(h.state(), &xf, &g).unwrap();
             assert_eq!(l, label);
             assert!((v - want).abs() < 1e-6, "{label}: {v} vs {want}");
@@ -4270,7 +4397,12 @@ mod tests {
         let inside = Point::new(last.bounds.center().x, last.bounds.y0 + (last.bounds.y1 - last.bounds.y0) * 0.3);
         let (r, sp) = layout.spread_at(inside).unwrap();
         assert_eq!(r, last.spread);
-        let g = GuideDrag { orientation: designcraft_doc::Orientation::Horizontal, from: None, at: Some(xf.to_screen(inside)) };
+        let g = GuideDrag {
+            orientation: designcraft_doc::Orientation::Horizontal,
+            from: None,
+            at: Some(xf.to_screen(inside)),
+            mods: egui::Modifiers::NONE,
+        };
         let (label, v, _) = guide_measure(h.state(), &xf, &g).unwrap();
         assert_eq!(label, "Y");
         // The guide would be stored at `sp.y` on that spread, which its ruler reads from the zero point.
@@ -4279,7 +4411,12 @@ mod tests {
         // An existing guide of another spread can't be dropped there (it only moves on its own
         // spread): no readout over this one, a readout over its own.
         let first = layout.slots[current].spread;
-        let moving = GuideDrag { orientation: designcraft_doc::Orientation::Horizontal, from: Some((first, 0, 0)), at: Some(xf.to_screen(inside)) };
+        let moving = GuideDrag {
+            orientation: designcraft_doc::Orientation::Horizontal,
+            from: Some((first, 0, 0)),
+            at: Some(xf.to_screen(inside)),
+            mods: egui::Modifiers::NONE,
+        };
         assert!(guide_measure(h.state(), &xf, &moving).is_none(), "an existing guide over another spread");
         let own = layout.slots[current].bounds;
         let over_own = Point::new(own.center().x, own.y0 + (own.y1 - own.y0) * 0.3);

@@ -191,6 +191,9 @@ pub enum Gesture {
     Create,
     Rotate,
     Point,
+    /// A ruler guide being dragged: one line on one axis, with no size or spacing to match and
+    /// no pull from the baseline grid.
+    Guide,
 }
 
 pub struct SnapRequest<'a> {
@@ -202,6 +205,8 @@ pub struct SnapRequest<'a> {
     /// Top, center, bottom.
     pub y_edges: [bool; 3],
     pub exclude: &'a [ItemId],
+    /// Ruler guides that are not targets: the ones being dragged.
+    pub exclude_guides: &'a [designcraft_doc::GuideSel],
     pub copying: bool,
     /// Proposed width and height for the dimensions pass. None when that length is not being set.
     pub lengths: [Option<f64>; 2],
