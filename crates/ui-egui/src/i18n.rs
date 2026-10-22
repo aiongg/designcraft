@@ -4625,9 +4625,6 @@ mod tests {
     /// The German and Japanese tables translate the whole interface and win over the shared columns.
     const WHOLE_INTERFACE: [&str; 2] = ["de", "ja"];
 
-    /// Catalog entries for strings the interface no longer shows, kept until their catalog drops them.
-    const STALE_ENTRIES: &[&str] = &["A custom name"];
-
     #[test]
     fn every_interface_language_has_a_catalog() {
         for (lang, i) in SHARED_COLUMNS.iter().zip(0..) {
@@ -4731,9 +4728,7 @@ mod tests {
 
         // A key is current while the interface or another catalog has it.
         let interface = interface_strings();
-        let current = |key: &str, own: &str| {
-            interface.contains(key) || STALE_ENTRIES.contains(&key) || catalogs.iter().any(|(name, keys)| *name != own && keys.contains(key))
-        };
+        let current = |key: &str, own: &str| interface.contains(key) || catalogs.iter().any(|(name, keys)| *name != own && keys.contains(key));
         for (name, keys) in &catalogs {
             let mut stale: Vec<_> = keys.iter().filter(|key| !current(key, name)).collect();
             stale.sort();
