@@ -3398,6 +3398,7 @@ fn snap_gutter(app: &DesignApp, g: &ColumnDrag, want: f64, shift: bool, zoom: f6
             x_edges: [true, false, true],
             y_edges: [false; 3],
             exclude: &[],
+            exclude_guides: &[],
             copying: false,
             lengths: [None, None],
             angle: None,
