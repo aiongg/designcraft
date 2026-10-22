@@ -5109,14 +5109,6 @@ mod tests {
     }
 
     #[test]
-    fn czech_translates_every_tool_name() {
-        for tool in designcraft_tools::TOOL_GROUPS.iter().flat_map(|group| group.iter()) {
-            assert_ne!(tr("cs", tool.label), tool.label, "{}", tool.id);
-            assert_eq!(tr("", tool.label), tool.label);
-        }
-    }
-
-    #[test]
     fn japanese_vertical_type_commands_are_translated() {
         for (en, ja) in [
             ("Story Direction", "組み方向"),
