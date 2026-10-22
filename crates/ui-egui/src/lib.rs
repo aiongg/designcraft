@@ -685,8 +685,9 @@ pub struct DesignApp {
     pub(crate) pending_window_commands: Vec<egui::ViewportCommand>,
     /// The host installed a native menu bar (macOS): don't draw menus in the window.
     pub native_menu: bool,
-    /// Shortcuts the native menu handles (skip them in the egui shortcut handler).
-    pub native_shortcuts: std::collections::HashSet<String>,
+    /// The commands the native menu bar gives a key equivalent, with that shortcut: the egui
+    /// shortcut handler leaves that key to the bar and runs the command's other bindings itself.
+    pub native_shortcuts: std::collections::HashMap<String, String>,
     /// Every command's shortcuts, with the user's changes (`ui.shortcuts`) applied.
     pub keymap: craft_keymap::Keymap,
     pub(crate) key_dispatcher: craft_keymap::egui::Dispatcher,
