@@ -5321,7 +5321,7 @@ mod tests {
     fn czech_catalog_has_no_stale_keys_and_keeps_placeholders_and_markers() {
         let catalog: HashMap<_, _> = cs::TABLE.iter().copied().collect();
         assert_eq!(catalog.len(), cs::TABLE.len(), "duplicate Czech keys");
-        let keys = interface_strings();
+        let mut keys = interface_strings();
         // A new English string falls back to English until it is translated, so only stale
         // entries (keys nothing passes to `tr` any more) fail.
         // The Keyboard Shortcuts dialog's strings (craft-keymap) reach `tr` too.

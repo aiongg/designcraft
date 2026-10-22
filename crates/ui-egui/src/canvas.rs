@@ -1591,7 +1591,7 @@ pub fn begin_frame(ctx: &egui::Context) {
 /// (held when this frame's events began, held after them).
 #[cfg(not(target_arch = "wasm32"))]
 fn modifiers_id() -> egui::Id {
-    egui::Id::new("canvas-frame-modifiers")
+    egui::Id::unique("canvas-frame-modifiers")
 }
 
 /// Caret / text highlight inside a table cell (the cell's lines are offset by the cell origin).
