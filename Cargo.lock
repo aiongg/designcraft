@@ -1280,6 +1280,7 @@ dependencies = [
 name = "designcraft-doc"
 version = "0.11.0"
 dependencies = [
+ "chrono",
  "designcraft-color",
  "designcraft-geom",
  "proptest",
@@ -1332,6 +1333,7 @@ dependencies = [
 name = "designcraft-epub"
 version = "0.11.0"
 dependencies = [
+ "chrono",
  "designcraft-color",
  "designcraft-doc",
  "zip",
@@ -1423,6 +1425,7 @@ dependencies = [
 name = "designcraft-pdf"
 version = "0.11.0"
 dependencies = [
+ "chrono",
  "craft-cms",
  "craft-pdf",
  "craft-prepress",
@@ -1447,6 +1450,7 @@ dependencies = [
 name = "designcraft-pptx"
 version = "0.11.0"
 dependencies = [
+ "chrono",
  "designcraft-color",
  "designcraft-compose",
  "designcraft-doc",
