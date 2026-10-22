@@ -2576,7 +2576,18 @@ fn keyboard_pane(app: &DesignApp) -> bool {
 /// A key for the active tool (caret movement, nudging, Backspace); Escape it leaves alone
 /// deselects.
 fn tool_key(app: &mut DesignApp, key: egui::Key, modifiers: egui::Modifiers, vi: designcraft_engine::ViewInfo) {
-    let k = match key {
+    let Some(k) = tool_key_of(key) else { return };
+    let m = Mods { shift: modifiers.shift, alt: modifiers.alt, cmd: modifiers.command, ctrl: modifiers.ctrl, space: false };
+    let handled = app.session.tool_key(k, m, vi).unwrap_or(false);
+    if !handled && k == ToolKey::Escape {
+        let _ = app.run("edit.deselectAll", json!({}));
+    }
+    app.after_engine();
+}
+
+/// The tool key a key press is, if any: the keys that move the caret or edit around it.
+fn tool_key_of(key: egui::Key) -> Option<ToolKey> {
+    Some(match key {
         egui::Key::ArrowLeft => ToolKey::Left,
         egui::Key::ArrowRight => ToolKey::Right,
         egui::Key::ArrowUp => ToolKey::Up,
@@ -2588,14 +2599,8 @@ fn tool_key(app: &mut DesignApp, key: egui::Key, modifiers: egui::Modifiers, vi:
         egui::Key::Tab => ToolKey::Tab,
         egui::Key::Home => ToolKey::Home,
         egui::Key::End => ToolKey::End,
-        _ => return,
-    };
-    let m = Mods { shift: modifiers.shift, alt: modifiers.alt, cmd: modifiers.command, ctrl: modifiers.ctrl, space: false };
-    let handled = app.session.tool_key(k, m, vi).unwrap_or(false);
-    if !handled && k == ToolKey::Escape {
-        let _ = app.run("edit.deselectAll", json!({}));
-    }
-    app.after_engine();
+        _ => return None,
+    })
 }
 
 /// The composer's edits at the text caret: marked text previews in the story, a commit types
@@ -2603,8 +2608,21 @@ fn tool_key(app: &mut DesignApp, key: egui::Key, modifiers: egui::Modifiers, vi:
 fn type_text(app: &mut DesignApp, edits: Vec<craft_ui::ime::Edit>, plain_paste: bool) {
     use craft_ui::ime::Edit;
     let vi = app.view_info();
+    let trace = std::env::var_os("DESIGNCRAFT_DEBUG_KEYS").is_some();
     for edit in edits {
-        if !matches!(edit, Edit::Preedit { .. } | Edit::Insert(_) | Edit::DeleteSurroundingBytes { .. }) {
+        log::debug!("text edit {edit:?}");
+        if trace {
+            eprintln!("text edit {edit:?} (pending deletion {:?})", app.ime_around);
+        }
+        // A pending deletion waits for its text. macOS sends the deletion of an accent picked with
+        // the letter's own key before that key's press, so only a key that moves the caret or
+        // edits drops it.
+        let keeps = match &edit {
+            Edit::Preedit { .. } | Edit::Insert(_) | Edit::DeleteSurroundingBytes { .. } => true,
+            Edit::Key { key, .. } => tool_key_of(*key).is_none(),
+            _ => false,
+        };
+        if !keeps {
             app.ime_around = [0, 0];
         }
         let r = match edit {
@@ -5095,6 +5113,26 @@ mod tests {
 
     /// Holding E on a Mac and picking è replaces the "e" already typed: the input method deletes
     /// it by byte count with the commit, as one undo step. Without that the story reads "eè".
+    /// macOS sends the deletion of an accent picked with the letter's own key before that key's
+    /// press: an empty commit, then the key, then its text. The key between them doesn't drop it.
+    #[test]
+    fn press_and_hold_deletion_survives_the_key_that_types_the_accent() {
+        let (mut h, id) = typing("ẫ");
+        h.state_mut().run("text.placeCaret", json!({"frame": id, "point": [390.0, 80.0]})).unwrap();
+        h.run_steps(2);
+        let text = |h: &Harness<'_, DesignApp>| h.state().session.doc().unwrap().doc.stories.values().map(|s| s.text.clone()).collect::<String>();
+        h.event(egui::Event::Text("e".into()));
+        h.run_steps(2);
+        assert_eq!(text(&h), "ẫe");
+        h.event(egui::Event::Ime(egui::ImeEvent::DeleteSurroundingBytes { before_bytes: 1, after_bytes: 0 }));
+        h.event(egui::Event::Ime(egui::ImeEvent::Commit(String::new())));
+        h.event(egui::Event::Key { key: egui::Key::E, physical_key: Some(egui::Key::E), pressed: true, repeat: false, modifiers: egui::Modifiers::NONE });
+        h.event(egui::Event::Text("è".into()));
+        h.event(egui::Event::Key { key: egui::Key::E, physical_key: Some(egui::Key::E), pressed: false, repeat: false, modifiers: egui::Modifiers::NONE });
+        h.run_steps(2);
+        assert_eq!(text(&h), "ẫè");
+    }
+
     #[test]
     fn press_and_hold_accents_replace_the_letter_typed() {
         let (mut h, id) = typing("ẫ");
