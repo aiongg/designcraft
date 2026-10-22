@@ -4509,7 +4509,7 @@ mod tests {
         }
         // A shortcut the user set runs here until the native menu bar carries it as its key
         // equivalent; then only the bar runs it, once.
-        app.ui.shortcuts.insert("view.zoomOut".to_string(), "Cmd+9".to_string());
+        run_ui(&mut app, "window.setShortcut", &json!({"id": "view.zoomOut", "shortcut": "Cmd+9"})).unwrap().unwrap();
         for (native, zooms_out) in [(false, true), (true, false)] {
             if native {
                 app.native_shortcuts.insert("view.zoomOut".to_string());
