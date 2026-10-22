@@ -3081,9 +3081,10 @@ pub fn shortcuts(app: &mut DesignApp, ctx: &egui::Context) {
             }
         }
         if let Some((id, exact)) = fired {
-            // The native menu's accelerator fires only for the shortcut's own key and modifiers; the
-            // Plus key standing in for = never reaches it.
-            if exact && app.native_shortcuts.contains(&id) && !app.ui.shortcuts.contains_key(&id) {
+            // The native menu bar carries the shortcuts in effect, the user's included, and its
+            // accelerator fires only for the shortcut's own key and modifiers; the Plus key standing
+            // in for = never reaches it.
+            if exact && app.native_shortcuts.contains(&id) {
                 continue; // The native menu handles it.
             }
             // The key press belongs to the shortcut: what it opens (Quick Apply's list, a dialog's
@@ -4505,6 +4506,19 @@ mod tests {
             frame(&mut app, vec![]);
             let z = app.view().unwrap().zoom;
             assert_eq!(z > z0, zooms_in, "native menu, {k:?} {m:?}: {z0} -> {z}");
+        }
+        // A shortcut the user set runs here until the native menu bar carries it as its key
+        // equivalent; then only the bar runs it, once.
+        app.ui.shortcuts.insert("view.zoomOut".to_string(), "Cmd+9".to_string());
+        for (native, zooms_out) in [(false, true), (true, false)] {
+            if native {
+                app.native_shortcuts.insert("view.zoomOut".to_string());
+            }
+            let z0 = app.view().unwrap().zoom;
+            frame(&mut app, key(egui::Key::Num9, egui::Modifiers::COMMAND));
+            frame(&mut app, vec![]);
+            let z = app.view().unwrap().zoom;
+            assert_eq!(z < z0, zooms_out, "native {native}: {z0} -> {z}");
         }
     }
 
