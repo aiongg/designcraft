@@ -367,6 +367,7 @@ pub const MENUS: &[(&str, &[&str])] = &[
             "cmd:edit.stepAndRepeat",
             "-",
             "cmd:edit.selectAll",
+            "cmd:guide.selectAll",
             "cmd:edit.deselectAll",
             "-",
             "ui:app.findChange",
@@ -462,6 +463,7 @@ pub const MENUS: &[(&str, &[&str])] = &[
             "-",
             "cmd:type.createOutlines",
             "ui:app.findFontDialog",
+            "cmd:font.reload",
             ">Change Case",
             "cmd:type.changeCase|UPPERCASE|{\"case\": \"upper\"}",
             "cmd:type.changeCase|lowercase|{\"case\": \"lower\"}",
@@ -1322,16 +1324,7 @@ fn run_ui_inner(app: &mut DesignApp, id: &str, p: &Value) -> Option<Result<Value
             Ok(Value::Null)
         }
         "app.deleteAllGuides" => {
-            let Some(st) = app.session.active() else { return Some(Err("no document open".into())) };
-            let page = crate::canvas::current_page(app).unwrap_or(0);
-            let spread = if st.editing_parents {
-                // The parent spread the canvas shows.
-                let layout = designcraft_tools::CanvasLayout::new(&st.doc, true);
-                let shown = crate::canvas::current_slot(app, &layout).and_then(|i| layout.slots.get(i)).map(|s| s.spread);
-                json!(shown.unwrap_or(designcraft_doc::SpreadRef::Parent(0)))
-            } else {
-                json!(st.doc.page_loc(page).map_or(0, |l| l.0))
-            };
+            let Some(spread) = guide_spread(app) else { return Some(Err("no document open".into())) };
             return Some(app.run("guide.deleteAll", json!({"spread": spread})));
         }
         "app.deletePage" | "app.duplicateSpread" => {
@@ -2292,6 +2285,9 @@ pub enum AppMenuItem {
         command: &'static str,
     },
     Sep,
+    /// Interface language: a submenu with each UI language in its own name, the current one
+    /// checked (`app.language {lang}`).
+    Language,
     Services,
     Hide,
     HideOthers,
@@ -2304,6 +2300,7 @@ pub const MAC_APP_MENU: &[AppMenuItem] = &[
     AppMenuItem::Cmd { id: "dc-discord", label: "Join the ArtCraft Discord…", command: "help.discord" },
     AppMenuItem::Sep,
     AppMenuItem::Cmd { id: "dc-settings", label: "Settings…", command: "app.preferences" },
+    AppMenuItem::Language,
     AppMenuItem::Sep,
     AppMenuItem::Services,
     AppMenuItem::Sep,
@@ -2447,6 +2444,9 @@ pub fn menu_enabled(app: &DesignApp, id: &str) -> bool {
     if id.starts_with("fit.") {
         return enabled(app, "object.fit");
     }
+    if id == "guide.selectAll" && (!app.ui.guides || app.ui.guides_locked) {
+        return false;
+    }
     if ui_label(id).is_some() {
         return app.session.active().is_some() || id.starts_with("app.") || id.starts_with("window.") || id.starts_with("help.");
     }
@@ -2548,6 +2548,16 @@ fn activate_inner(app: &mut DesignApp, id: &str, params: &Value) {
         app.ui.dialog = Some(crate::dialogs::Dialog::new(&format!("cmd:{id}"), json!({})));
         return;
     }
+    // Select All Guides: on the spread in view, while guides are shown and not locked.
+    if params.is_null() && id == "guide.selectAll" {
+        if app.ui.guides
+            && !app.ui.guides_locked
+            && let Some(spread) = guide_spread(app)
+        {
+            let _ = app.run(id, json!({"spread": spread}));
+        }
+        return;
+    }
     let p = if params.is_null() { json!({}) } else { params.clone() };
     // Update Link asks before replacing edits made to linked text in the layout.
     if id == "links.update" {
@@ -2555,6 +2565,20 @@ fn activate_inner(app: &mut DesignApp, id: &str, params: &Value) {
         return;
     }
     let _ = app.run(id, p);
+}
+
+/// The spread the guide commands of the menus act on: the one in view (a parent spread while
+/// parents are edited).
+fn guide_spread(app: &DesignApp) -> Option<Value> {
+    let st = app.session.active()?;
+    let page = crate::canvas::current_page(app).unwrap_or(0);
+    Some(if st.editing_parents {
+        let layout = designcraft_tools::CanvasLayout::new(&st.doc, true);
+        let shown = crate::canvas::current_slot(app, &layout).and_then(|i| layout.slots.get(i)).map(|s| s.spread);
+        json!(shown.unwrap_or(designcraft_doc::SpreadRef::Parent(0)))
+    } else {
+        json!(st.doc.page_loc(page).map_or(0, |l| l.0))
+    })
 }
 
 /// A menu button whose popup stays within the viewport and scrolls when needed.
@@ -3089,9 +3113,10 @@ pub fn shortcuts(app: &mut DesignApp, ctx: &egui::Context) {
             }
         }
         if let Some((id, exact)) = fired {
-            // The native menu's accelerator fires only for the shortcut's own key and modifiers; the
-            // Plus key standing in for = never reaches it.
-            if exact && app.native_shortcuts.contains(&id) && !app.ui.shortcuts.contains_key(&id) {
+            // The native menu bar carries the shortcuts in effect, the user's included, and its
+            // accelerator fires only for the shortcut's own key and modifiers; the Plus key standing
+            // in for = never reaches it.
+            if exact && app.native_shortcuts.contains(&id) {
                 continue; // The native menu handles it.
             }
             // The key press belongs to the shortcut: what it opens (Quick Apply's list, a dialog's
@@ -4534,6 +4559,19 @@ mod tests {
             let z = app.view().unwrap().zoom;
             assert_eq!(z > z0, zooms_in, "native menu, {k:?} {m:?}: {z0} -> {z}");
         }
+        // A shortcut the user set runs here until the native menu bar carries it as its key
+        // equivalent; then only the bar runs it, once.
+        run_ui(&mut app, "window.setShortcut", &json!({"id": "view.zoomOut", "shortcut": "Cmd+9"})).unwrap().unwrap();
+        for (native, zooms_out) in [(false, true), (true, false)] {
+            if native {
+                app.native_shortcuts.insert("view.zoomOut".to_string());
+            }
+            let z0 = app.view().unwrap().zoom;
+            frame(&mut app, key(egui::Key::Num9, egui::Modifiers::COMMAND));
+            frame(&mut app, vec![]);
+            let z = app.view().unwrap().zoom;
+            assert_eq!(z < z0, zooms_out, "native {native}: {z0} -> {z}");
+        }
     }
 
     #[test]
@@ -5033,6 +5071,7 @@ mod tests {
             "-",
             "Create Outlines",
             "Find/Replace Font…",
+            "Reload Fonts",
             "Change Case >",
             "-",
             "Type on a Path >",
@@ -5579,7 +5618,12 @@ mod tests {
         let (Some(about), Some(settings)) = (pos("help.about"), pos("app.preferences")) else { panic!("About and Settings are in the app menu") };
         assert!(about < settings);
         assert_eq!(MAC_APP_MENU.get(settings - 1), Some(&AppMenuItem::Sep));
-        assert_eq!(MAC_APP_MENU.get(settings + 1), Some(&AppMenuItem::Sep));
+        // Language follows Settings, as in the suite's other apps, titled in the interface language.
+        assert_eq!(MAC_APP_MENU.get(settings + 1), Some(&AppMenuItem::Language));
+        assert_eq!(MAC_APP_MENU.get(settings + 2), Some(&AppMenuItem::Sep));
+        for (code, _) in crate::i18n::LANGUAGES.iter().filter(|(c, _)| !c.is_empty()) {
+            assert_ne!(crate::i18n::tr(code, "Language"), "Language", "{code}");
+        }
         let label = |command: &str| {
             MAC_APP_MENU.iter().find_map(|m| match m {
                 AppMenuItem::Cmd { label, command: c, .. } if *c == command => Some(*label),
