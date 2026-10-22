@@ -81,6 +81,18 @@ impl NativeMenu {
                     items.insert(id.into(), (command.into(), Value::Null, Handle::Plain(item)));
                     appended
                 }
+                AppMenuItem::Language => {
+                    let sub = Submenu::new(menu_title(app, "Language"), true);
+                    for (code, name) in designcraft_ui_egui::i18n::LANGUAGES {
+                        let id = format!("dc-language-{}", if code.is_empty() { "en" } else { code });
+                        let params = serde_json::json!({ "lang": code });
+                        let checked = menus::checked(app, "app.language", &params).unwrap_or(false);
+                        let item = CheckMenuItem::with_id(id.clone(), menus::native_label(name), true, checked, None);
+                        let _ = sub.append(&item);
+                        items.insert(id, ("app.language".into(), params, Handle::Check(item)));
+                    }
+                    app_menu.append(&sub)
+                }
                 AppMenuItem::Sep => app_menu.append(&PredefinedMenuItem::separator()),
                 AppMenuItem::Services => app_menu.append(&PredefinedMenuItem::services(None)),
                 AppMenuItem::Hide => app_menu.append(&PredefinedMenuItem::hide(None)),
