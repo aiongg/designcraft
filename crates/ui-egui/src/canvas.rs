@@ -5126,9 +5126,21 @@ mod tests {
         assert_eq!(text(&h), "ẫe");
         h.event(egui::Event::Ime(egui::ImeEvent::DeleteSurroundingBytes { before_bytes: 1, after_bytes: 0 }));
         h.event(egui::Event::Ime(egui::ImeEvent::Commit(String::new())));
-        h.event(egui::Event::Key { key: egui::Key::E, physical_key: Some(egui::Key::E), pressed: true, repeat: false, modifiers: egui::Modifiers::NONE });
+        h.event(egui::Event::Key {
+            key: egui::Key::E,
+            physical_key: Some(egui::Key::E),
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
         h.event(egui::Event::Text("è".into()));
-        h.event(egui::Event::Key { key: egui::Key::E, physical_key: Some(egui::Key::E), pressed: false, repeat: false, modifiers: egui::Modifiers::NONE });
+        h.event(egui::Event::Key {
+            key: egui::Key::E,
+            physical_key: Some(egui::Key::E),
+            pressed: false,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
         h.run_steps(2);
         assert_eq!(text(&h), "ẫè");
     }
