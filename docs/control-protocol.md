@@ -75,8 +75,9 @@ to finish before retrying a request that would exceed the pending-event limit.
 ## Shared panel docking
 
 Panel arrangements support tab grouping and reordering, horizontal and vertical splits,
-and movable, resizable floating groups inside the application window. Drag a panel tab,
-or use its context menu. Floating groups remain within the application viewport.
+and movable, resizable floating windows inside the application window. A floating window
+holds tab groups split side by side or one above another, like the dock area. Drag a panel
+tab, or use its context menu. Floating windows remain within the application viewport.
 
 The window is one panel layout: the protected `canvas` panel (the document area) beside a
 dock at the logical end edge, the right in left-to-right languages and the left in
@@ -147,8 +148,12 @@ invalid destinations return an error without changing the arrangement.
 
 `window.panel.layout {action}` also accepts the shared, externally tagged action schema.
 For example, `{"action":{"MoveFloating":{"panel":"properties","rect":[44,66,360,450]}}}`
-updates a floating group's position and size; `{"action":{"ResizeSplit":{"path":[],"size":{"Ratio":0.35}}}}`
-resizes the root divider (`false`/`true` path entries select first/second children).
+updates a floating window's position and size; `{"action":{"ResizeSplit":{"path":[],"size":{"Ratio":0.35}}}}`
+resizes the root divider (`false`/`true` path entries select first/second children), and
+`{"action":{"ResizeWindowSplit":{"panel":"swatches","path":[],"size":{"Ratio":0.6}}}}` resizes
+a divider in the floating window that holds `panel`, by its path from the window's root.
+Floating windows saved as a stack of groups (`{"groups": […], "rect": […]}`) load as groups
+one above another, sized by their saved heights.
 `Move` with `placement: {"Tab":{"before":"swatches"}}` reorders tabs, and
 `SetStackOpen {panel,open}` / `ResizeStack {panel,height}` control accordion entries.
 The UI dispatches these same commands. Unknown panel IDs, invalid geometry, and stale

@@ -13,7 +13,7 @@ fn panel_commands_group_split_reorder_float_and_restore_without_duplicate_owners
     app.run("window.panel.move", json!({"panel":"properties", "anchor":"swatches", "before":"swatches"})).unwrap();
     let before_float = app.ui.docking.clone().unwrap();
     app.run("window.panel.float", json!({"panel":"properties", "x":50,"y":70,"width":330,"height":410})).unwrap();
-    assert!(app.ui.docking.as_ref().unwrap().floating.iter().flat_map(|w| &w.groups).any(|g| g.panels == ["properties"]));
+    assert!(app.ui.docking.as_ref().unwrap().floating.iter().flat_map(window_groups).any(|g| g.panels == ["properties"]));
     app.run("window.panel.dock", json!({"panel":"properties"})).unwrap();
     assert_eq!(app.ui.docking.as_ref().unwrap(), &before_float);
     app.run("window.panel.close", json!({"panel":"properties"})).unwrap();
@@ -86,12 +86,12 @@ fn ordinary_panel_tab_drag_enters_shared_docking_and_can_redock_into_another_tab
     let source = h.query_all_by_label("Layers").find(|node| node.rect().height() <= 45.0).unwrap().rect().center();
     drag(&mut h, source, egui::pos2(160.0, 140.0));
     let layout = h.state().ui.docking.as_ref().expect("ordinary tab drag starts shared docking");
-    assert!(layout.floating.iter().flat_map(|w| &w.groups).any(|g| g.panels.contains(&"layers".into())), "{layout:?}");
+    assert!(layout.floating.iter().flat_map(window_groups).any(|g| g.panels.contains(&"layers".into())), "{layout:?}");
     let source = h.ctx.read_response(tab_id("layers")).unwrap().rect.center();
     let destination = h.ctx.read_response(tab_id("properties")).unwrap().rect.center();
     drag(&mut h, source, destination);
     let layout = h.state().ui.docking.as_ref().unwrap();
-    assert!(!layout.floating.iter().flat_map(|w| &w.groups).any(|g| g.panels.contains(&"layers".into())));
+    assert!(!layout.floating.iter().flat_map(window_groups).any(|g| g.panels.contains(&"layers".into())));
     assert!(valid(layout));
     assert_eq!(h.state().ui.docking_focused.as_deref(), Some("layers"), "the user's drag keeps the focus on the panel it moved");
 }
@@ -661,7 +661,7 @@ fn paragraph_styles_open_floating_with_character_styles() {
     let mut app = app();
     app.run("window.panel", json!({"panel":"paragraphStyles"})).unwrap();
     let layout = app.ui.docking.clone().unwrap();
-    let group = layout.floating.iter().flat_map(|w| &w.groups).find(|g| g.panels.iter().any(|p| p == "paragraphStyles")).expect("a floating group");
+    let group = layout.floating.iter().flat_map(window_groups).find(|g| g.panels.iter().any(|p| p == "paragraphStyles")).expect("a floating group");
     assert_eq!(group.panels, ["characterStyles", "paragraphStyles"]);
     assert_eq!(group.panels[group.active], "paragraphStyles", "the one chosen is in front");
     // The dock still shows Properties in front.
@@ -671,11 +671,11 @@ fn paragraph_styles_open_floating_with_character_styles() {
     app.run("window.panel", json!({"panel":"color"})).unwrap();
     app.run("window.panel", json!({"panel":"links"})).unwrap();
     let layout = app.ui.docking.clone().unwrap();
-    assert!(layout.floating.iter().flat_map(|w| &w.groups).any(|g| g.panels == ["characterStyles", "paragraphStyles"]));
+    assert!(layout.floating.iter().flat_map(window_groups).any(|g| g.panels == ["characterStyles", "paragraphStyles"]));
     // Once showing, Window › Character Styles brings that tab forward.
     app.run("window.panel", json!({"panel":"characterStyles"})).unwrap();
     let layout = app.ui.docking.clone().unwrap();
-    let group = layout.floating.iter().flat_map(|w| &w.groups).find(|g| g.panels.iter().any(|p| p == "characterStyles")).unwrap();
+    let group = layout.floating.iter().flat_map(window_groups).find(|g| g.panels.iter().any(|p| p == "characterStyles")).unwrap();
     assert_eq!(group.panels[group.active], "characterStyles");
     assert_eq!(layout.panels().iter().filter(|p| p.as_str() == "characterStyles").count(), 1);
 }
@@ -694,7 +694,7 @@ fn paragraph_styles_closed_from_the_dock_reopen_there() {
     app.run("window.panel", json!({"panel":"paragraphStyles"})).unwrap();
     let layout = app.ui.docking.clone().unwrap();
     assert!(layout.contains(&"paragraphStyles".to_string()));
-    assert!(layout.floating.iter().flat_map(|w| &w.groups).all(|g| !g.panels.iter().any(|p| p == "paragraphStyles")), "{:?}", layout.floating);
+    assert!(layout.floating.iter().flat_map(window_groups).all(|g| !g.panels.iter().any(|p| p == "paragraphStyles")), "{:?}", layout.floating);
 }
 
 fn click(h: &mut Harness<'static, DesignApp>, at: Pos2, button: PointerButton) {
@@ -737,18 +737,18 @@ fn pages_keeps_its_panel_menu_in_the_docking_layout() {
     assert!(h.query_by_label("Panel Options…").is_none(), "the panel's own commands stay in its panel menu");
 }
 
-fn group_with<'a>(layout: &'a Layout<String>, panel: &str) -> (bool, &'a [String], usize) {
-    if let Some(g) = layout.floating.iter().flat_map(|w| &w.groups).find(|g| g.panels.iter().any(|p| p == panel)) {
-        return (true, &g.panels, g.active);
+fn group_with(layout: &Layout<String>, panel: &str) -> (bool, Vec<String>, usize) {
+    if let Some(g) = layout.floating.iter().flat_map(window_groups).find(|g| g.panels.iter().any(|p| p == panel)) {
+        return (true, g.panels, g.active);
     }
     let mut visit: Vec<&Node<String>> = layout.root.iter().collect();
     while let Some(node) = visit.pop() {
         match node {
             Node::Split { first, second, .. } => visit.extend([&**first, &**second]),
-            Node::Tabs { panels, active } if panels.iter().any(|p| p == panel) => return (false, panels, *active),
+            Node::Tabs { panels, active } if panels.iter().any(|p| p == panel) => return (false, panels.clone(), *active),
             Node::Dock { columns, .. } => {
                 if let Some(g) = columns.iter().flat_map(|c| &c.groups).find(|g| g.panels.iter().any(|p| p == panel)) {
-                    return (false, &g.panels, g.active);
+                    return (false, g.panels.clone(), g.active);
                 }
             }
             _ => {}
@@ -771,13 +771,13 @@ fn dragging_a_docked_group_by_its_bar_moves_every_tab() {
     let below = json!({"MoveGroup": {"panel": "characterStyles", "to": {"At": {"anchor": "properties", "placement": {"Group": {"below": true}}}}}});
     app.run("window.panel.layout", json!({"action": below})).unwrap();
     let styles = ["characterStyles", "paragraphStyles"];
-    assert_eq!(group_with(app.ui.docking.as_ref().unwrap(), "characterStyles"), (false, &styles.map(String::from)[..], 1));
+    assert_eq!(group_with(app.ui.docking.as_ref().unwrap(), "characterStyles"), (false, styles.map(String::from).to_vec(), 1));
 
     let mut h = harness(app, vec2(1280.0, 800.0));
     let bar = drag_bar(&h, "characterStyles");
     drag(&mut h, bar.center(), egui::pos2(400.0, 400.0));
     let layout = h.state().ui.docking.as_ref().unwrap();
-    assert_eq!(group_with(layout, "paragraphStyles"), (true, &styles.map(String::from)[..], 1), "{layout:?}");
+    assert_eq!(group_with(layout, "paragraphStyles"), (true, styles.map(String::from).to_vec(), 1), "{layout:?}");
     assert!(valid(layout));
 
     let bar = drag_bar(&h, "characterStyles");
@@ -1002,7 +1002,7 @@ fn shared_panel_commands_float_dock_and_reject_atomically() {
     app.run("window.panel.float", json!({"panel": "pages", "group": true, "x": 80, "y": 80, "width": 300, "height": 400})).unwrap();
     let layout = app.ui.docking.clone().unwrap();
     assert_eq!(layout.floating.len(), 1);
-    assert_eq!(layout.floating[0].groups[0].panels, ["properties", "pages", "layers"]);
+    assert_eq!(window_groups(&layout.floating[0])[0].panels, ["properties", "pages", "layers"]);
     app.run("window.panel.dock", json!({"panel": "pages", "group": true, "side": "End"})).unwrap();
     let layout = app.ui.docking.clone().unwrap();
     assert!(layout.floating.is_empty());
@@ -1156,4 +1156,33 @@ fn a_floating_window_saved_in_the_title_bar_strip_is_drawn_below_it() {
     let h = harness(app, egui::vec2(1400.0, 900.0));
     let drawn = h.ctx.memory(|m| m.area_rect(crate::panel_docking::floating_layer("properties").id)).unwrap();
     assert!(drawn.min.y >= crate::chrome::MAC_APP_BAR - 0.5, "{drawn:?}");
+}
+
+/// A floating window holds splits like the dock: a panel docked below another one in the
+/// window splits it, the divider between them drags, and the new size is saved.
+#[test]
+fn a_split_inside_a_floating_window_resizes_and_is_saved() {
+    let mut app = app();
+    app.run("window.panel.float", json!({"panel":"swatches", "x":300, "y":120, "width":300, "height":500})).unwrap();
+    app.run("window.panel.move", json!({"panel":"color", "anchor":"swatches", "zone":"bottom"})).unwrap();
+    let window = |app: &DesignApp| app.ui.docking.as_ref().unwrap().floating.iter().find(|w| w.contains("swatches")).cloned().unwrap();
+    let ratio = |window: &Floating<String>| match window.root {
+        Node::Split { size: craft_ui::layout::SplitSize::Ratio(r), .. } => r,
+        ref root => panic!("expected a split window: {root:?}"),
+    };
+    assert_eq!(window_groups(&window(&app)).into_iter().map(|g| g.panels).collect::<Vec<_>>(), [["swatches"], ["color"]]);
+    let before = ratio(&window(&app));
+    let mut h = harness(app, vec2(1400.0, 900.0));
+    let divider = hits(&h)
+        .into_iter()
+        .find_map(|(hit, rect)| {
+            matches!(&hit, craft_ui::docking::Hit::Divider(craft_ui::docking::Divider::WindowSplit(_, path)) if path.is_empty()).then_some(rect)
+        })
+        .expect("the window's divider");
+    drag(&mut h, divider.center(), divider.center() + vec2(0.0, 60.0));
+    let after = ratio(&window(h.state()));
+    assert!(after > before + 0.05, "{before} -> {after}");
+    let saved = serde_json::to_vec(&h.state().ui).unwrap();
+    let loaded = crate::UiState::from_preferences_json(&saved).unwrap();
+    assert_eq!(loaded.docking, h.state().ui.docking);
 }

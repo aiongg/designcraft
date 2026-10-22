@@ -5280,7 +5280,13 @@ mod tests {
         // Paragraph Styles opens floating, grouped with Character Styles, as in InDesign.
         activate(&mut app, "app.paragraphStylesPanel", &Value::Null);
         let layout = app.ui.docking.as_ref().unwrap();
-        assert!(layout.floating.iter().flat_map(|w| &w.groups).any(|g| g.panels == ["characterStyles", "paragraphStyles"] && g.active == 1));
+        assert!(
+            layout
+                .floating
+                .iter()
+                .flat_map(crate::panel_docking::window_groups)
+                .any(|g| g.panels == ["characterStyles", "paragraphStyles"] && g.active == 1)
+        );
         let story = app.run("frame.create", json!({"rect": [36, 36, 200, 100], "content": "text", "text": "Page "})).unwrap()["story"].clone();
         app.run("text.select", json!({"story": story, "anchor": 5, "focus": 5})).unwrap();
         activate(&mut app, "app.insertCurrentPageNumber", &Value::Null);

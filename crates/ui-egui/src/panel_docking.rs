@@ -219,13 +219,8 @@ pub(crate) fn from_dock_only<'a>(
         reading.into_iter().map(|groups| Column { groups, width: COLUMN_WIDTH, iconic: !dock_expanded, iconic_width: Some(ICON_WIDTH) }).collect();
     let mut floating = Vec::new();
     for window in &old.floating {
-        let groups: Vec<Group<String>> = window
-            .groups
-            .iter()
-            .filter_map(|g| placed.group(&g.panels, g.active).map(|kept| Group { minimized: g.minimized, height: g.height, ..kept }))
-            .collect();
-        if !groups.is_empty() {
-            floating.push(Floating { groups, rect: window.rect, native: None });
+        if let Some(root) = unplaced_tree(&window.root, 0, &mut placed) {
+            floating.push(Floating { root, rect: window.rect, native: None, minimized: window.minimized });
         }
     }
     for panel in hidden {
@@ -234,6 +229,52 @@ pub(crate) fn from_dock_only<'a>(
     columns.extend(icon_column(icon_groups, &mut placed));
     let layout = with_canvas(columns, floating);
     valid(&layout).then_some(layout)
+}
+
+/// A floating window's tree with only the panels not placed yet; a split that loses one side
+/// becomes its other side. None when no panel is left.
+fn unplaced_tree(node: &Node<String>, depth: usize, placed: &mut Placed) -> Option<Node<String>> {
+    if depth > craft_ui::docking::MAX_DEPTH {
+        return None;
+    }
+    match node {
+        Node::Tabs { panels, active } => placed.group(panels, *active).map(|g| Node::Tabs { panels: g.panels, active: g.active }),
+        Node::Stack { entries } => {
+            let entries: Vec<_> =
+                entries.iter().filter_map(|e| placed.take(&e.panel).map(|panel| craft_ui::docking::StackEntry { panel, ..e.clone() })).collect();
+            (!entries.is_empty()).then_some(Node::Stack { entries })
+        }
+        Node::Split { axis, size, first, second } => {
+            let first = unplaced_tree(first, depth.saturating_add(1), placed);
+            let second = unplaced_tree(second, depth.saturating_add(1), placed);
+            match (first, second) {
+                (Some(first), Some(second)) => Some(Node::Split { axis: *axis, size: *size, first: Box::new(first), second: Box::new(second) }),
+                (one, other) => one.or(other),
+            }
+        }
+        _ => None,
+    }
+}
+
+/// The groups of a floating window, first to last: its tab groups and accordions.
+pub(crate) fn window_groups(window: &Floating<String>) -> Vec<Group<String>> {
+    let mut out = Vec::new();
+    let mut visit = vec![(&window.root, 0usize)];
+    while let Some((node, depth)) = visit.pop() {
+        if depth > craft_ui::docking::MAX_DEPTH || out.len() > craft_ui::docking::MAX_PANELS {
+            break;
+        }
+        match node {
+            Node::Split { first, second, .. } => {
+                visit.push((second, depth.saturating_add(1)));
+                visit.push((first, depth.saturating_add(1)));
+            }
+            Node::Tabs { panels, active } => out.push(Group::new(panels.clone(), *active)),
+            Node::Stack { entries } => out.push(Group::new(entries.iter().map(|e| e.panel.clone()).collect(), 0)),
+            _ => {}
+        }
+    }
+    out
 }
 
 /// The groups of a dock-only layout's node, column by column in reading order. A vertical split
@@ -315,7 +356,7 @@ fn dock_columns(layout: &Layout<String>) -> Vec<&Column<String>> {
 /// an accordion, or not in the layout, is a group of its own.
 #[cfg(test)]
 pub(crate) fn tab_group(layout: &Layout<String>, panel: &str) -> Vec<String> {
-    if let Some(group) = layout.floating.iter().flat_map(|w| &w.groups).find(|g| g.panels.iter().any(|p| p == panel)) {
+    if let Some(group) = layout.floating.iter().flat_map(window_groups).find(|g| g.panels.iter().any(|p| p == panel)) {
         return group.panels.clone();
     }
     let mut visit: Vec<&Node<String>> = layout.root.iter().collect();
@@ -353,7 +394,7 @@ enum Place {
 fn place(layout: &Layout<String>, panel: &str) -> Option<Place> {
     let has = |group: &Group<String>| group.panels.iter().any(|p| p == panel);
     for (window, floating) in layout.floating.iter().enumerate() {
-        if let Some(group) = floating.groups.iter().position(has) {
+        if let Some(group) = window_groups(floating).iter().position(has) {
             return Some(Place::Floating { window, group });
         }
     }
@@ -724,6 +765,7 @@ fn known(action: &Action<String>) -> bool {
         | Action::SetStackOpen { panel, .. }
         | Action::ResizeStack { panel, .. } => registered(panel),
         Action::ResizeSplit { path, .. } => path.len() <= craft_ui::docking::MAX_DEPTH,
+        Action::ResizeWindowSplit { panel, path, .. } => registered(panel) && path.len() <= craft_ui::docking::MAX_DEPTH,
         Action::MovePanel { panel, to } | Action::MoveGroup { panel, to } | Action::MoveColumn { panel, to } | Action::MoveWindow { panel, to } => {
             registered(panel)
                 && match to {
@@ -955,6 +997,20 @@ fn dock_style(ui: &egui::Ui, language: &str) -> craft_ui::docking::DockStyle {
     style.border = egui::Stroke::new(1.0, t.border);
     style.accent = t.accent;
     style.right_to_left = crate::i18n::is_rtl(language);
+    // InDesign's docking: new docks at the docked area's free sides, but no full-height column
+    // from the window's left or right edge; a drop on no target (the canvas) floats, and a
+    // floating window's title bar docks the whole window. No Ctrl/Cmd undock latch or hint, no
+    // Maximize Frame or Close Others items, no wheel or middle-click tab gestures.
+    style.side_edge_zones = false;
+    style.new_dock_zones = true;
+    style.float_on_empty_drop = true;
+    style.title_bar_docks = true;
+    style.command_press_floats = false;
+    style.float_hint = false;
+    style.close_others_item = false;
+    style.maximize_item = false;
+    style.wheel_selects_tabs = false;
+    style.middle_click_closes_tabs = false;
     style.localized(|key| DOCK_LABELS.iter().find(|(k, _)| *k == key).map(|(_, english)| crate::i18n::tr(language, english).to_owned()))
 }
 
@@ -979,9 +1035,6 @@ const DOCK_LABELS: &[(&str, &str)] = &[
     ("dock.expandColumn", "Expand Panels"),
     ("dock.moveWindow", "Move panel window"),
     ("dock.closeWindow", "Close panel window"),
-    ("dock.undock", "Undock Panel"),
-    ("dock.undockGroup", "Undock Panel Group"),
-    ("dock.closePanelGroup", "Close Panel Group"),
     ("dock.closeOthers", "Close Other Panels in Group"),
     ("dock.maximize", "Maximize Frame"),
     ("dock.restoreFrame", "Restore Frame Size"),
@@ -1114,9 +1167,6 @@ impl craft_ui::docking::DockContent<String> for PanelContent<'_> {
         let Some(icon) = panel_icon(id) else { return false };
         crate::icons::paint(painter, rect, icon, color);
         true
-    }
-    fn bare(&self, id: &String) -> bool {
-        id == CANVAS
     }
     fn panel_menu(&mut self, ui: &mut egui::Ui, id: &String) {
         if let Some(panel) = normalize(id) {

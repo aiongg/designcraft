@@ -263,7 +263,7 @@ mod tests {
         assert!(!columns[0].iconic && columns[1].iconic);
         assert!(columns[1].groups.iter().all(|g| !g.panels.iter().any(|p| p == "glyphs" || p == "swatches")));
         assert_eq!(layout.floating.len(), 1);
-        assert_eq!(layout.floating[0].groups[0].panels, ["glyphs"]);
+        assert_eq!(crate::panel_docking::window_groups(&layout.floating[0])[0].panels, ["glyphs"]);
         assert_eq!(&layout.floating[0].rect[..2], &[100.0, 120.0]);
     }
 
@@ -345,8 +345,8 @@ mod tests {
         let layout = ui.docking.clone().unwrap();
         let columns = dock(&layout);
         assert_eq!(layout.floating.len(), 1);
-        assert_eq!(layout.floating[0].groups[0].panels, ["glyphs", "character"]);
-        assert_eq!(layout.floating[0].groups[0].active, 1);
+        assert_eq!(crate::panel_docking::window_groups(&layout.floating[0])[0].panels, ["glyphs", "character"]);
+        assert_eq!(crate::panel_docking::window_groups(&layout.floating[0])[0].active, 1);
         assert_eq!(layout.floating[0].rect, [40.0, 60.0, 300.0, 400.0]);
         assert_eq!(ui.floating, [("tabs".to_string(), [10.0, 20.0])], "the layout holds the floating dock panels");
         assert!(ui.docking_hidden.contains_key("color") && !layout.contains(&"color".to_string()), "a closed panel stays closed");
@@ -359,6 +359,40 @@ mod tests {
         // Saved again, the file is in the current shape and loads unchanged.
         let again = UiState::from_preferences_json(&serde_json::to_vec(&app.ui).unwrap()).unwrap();
         assert_eq!(again.docking, app.ui.docking);
+    }
+
+    /// Floating windows saved as a stack of groups (`groups`, before floating windows held split
+    /// trees) load as a vertical split of the groups in order, sized by their heights; a window
+    /// whose groups were all minimized loads minimized.
+    #[test]
+    fn floating_stacks_of_groups_load_as_split_windows() {
+        let mut saved = serde_json::to_value(UiState::default()).unwrap();
+        let mut docking = serde_json::to_value(crate::panel_docking::default_layout(&UiState::default())).unwrap();
+        docking["floating"] = json!([
+            {"groups": [
+                {"panels": ["swatches", "color"], "active": 1, "minimized": false, "height": 300.0},
+                {"panels": ["stroke"], "active": 0, "minimized": false, "height": 100.0},
+            ], "rect": [400.0, 100.0, 280.0, 440.0]},
+            {"groups": [{"panels": ["glyphs"], "active": 0, "minimized": true, "height": null}], "rect": [40.0, 60.0, 300.0, 400.0]},
+        ]);
+        docking["root"]["Split"]["second"]["Dock"]["columns"][1]["groups"] = json!([{"panels": ["effects"], "active": 0}]);
+        saved["docking"] = docking;
+        let read = UiState::read_preferences(&serde_json::to_vec(&saved).unwrap()).unwrap();
+        assert!(read.intact);
+        let layout = read.ui.docking.clone().unwrap();
+        dock(&layout);
+        let Node::Split { axis: craft_ui::layout::SplitAxis::Vertical, size: craft_ui::layout::SplitSize::Ratio(ratio), first, second } =
+            &layout.floating[0].root
+        else {
+            panic!("expected a vertical split: {:?}", layout.floating[0]);
+        };
+        assert!((ratio - 0.75).abs() < 1e-4, "{ratio}");
+        assert_eq!(**first, Node::Tabs { panels: vec!["swatches".into(), "color".into()], active: 1 });
+        assert_eq!(**second, Node::Tabs { panels: vec!["stroke".into()], active: 0 });
+        assert_eq!(layout.floating[0].rect, [400.0, 100.0, 280.0, 440.0]);
+        assert!(!layout.floating[0].minimized && layout.floating[1].minimized);
+        let again = UiState::from_preferences_json(&serde_json::to_vec(&read.ui).unwrap()).unwrap();
+        assert_eq!(again.docking, read.ui.docking);
     }
 
     /// An old layout that cannot be converted gives way to the workspace's default and is

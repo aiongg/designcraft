@@ -12,11 +12,11 @@ repository = "https://github.com/storytold/designcraft"
 
 [workspace.dependencies]
 # Shared reader and writer; publish the immutable revision before this consumer.
-craft-pdf = { git = "https://github.com/aiongg/craft-libs", rev = "fe71d5d0ec4871b685f869c2f6c95a2ae115af8b", version = "=0.1.0", default-features = false }
+craft-pdf = { git = "https://github.com/aiongg/craft-libs", rev = "6e6c85da9fa9e3389621f796ac5a0b2834469927", version = "=0.1.0", default-features = false }
 # Separations, ink coverage and the ink manager; same revision as craft-pdf and the krilla patch.
-craft-prepress = { git = "https://github.com/aiongg/craft-libs", rev = "fe71d5d0ec4871b685f869c2f6c95a2ae115af8b", version = "=0.1.0", features = ["flatten"] }
+craft-prepress = { git = "https://github.com/aiongg/craft-libs", rev = "6e6c85da9fa9e3389621f796ac5a0b2834469927", version = "=0.1.0", features = ["flatten"] }
 # Shared keyboard bindings: chords, overrides, conflicts, egui dispatch, the Keyboard Shortcuts dialog.
-craft-keymap = { git = "https://github.com/aiongg/craft-libs", rev = "fe71d5d0ec4871b685f869c2f6c95a2ae115af8b", version = "=0.1.0", features = ["egui", "ui"] }
+craft-keymap = { git = "https://github.com/aiongg/craft-libs", rev = "6e6c85da9fa9e3389621f796ac5a0b2834469927", version = "=0.1.0", features = ["egui", "ui"] }
 # internal
 designcraft-geom = { path = "crates/geom" }
 designcraft-color = { path = "crates/color" }
@@ -79,21 +79,21 @@ zip = { version = "3", default-features = false, features = ["deflate"] }
 indd = { git = "https://github.com/storytold/indd-utils", branch = "main" }
 
 # Which paths stored in documents may be followed (craft-libs).
-craft-docpath = { version = "0.1.0", git = "https://github.com/aiongg/craft-libs", rev = "fe71d5d0ec4871b685f869c2f6c95a2ae115af8b" }
+craft-docpath = { version = "0.1.0", git = "https://github.com/aiongg/craft-libs", rev = "6e6c85da9fa9e3389621f796ac5a0b2834469927" }
 # Atomic file replacement for saves and exports (craft-libs).
-craft-atomic = { version = "0.1.0", git = "https://github.com/aiongg/craft-libs", rev = "fe71d5d0ec4871b685f869c2f6c95a2ae115af8b" }
+craft-atomic = { version = "0.1.0", git = "https://github.com/aiongg/craft-libs", rev = "6e6c85da9fa9e3389621f796ac5a0b2834469927" }
 # File › Print through the system print spooler (craft-libs).
-craft-print = { version = "0.1.0", git = "https://github.com/aiongg/craft-libs", rev = "fe71d5d0ec4871b685f869c2f6c95a2ae115af8b" }
+craft-print = { version = "0.1.0", git = "https://github.com/aiongg/craft-libs", rev = "6e6c85da9fa9e3389621f796ac5a0b2834469927" }
 
 # ICC colour management: working spaces, transforms, black point compensation (craft-libs).
-craft-cms = { version = "0.1.0", git = "https://github.com/aiongg/craft-libs", rev = "fe71d5d0ec4871b685f869c2f6c95a2ae115af8b" }
+craft-cms = { version = "0.1.0", git = "https://github.com/aiongg/craft-libs", rev = "6e6c85da9fa9e3389621f796ac5a0b2834469927" }
 
 # ui
 # Shared frontend components; keep this dependency above the engine boundary.
-craft-ui = { version = "0.1.0", git = "https://github.com/aiongg/craft-libs", rev = "fe71d5d0ec4871b685f869c2f6c95a2ae115af8b", features = ["serde"] }
-craft-i18n = { version = "0.1.0", git = "https://github.com/aiongg/craft-libs", rev = "fe71d5d0ec4871b685f869c2f6c95a2ae115af8b" }
+craft-ui = { version = "0.1.0", git = "https://github.com/aiongg/craft-libs", rev = "6e6c85da9fa9e3389621f796ac5a0b2834469927", features = ["serde"] }
+craft-i18n = { version = "0.1.0", git = "https://github.com/aiongg/craft-libs", rev = "6e6c85da9fa9e3389621f796ac5a0b2834469927" }
 # Embeds the craft-fonts interface faces, cut to the catalogs' characters (craft-libs).
-craft-fonts-build = { version = "0.1.0", git = "https://github.com/aiongg/craft-libs", rev = "fe71d5d0ec4871b685f869c2f6c95a2ae115af8b" }
+craft-fonts-build = { version = "0.1.0", git = "https://github.com/aiongg/craft-libs", rev = "6e6c85da9fa9e3389621f796ac5a0b2834469927" }
 egui = "0.37"
 egui_extras = { version = "0.37", default-features = false, features = ["svg"] }
 eframe = { version = "0.37", default-features = false }
@@ -135,9 +135,9 @@ egui_kittest = { git = "https://github.com/aiongg/egui", rev = "a4f9a17f64a6bae6
 emath = { git = "https://github.com/aiongg/egui", rev = "a4f9a17f64a6bae61350fb85804c9df0d9865916" }
 epaint = { git = "https://github.com/aiongg/egui", rev = "a4f9a17f64a6bae61350fb85804c9df0d9865916" }
 epaint_default_fonts = { git = "https://github.com/aiongg/egui", rev = "a4f9a17f64a6bae61350fb85804c9df0d9865916" }
-krilla = { git = "https://github.com/aiongg/craft-libs", rev = "fe71d5d0ec4871b685f869c2f6c95a2ae115af8b", version = "=0.8.2" }
+krilla = { git = "https://github.com/aiongg/craft-libs", rev = "6e6c85da9fa9e3389621f796ac5a0b2834469927", version = "=0.8.2" }
 winit = { git = "https://github.com/aiongg/winit", rev = "8b35388bd719e8cc86a95971ba0bc026c9a8f058" }
-hayro = { git = "https://github.com/aiongg/craft-libs", rev = "fe71d5d0ec4871b685f869c2f6c95a2ae115af8b", version = "=0.7.1" }
-hayro-interpret = { git = "https://github.com/aiongg/craft-libs", rev = "fe71d5d0ec4871b685f869c2f6c95a2ae115af8b", version = "=0.7.0" }
-hayro-syntax = { git = "https://github.com/aiongg/craft-libs", rev = "fe71d5d0ec4871b685f869c2f6c95a2ae115af8b", version = "=0.7.2" }
-hayro-jbig2 = { git = "https://github.com/aiongg/craft-libs", rev = "fe71d5d0ec4871b685f869c2f6c95a2ae115af8b", version = "=0.3.0" }
+hayro = { git = "https://github.com/aiongg/craft-libs", rev = "6e6c85da9fa9e3389621f796ac5a0b2834469927", version = "=0.7.1" }
+hayro-interpret = { git = "https://github.com/aiongg/craft-libs", rev = "6e6c85da9fa9e3389621f796ac5a0b2834469927", version = "=0.7.0" }
+hayro-syntax = { git = "https://github.com/aiongg/craft-libs", rev = "6e6c85da9fa9e3389621f796ac5a0b2834469927", version = "=0.7.2" }
+hayro-jbig2 = { git = "https://github.com/aiongg/craft-libs", rev = "6e6c85da9fa9e3389621f796ac5a0b2834469927", version = "=0.3.0" }
