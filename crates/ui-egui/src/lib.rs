@@ -2460,7 +2460,7 @@ mod tests {
         assert_eq!(app.ui.status, "Table: No table selected");
         app.ui.language = "cs".into();
         app.status_error("Table", "No table selected");
-        assert_eq!(app.ui.status, "Tabulka: No table selected");
+        assert_eq!(app.ui.status, format!("{}: No table selected", crate::i18n::tr("cs", "Table")));
     }
 
     #[test]

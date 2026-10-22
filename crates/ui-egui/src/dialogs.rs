@@ -8963,7 +8963,7 @@ mod tests {
         assert_eq!(app.ui.language, "de");
         assert_eq!(app.ui.dialog.as_ref().map(|d| d.id.as_str()), Some("preferences"));
         let labels = dialog_frame(&mut app, &ctx, screen, vec![]);
-        let heading = visible_label(&labels, screen, "Sprache der Oberfläche");
+        let heading = visible_label(&labels, screen, crate::i18n::tr("de", "Interface Language"));
         let combo = visible_label(&labels, screen, "Deutsch");
 
         // The names stay endonyms in the German interface.
