@@ -2357,6 +2357,9 @@ pub enum AppMenuItem {
         command: &'static str,
     },
     Sep,
+    /// Interface language: a submenu with each UI language in its own name, the current one
+    /// checked (`app.language {lang}`).
+    Language,
     Services,
     Hide,
     HideOthers,
@@ -2369,6 +2372,7 @@ pub const MAC_APP_MENU: &[AppMenuItem] = &[
     AppMenuItem::Cmd { id: "dc-discord", label: "Join the ArtCraft Discord…", command: "help.discord" },
     AppMenuItem::Sep,
     AppMenuItem::Cmd { id: "dc-settings", label: "Settings…", command: "app.preferences" },
+    AppMenuItem::Language,
     AppMenuItem::Sep,
     AppMenuItem::Services,
     AppMenuItem::Sep,
@@ -5747,7 +5751,12 @@ mod tests {
         let (Some(about), Some(settings)) = (pos("help.about"), pos("app.preferences")) else { panic!("About and Settings are in the app menu") };
         assert!(about < settings);
         assert_eq!(MAC_APP_MENU.get(settings - 1), Some(&AppMenuItem::Sep));
-        assert_eq!(MAC_APP_MENU.get(settings + 1), Some(&AppMenuItem::Sep));
+        // Language follows Settings, as in the suite's other apps, titled in the interface language.
+        assert_eq!(MAC_APP_MENU.get(settings + 1), Some(&AppMenuItem::Language));
+        assert_eq!(MAC_APP_MENU.get(settings + 2), Some(&AppMenuItem::Sep));
+        for (code, _) in crate::i18n::LANGUAGES.iter().filter(|(c, _)| !c.is_empty()) {
+            assert_ne!(crate::i18n::tr(code, "Language"), "Language", "{code}");
+        }
         let label = |command: &str| {
             MAC_APP_MENU.iter().find_map(|m| match m {
                 AppMenuItem::Cmd { label, command: c, .. } if *c == command => Some(*label),
