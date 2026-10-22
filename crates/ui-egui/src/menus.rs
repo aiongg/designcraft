@@ -85,6 +85,12 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("window.richBlack", "Appearance of Black", None, "{on: bool} — show 100% black as rich black on screen (off: accurately)"),
     ("window.setShortcut", "Set Shortcut", None, "{id, shortcut: \"Cmd+Alt+J\" | \"\" (none) | null (default)} → {shortcut, conflicts: [ids]}"),
     ("window.resetShortcuts", "Reset Shortcuts", None, "{} — every command back to its default shortcut"),
+    (
+        "window.importShortcuts",
+        "Import InDesign Shortcut Set",
+        None,
+        "{path | text} — a set saved by InDesign's Show Set (.txt): matched commands take its Default shortcuts (or none), other commands lose keys it takes → {set, imported, changed, conflictsCleared, skipped (an earlier item whose keys a later one took), unmatched, unmatchedWithoutShortcut, unreadable}",
+    ),
     ("app.findChange", "Find/Change…", Some("Cmd+F"), "{}"),
     ("app.insertTableDialog", "Create Table…", None, "{} — Insert Table dialog (body/header/footer rows, columns)"),
     (
@@ -1705,6 +1711,17 @@ fn run_ui_inner(app: &mut DesignApp, id: &str, p: &Value) -> Option<Result<Value
             app.ui.shortcuts.clear();
             Ok(Value::Null)
         }
+        "window.importShortcuts" => {
+            let text = match (p.get("text").and_then(Value::as_str), p.get("path").and_then(Value::as_str)) {
+                (Some(text), _) => text.to_string(),
+                (None, Some(path)) => match crate::shortcut_import::read_file(path) {
+                    Ok(text) => text,
+                    Err(e) => return Some(Err(e)),
+                },
+                (None, None) => return Some(Err("give the set's path or text".into())),
+            };
+            crate::shortcut_import::import(app, &text)
+        }
         "view.snapPreferences" => {
             let b = |k: &str| p.get(k).and_then(Value::as_bool);
             let ui = &mut app.ui;
@@ -3009,7 +3026,7 @@ pub fn all_menu_items() -> Vec<(String, String)> {
     out
 }
 
-fn parse_shortcut(sc: &str) -> Option<(egui::Modifiers, egui::Key)> {
+pub(crate) fn parse_shortcut(sc: &str) -> Option<(egui::Modifiers, egui::Key)> {
     let mut m = egui::Modifiers::NONE;
     let mut key = None;
     for part in sc.split('+').filter(|s| !s.is_empty()) {

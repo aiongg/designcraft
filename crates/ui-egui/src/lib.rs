@@ -27,6 +27,7 @@ mod prefs;
 pub mod render_worker;
 mod rtl;
 mod section_options;
+mod shortcut_import;
 pub mod story_editor;
 pub mod taskbar;
 pub mod theme;
@@ -1033,6 +1034,10 @@ impl DesignApp {
         let Some(inbox) = self.services.inbox.clone() else { return };
         let files = std::mem::take(&mut *inbox.lock().unwrap_or_else(|e| e.into_inner()));
         for file in files {
+            if file.request.purpose == "shortcuts" {
+                shortcut_import::import_delivered(self, &file.bytes);
+                continue;
+            }
             if self.ui.dialog.is_some() {
                 self.status(
                     crate::i18n::tr(&self.ui.language, "{name}: import cancelled while a dialog is open; choose the file again")
