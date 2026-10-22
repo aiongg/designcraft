@@ -3119,9 +3119,7 @@ pub fn shortcuts(app: &mut DesignApp, ctx: &egui::Context) {
         // handle them, and Paste carries the text.
         let accept = |hit: &craft_keymap::egui::Hit| {
             let c = &hit.command;
-            let leave = hit.exact
-                && hit.cycle.is_empty()
-                && (c.id == "edit.clear" || (c.params.is_null() && native.contains(&c.id)));
+            let leave = hit.exact && hit.cycle.is_empty() && (c.id == "edit.clear" || (c.params.is_null() && native.contains(&c.id)));
             !leave
         };
         app.key_dispatcher.dispatch_filtered(i, &app.keymap, &active, accept)

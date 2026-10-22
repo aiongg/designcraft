@@ -109,11 +109,8 @@ impl NativeMenu {
         app.native_menu = true;
         let keys: Vec<(String, Option<String>)> =
             items.values().filter(|(_, p, _)| p.is_null()).map(|(id, _, _)| (id.clone(), shortcut(app, id))).collect();
-        app.native_shortcuts = keys
-            .iter()
-            .filter(|(_, sc)| !app.shortcut_recording() && sc.as_deref().and_then(accel).is_some())
-            .map(|(id, _)| id.clone())
-            .collect();
+        app.native_shortcuts =
+            keys.iter().filter(|(_, sc)| !app.shortcut_recording() && sc.as_deref().and_then(accel).is_some()).map(|(id, _)| id.clone()).collect();
         let recent = recent.map(|submenu| RecentMenu { submenu, shown: Vec::new(), ids: Vec::new(), separator: None });
         Self {
             _menu: menu,
