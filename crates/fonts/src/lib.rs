@@ -30,26 +30,21 @@ pub use kurbo::BezPath;
 use skrifa::MetadataProvider;
 use skrifa::instance::Size;
 
-/// A font from the optional craft-fonts build input (https://github.com/storytold/craft-fonts;
-/// empty unless built with `CRAFT_FONTS_DIR`, see `build.rs`).
-pub struct CraftFont {
-    pub family: &'static str,
-    pub style: &'static str,
-    /// ISO 15924 scripts the font is for, e.g. `"Jpan"`.
-    pub scripts: &'static [&'static str],
-    pub bytes: &'static [u8],
-}
+pub use craft_fonts_build::EmbeddedFace;
 
-include!(concat!(env!("OUT_DIR"), "/craft_fonts.rs"));
+/// The document faces from the optional craft-fonts build input
+/// (https://github.com/storytold/craft-fonts; empty unless built with `CRAFT_FONTS_DIR`, see
+/// `build.rs`).
+pub static CRAFT_FONTS: &[EmbeddedFace] = include!(concat!(env!("OUT_DIR"), "/craft_fonts.rs"));
 
 /// The craft-fonts faces for Japanese (`"Jpan"`), in manifest order. Empty without craft-fonts.
-pub fn japanese_fonts() -> impl Iterator<Item = &'static CraftFont> {
+pub fn japanese_fonts() -> impl Iterator<Item = &'static EmbeddedFace> {
     CRAFT_FONTS.iter().filter(|f| f.scripts.contains(&"Jpan"))
 }
 
 /// Japanese faces in document-fallback order: Mincho (serif) families first, matching the
 /// serif default text font, then the others; Regular before other styles.
-pub fn japanese_document_fonts() -> Vec<&'static CraftFont> {
+pub fn japanese_document_fonts() -> Vec<&'static EmbeddedFace> {
     let mut v: Vec<_> = japanese_fonts().collect();
     v.sort_by_key(|f| (!f.family.contains("Mincho"), f.style != "Regular"));
     v
@@ -57,7 +52,7 @@ pub fn japanese_document_fonts() -> Vec<&'static CraftFont> {
 
 /// Japanese faces in UI order: BIZ UDPGothic first (the UI face), then the others; `bold` puts
 /// bold styles before regular ones.
-pub fn japanese_ui_fonts(bold: bool) -> Vec<&'static CraftFont> {
+pub fn japanese_ui_fonts(bold: bool) -> Vec<&'static EmbeddedFace> {
     let mut v: Vec<_> = japanese_fonts().collect();
     v.sort_by_key(|f| (f.family != "BIZ UDPGothic", (f.style == "Bold") != bold));
     v

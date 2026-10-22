@@ -214,7 +214,7 @@ impl Default for View {
 
 /// About ▸ Contributors: a name toggle, a sort, and the list as a grab bag or a table.
 pub fn contributors_ui(ui: &mut egui::Ui, lang: &str) {
-    let id = egui::Id::new("credits_view");
+    let id = egui::Id::unique("credits_view");
     let mut v = ui.data_mut(|d| d.get_temp::<View>(id)).unwrap_or_default();
     ui.horizontal_wrapped(|ui| {
         ui.label(tr(lang, "Show"));
@@ -233,6 +233,7 @@ pub fn contributors_ui(ui: &mut egui::Ui, lang: &str) {
                 }
             }
         });
+        crate::widgets::name_combo(ui, "credits_sort", "credits_sort");
         if ui.button(if v.ascending { "▲" } else { "▼" }).on_hover_text(tr(lang, "Reverse the order")).clicked() {
             v.ascending = !v.ascending;
         }

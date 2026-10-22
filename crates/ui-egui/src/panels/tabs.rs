@@ -130,7 +130,7 @@ pub(crate) fn ruler(ui: &mut Ui, salt: &str, r: &Ruler) -> Option<RulerEdit> {
         Some(nearest.map_or(Grab::New, |(i, _)| Grab::Tab(i)))
     };
 
-    let key = ui.id().with(("tab_ruler", salt));
+    let key = ui.scope_id().with(("tab_ruler", salt));
     let mut drag: Option<Drag> = ui.data(|d| d.get_temp(key));
     let mut edit = None;
     if resp.drag_started()
@@ -267,7 +267,7 @@ pub(crate) fn align_buttons(ui: &mut Ui, lang: &str, current: TabAlign) -> Optio
 
 /// A one-line text field that commits on Enter or when it loses focus.
 pub(crate) fn text_commit(ui: &mut Ui, id: &str, current: &str, width: f32, enabled: bool) -> Option<String> {
-    let tid = ui.id().with(("tabs_text", id));
+    let tid = ui.scope_id().with(("tabs_text", id));
     let focused = ui.memory(|m| m.has_focus(tid));
     let mut buf: String = if focused { ui.data(|d| d.get_temp(tid)).unwrap_or_else(|| current.to_string()) } else { current.to_string() };
     let r = ui.add_enabled(enabled, egui::TextEdit::singleline(&mut buf).id(tid).desired_width(width));
@@ -306,7 +306,7 @@ pub fn show(app: &mut DesignApp, ui: &mut Ui) {
     let lang = app.ui.language.clone();
     let tr = |s: &'static str| crate::i18n::tr(&lang, s);
     let Ok(v) = app.session.execute("type.tabs.get", &json!({})) else {
-        crate::rtl::label(ui, tr("Select text or a text frame."));
+        ui.label(tr("Select text or a text frame."));
         return;
     };
     let tabs: Vec<TabStop> = serde_json::from_value(v["tabs"].clone()).unwrap_or_default();
@@ -321,7 +321,7 @@ pub fn show(app: &mut DesignApp, ui: &mut Ui) {
     let zoom = app.view().map(|v| v.zoom as f32);
 
     // Panel position above the frame: on request (the magnet, or opening the panel).
-    let win = ui.ctx().memory(|m| m.area_rect(egui::Id::new(("floating_panel", "tabs"))));
+    let win = ui.ctx().memory(|m| m.area_rect(egui::Id::unique(("floating_panel", "tabs"))));
     let state = &mut app.ui.tabs_panel;
     if state.selected.is_some_and(|i| i >= tabs.len()) {
         state.selected = None;
@@ -356,18 +356,18 @@ pub fn show(app: &mut DesignApp, ui: &mut Ui) {
             }
         }
         ui.add_space(6.0);
-        crate::rtl::label(ui, tr("X:"));
+        ui.label(tr("X:"));
         if let Some(x) = crate::widgets::measure(ui, "tabs_x", sel.map(|s| s.position), unit, 72.0) {
             match selected {
                 Some(i) => cmds.push(("type.tabs.move", json!({"index": i, "position": x}))),
                 None => cmds.push(("type.tabs.add", json!({"position": x, "align": current_align}))),
             }
         }
-        crate::rtl::label(ui, tr("Leader:"));
+        ui.label(tr("Leader:"));
         if let (Some(l), Some(i)) = (text_commit(ui, "leader", sel.map_or("", |s| s.leader.as_str()), 36.0, sel.is_some()), selected) {
             cmds.push(("type.tabs.change", json!({"index": i, "leader": l})));
         }
-        crate::rtl::label(ui, tr("Align On:"));
+        ui.label(tr("Align On:"));
         let char_tab = sel.is_some_and(|s| s.align == TabAlign::Char);
         if let (Some(c), Some(i)) = (text_commit(ui, "alignOn", sel.map_or("", |s| s.align_on.as_str()), 18.0, char_tab), selected) {
             cmds.push(("type.tabs.change", json!({"index": i, "alignOn": c})));
@@ -381,12 +381,12 @@ pub fn show(app: &mut DesignApp, ui: &mut Ui) {
             for (label, id, needs_stop) in
                 [("Clear All", "type.tabs.clear", false), ("Delete Tab", "type.tabs.remove", true), ("Repeat Tab", "type.tabs.repeat", true)]
             {
-                if ui.add_enabled(!needs_stop || selected.is_some(), egui::Button::new(crate::rtl::widget(ui, tr(label)))).clicked() {
+                if ui.add_enabled(!needs_stop || selected.is_some(), egui::Button::new(tr(label))).clicked() {
                     cmds.push((id, selected.map_or(json!({}), |i| json!({"index": i}))));
                     ui.close();
                 }
             }
-            if ui.button(crate::rtl::widget(ui, tr("Reset Indents"))).clicked() {
+            if ui.button(tr("Reset Indents")).clicked() {
                 cmds.push(("type.para", json!({"attrs": {"leftIndent": 0, "firstLineIndent": 0, "rightIndent": 0}})));
                 ui.close();
             }

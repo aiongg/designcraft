@@ -141,7 +141,7 @@ fn font_fields(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog, cf: &Char
         _ if fam.is_empty() => parent.clone(),
         _ => crate::panels::font_label(app, &menu, &fam),
     };
-    crate::rtl::label(ui, tr(lang, "Font Family:"));
+    ui.label(tr(lang, "Font Family:"));
     ui.add_enabled_ui(enabled, |ui| {
         egui::ComboBox::from_id_salt(("cjkfam", fam_key))
             .selected_text(shown)
@@ -153,7 +153,7 @@ fn font_fields(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog, cf: &Char
                     cf.set(d, fam_key, Value::Null);
                     cf.set(d, style_key, Value::Null);
                 }
-                if ui.selectable_label(!raw.is_null() && fam.is_empty(), crate::rtl::widget(ui, parent.as_str())).clicked() {
+                if ui.selectable_label(!raw.is_null() && fam.is_empty(), parent.as_str()).clicked() {
                     cf.set(d, fam_key, json!(""));
                     cf.set(d, style_key, json!(""));
                 }
@@ -164,9 +164,10 @@ fn font_fields(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog, cf: &Char
                     }
                 }
             });
+        crate::widgets::name_combo(ui, ("cjkfam", fam_key), "cjkfam");
     });
     ui.end_row();
-    crate::rtl::label(ui, tr(lang, "Font Style:"));
+    ui.label(tr(lang, "Font Style:"));
     let sty = cf.get(d, style_key).as_str().unwrap_or("").to_string();
     ui.add_enabled_ui(enabled && !fam.is_empty(), |ui| {
         egui::ComboBox::from_id_salt(("cjksty", style_key)).selected_text(&sty).width(200.0).show_ui(ui, |ui| {
@@ -176,6 +177,7 @@ fn font_fields(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog, cf: &Char
                 }
             }
         });
+        crate::widgets::name_combo(ui, ("cjksty", style_key), "cjksty");
     });
     ui.end_row();
 }
@@ -186,7 +188,7 @@ fn overprint_check(ui: &mut egui::Ui, d: &mut Dialog, cf: &CharFields, key: &str
     let cur = cf.get(d, key);
     let mut on = cur.as_str() == Some("on");
     let unset = cf.sparse && cur.is_null();
-    if ui.add(egui::Checkbox::new(&mut on, crate::rtl::widget(ui, label)).indeterminate(unset)).clicked() {
+    if ui.add(egui::Checkbox::new(&mut on, label).indeterminate(unset)).clicked() {
         let next = match cur.as_str() {
             _ if !cf.sparse => json!(if on { "on" } else { "auto" }),
             None => json!("on"),
@@ -202,10 +204,10 @@ fn tate_chu_yoko(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, cf: &CharFields)
     char_check(ui, d, cf, "tateChuYoko", crate::i18n::tr(lang, "Tate-Chu-Yoko"));
     ui.add_space(4.0);
     egui::Grid::new("cjktcy").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
-        crate::rtl::label(ui, crate::i18n::tr(lang, "Up/Down Position:"));
+        ui.label(crate::i18n::tr(lang, "Up/Down Position:"));
         char_number(ui, d, cf, "tateChuYokoYOffset", " pt", 1.0, (-1000.0, 1000.0));
         ui.end_row();
-        crate::rtl::label(ui, crate::i18n::tr(lang, "Left/Right Position:"));
+        ui.label(crate::i18n::tr(lang, "Left/Right Position:"));
         char_number(ui, d, cf, "tateChuYokoXOffset", " pt", 1.0, (-1000.0, 1000.0));
         ui.end_row();
     });
@@ -214,10 +216,10 @@ fn tate_chu_yoko(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, cf: &CharFields)
 /// Ruby Placement and Spacing: type, alignment, position and offsets.
 fn ruby_placement(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, cf: &CharFields) {
     grid("cjkrubyplace").show(ui, |ui| {
-        crate::rtl::label(ui, tr(lang, "Ruby Type:"));
+        ui.label(tr(lang, "Ruby Type:"));
         char_choice(lang, ui, d, cf, "rubyType", &[(json!("perCharacter"), "Per-Character Ruby"), (json!("group"), "Group Ruby")]);
         ui.end_row();
-        crate::rtl::label(ui, tr(lang, "Alignment:"));
+        ui.label(tr(lang, "Alignment:"));
         char_choice(
             lang,
             ui,
@@ -235,17 +237,17 @@ fn ruby_placement(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, cf: &CharFields
             ],
         );
         ui.end_row();
-        crate::rtl::label(ui, tr(lang, "Position:"));
+        ui.label(tr(lang, "Position:"));
         char_choice(lang, ui, d, cf, "rubyPosition", &[(json!("aboveRight"), "Above/Right"), (json!("belowLeft"), "Below/Left")]);
         ui.end_row();
     });
     ui.add_space(6.0);
-    crate::rtl::label(ui, egui::RichText::new(tr(lang, "Offset from Parent")).font(crate::theme::semibold(12.0)));
+    ui.label(egui::RichText::new(tr(lang, "Offset from Parent")).font(crate::theme::semibold(12.0)));
     grid("cjkrubyoffset").show(ui, |ui| {
-        crate::rtl::label(ui, tr(lang, "Across the Line:"));
+        ui.label(tr(lang, "Across the Line:"));
         char_number(ui, d, cf, "rubyYOffset", " pt", 1.0, (-1000.0, 1000.0));
         ui.end_row();
-        crate::rtl::label(ui, tr(lang, "Along the Line:"));
+        ui.label(tr(lang, "Along the Line:"));
         char_number(ui, d, cf, "rubyXOffset", " pt", 1.0, (-1000.0, 1000.0));
         ui.end_row();
     });
@@ -258,20 +260,20 @@ fn ruby_font(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog, cf: &CharFi
     let lang = lang.as_str();
     grid("cjkrubyfont").show(ui, |ui| {
         font_fields(app, ui, d, cf, ("rubyFont", "rubyFontStyle"), true);
-        crate::rtl::label(ui, tr(lang, "Size:"));
+        ui.label(tr(lang, "Size:"));
         char_auto_number(ui, d, cf, "rubyFontSize", " pt", 1.0, (0.1, 1296.0));
         ui.end_row();
-        crate::rtl::label(ui, tr(lang, "Horizontal Scale:"));
+        ui.label(tr(lang, "Horizontal Scale:"));
         char_number(ui, d, cf, "rubyXScale", "%", 100.0, (1.0, 1000.0));
         ui.end_row();
-        crate::rtl::label(ui, tr(lang, "Vertical Scale:"));
+        ui.label(tr(lang, "Vertical Scale:"));
         char_number(ui, d, cf, "rubyYScale", "%", 100.0, (1.0, 1000.0));
         ui.end_row();
     });
     char_check(ui, d, cf, "rubyOpenTypePro", tr(lang, "Use OpenType Pro Ruby Glyphs"));
     ui.add_space(4.0);
     grid("cjkrubytcy").show(ui, |ui| {
-        crate::rtl::label(ui, tr(lang, "Tate-chu-yoko Digits:"));
+        ui.label(tr(lang, "Tate-chu-yoko Digits:"));
         char_count(ui, d, cf, "rubyAutoTcyDigits", (0.0, 9.0));
         ui.end_row();
     });
@@ -283,7 +285,7 @@ fn ruby_font(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog, cf: &CharFi
 /// and alignment with the line edges.
 fn ruby_longer(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, cf: &CharFields) {
     grid("cjkrubylonger").show(ui, |ui| {
-        crate::rtl::label(ui, tr(lang, "Ruby Overhang:"));
+        ui.label(tr(lang, "Ruby Overhang:"));
         char_choice(
             lang,
             ui,
@@ -300,7 +302,7 @@ fn ruby_longer(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, cf: &CharFields) {
             ],
         );
         ui.end_row();
-        crate::rtl::label(ui, tr(lang, "Parent Character Spacing:"));
+        ui.label(tr(lang, "Parent Character Spacing:"));
         char_choice(
             lang,
             ui,
@@ -320,7 +322,7 @@ fn ruby_longer(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, cf: &CharFields) {
     ui.add_space(4.0);
     char_check(ui, d, cf, "rubyAutoScaling", tr(lang, "Shrink Ruby Width Automatically"));
     grid("cjkrubyscale").show(ui, |ui| {
-        crate::rtl::label(ui, tr(lang, "Minimum Scale:"));
+        ui.label(tr(lang, "Minimum Scale:"));
         let on = cf.get(d, "rubyAutoScaling").as_bool() == Some(true);
         ui.add_enabled_ui(on, |ui| char_number(ui, d, cf, "rubyScalingMin", "%", 100.0, (10.0, 100.0)));
         ui.end_row();
@@ -335,7 +337,7 @@ fn adornment_color(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, cf: &CharField
     let stroke = d.s(&target) == "stroke";
     ui.horizontal(|ui| {
         for (t, label) in [("fill", "Fill"), ("stroke", "Stroke")] {
-            if ui.selectable_label((t == "stroke") == stroke, crate::rtl::widget(ui, tr(lang, label))).clicked() {
+            if ui.selectable_label((t == "stroke") == stroke, tr(lang, label)).clicked() {
                 d.fields.insert(target.clone(), json!(t));
             }
         }
@@ -347,7 +349,7 @@ fn adornment_color(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, cf: &CharField
     let mut pick: Option<Value> = None;
     egui::ScrollArea::vertical().id_salt(("cjkcolor", key.as_str())).max_height(150.0).show(ui, |ui| {
         let entry = |ui: &mut egui::Ui, name: &str, label: &str, pick: &mut Option<Value>| {
-            if ui.selectable_label(cur == Some(name), crate::rtl::widget(ui, label)).clicked() {
+            if ui.selectable_label(cur == Some(name), label).clicked() {
                 // A character style's chosen colour, clicked again, is no longer set.
                 *pick = Some(if cf.sparse && cur == Some(name) { Value::Null } else { json!(name) });
             }
@@ -369,10 +371,10 @@ fn adornment_color(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, cf: &CharField
         cf.set(d, &key, v);
     }
     grid(&format!("cjkcolorg{prefix}")).show(ui, |ui| {
-        crate::rtl::label(ui, tr(lang, "Tint:"));
+        ui.label(tr(lang, "Tint:"));
         char_auto_number(ui, d, cf, &format!("{prefix}{part}Tint"), "%", 100.0, (0.0, 100.0));
         ui.end_row();
-        crate::rtl::label(ui, tr(lang, "Weight:"));
+        ui.label(tr(lang, "Weight:"));
         char_auto_number(ui, d, cf, &format!("{prefix}StrokeWeight"), " pt", 1.0, (0.0, 800.0));
         ui.end_row();
     });
@@ -433,10 +435,10 @@ pub(super) fn ruby_dialog(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog
     let base = d.fields.get("base").cloned().unwrap_or(Value::Null);
     let cf = CharFields { base: &base, sparse: false };
     ui.horizontal(|ui| {
-        crate::rtl::label(ui, tr(&lang, "Ruby:"));
+        ui.label(tr(&lang, "Ruby:"));
         super::text_field(ui, d, "text", 260.0);
     });
-    crate::rtl::label(ui, egui::RichText::new(tr(&lang, "Set over the selected text; empty removes it.")).size(11.0));
+    ui.label(egui::RichText::new(tr(&lang, "Set over the selected text; empty removes it.")).size(11.0));
     ui.add_space(6.0);
     ui.set_min_width(560.0);
     ui.horizontal_top(|ui| {
@@ -503,48 +505,49 @@ fn kenten(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog, cf: &CharField
     let kind = shown_kenten_kind(stored, &character);
     let custom = on == Some(true) && kind == KentenKind::Custom;
     grid("cjkkenten").show(ui, |ui| {
-        crate::rtl::label(ui, tr(lang, "Distance from Parent:"));
+        ui.label(tr(lang, "Distance from Parent:"));
         char_number(ui, d, cf, "kentenDistance", " pt", 1.0, (-1296.0, 1296.0));
         ui.end_row();
-        crate::rtl::label(ui, tr(lang, "Position:"));
+        ui.label(tr(lang, "Position:"));
         char_choice(lang, ui, d, cf, "kentenPosition", &[(json!("aboveRight"), "Above/Right"), (json!("belowLeft"), "Below/Left")]);
         ui.end_row();
-        crate::rtl::label(ui, tr(lang, "Size:"));
+        ui.label(tr(lang, "Size:"));
         char_auto_number(ui, d, cf, "kentenSize", " pt", 1.0, (0.1, 1296.0));
         ui.end_row();
-        crate::rtl::label(ui, tr(lang, "Alignment:"));
+        ui.label(tr(lang, "Alignment:"));
         char_choice(lang, ui, d, cf, "kentenAlignment", &[(json!("center"), "Centered"), (json!("start"), "Left/Top")]);
         ui.end_row();
-        crate::rtl::label(ui, tr(lang, "Horizontal Scale:"));
+        ui.label(tr(lang, "Horizontal Scale:"));
         char_number(ui, d, cf, "kentenXScale", "%", 100.0, (1.0, 1000.0));
         ui.end_row();
-        crate::rtl::label(ui, tr(lang, "Vertical Scale:"));
+        ui.label(tr(lang, "Vertical Scale:"));
         char_number(ui, d, cf, "kentenYScale", "%", 100.0, (1.0, 1000.0));
         ui.end_row();
-        crate::rtl::label(ui, tr(lang, "Kenten Type:"));
+        ui.label(tr(lang, "Kenten Type:"));
         let shown = match on {
             None => String::new(),
             Some(false) => tr(lang, "None").to_string(),
             Some(true) => tr(lang, kenten_label(kind)).to_string(),
         };
-        egui::ComboBox::from_id_salt("cjkkententype").selected_text(crate::rtl::widget(ui, shown)).width(200.0).show_ui(ui, |ui| {
+        egui::ComboBox::from_id_salt("cjkkententype").selected_text(shown).width(200.0).show_ui(ui, |ui| {
             if cf.sparse && ui.selectable_label(on.is_none(), " ").clicked() {
                 for key in ["kenten", "kentenKind", "kentenCharacter"] {
                     cf.set(d, key, Value::Null);
                 }
             }
-            if ui.selectable_label(on == Some(false), crate::rtl::widget(ui, tr(lang, "None"))).clicked() {
+            if ui.selectable_label(on == Some(false), tr(lang, "None")).clicked() {
                 pick_kenten(d, cf, None);
             }
             for k in KentenKind::ALL {
-                if ui.selectable_label(on == Some(true) && kind == k, crate::rtl::widget(ui, tr(lang, kenten_label(k)))).clicked() {
+                if ui.selectable_label(on == Some(true) && kind == k, tr(lang, kenten_label(k))).clicked() {
                     pick_kenten(d, cf, Some(k));
                 }
             }
         });
+        crate::widgets::name_combo(ui, "cjkkententype", "cjkkententype");
         ui.end_row();
         font_fields(app, ui, d, cf, ("kentenFont", "kentenFontStyle"), custom);
-        crate::rtl::label(ui, tr(lang, "Character:"));
+        ui.label(tr(lang, "Character:"));
         // Typed directly; a mark stored with another input mode (IDML) is kept as it is.
         let mut text = if custom { character.clone() } else { String::new() };
         if ui.add_enabled(custom, egui::TextEdit::singleline(&mut text).desired_width(80.0)).changed() {
@@ -558,10 +561,10 @@ fn kenten(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog, cf: &CharField
 /// Shatai: magnification, angle, and the rotation and tsume adjustments.
 fn shatai(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, cf: &CharFields) {
     grid("cjkshatai").show(ui, |ui| {
-        crate::rtl::label(ui, tr(lang, "Magnification:"));
+        ui.label(tr(lang, "Magnification:"));
         char_number(ui, d, cf, "shataiMagnification", "%", 1.0, (0.0, 90.0));
         ui.end_row();
-        crate::rtl::label(ui, tr(lang, "Angle:"));
+        ui.label(tr(lang, "Angle:"));
         let v = cf.get(d, "shataiAngle").as_f64();
         let field = crate::widgets::NumField::number("shataiAngle", v, "°", 2).width(80.0).range(0.0, 180.0).presets(&[30.0, 45.0, 60.0]);
         let edit = if cf.sparse { field.show_or_clear(ui) } else { field.show(ui).map(Some) };
@@ -578,7 +581,7 @@ fn shatai(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, cf: &CharFields) {
 /// letters count.
 fn auto_tate_chu_yoko(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, pv: &Value) {
     grid("cjkautotcy").show(ui, |ui| {
-        crate::rtl::label(ui, tr(lang, "Tate-chu-yoko Digits:"));
+        ui.label(tr(lang, "Tate-chu-yoko Digits:"));
         para_count(ui, d, pv, "autoTcy", (0.0, f64::from(designcraft_compose::shape::AUTO_TCY_MAX)));
         ui.end_row();
     });
@@ -608,16 +611,16 @@ fn warichu(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, cf: &CharFields) {
     char_check(ui, d, cf, "warichu", crate::i18n::tr(lang, "Warichu"));
     ui.add_space(4.0);
     egui::Grid::new("cjkwarichu").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
-        crate::rtl::label(ui, crate::i18n::tr(lang, "Lines:"));
+        ui.label(crate::i18n::tr(lang, "Lines:"));
         char_count(ui, d, cf, "warichuLines", (2.0, 16.0));
         ui.end_row();
-        crate::rtl::label(ui, crate::i18n::tr(lang, "Warichu Size:"));
+        ui.label(crate::i18n::tr(lang, "Warichu Size:"));
         char_number(ui, d, cf, "warichuSize", "%", 1.0, (1.0, 1000.0));
         ui.end_row();
-        crate::rtl::label(ui, crate::i18n::tr(lang, "Line Spacing:"));
+        ui.label(crate::i18n::tr(lang, "Line Spacing:"));
         char_number(ui, d, cf, "warichuLineSpacing", " pt", 1.0, (-1000.0, 1000.0));
         ui.end_row();
-        crate::rtl::label(ui, crate::i18n::tr(lang, "Alignment:"));
+        ui.label(crate::i18n::tr(lang, "Alignment:"));
         char_choice(
             lang,
             ui,
@@ -635,12 +638,12 @@ fn warichu(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, cf: &CharFields) {
         ui.end_row();
     });
     ui.add_space(6.0);
-    crate::rtl::label(ui, egui::RichText::new(crate::i18n::tr(lang, "Line Break Options")).font(crate::theme::semibold(12.0)));
+    ui.label(egui::RichText::new(crate::i18n::tr(lang, "Line Break Options")).font(crate::theme::semibold(12.0)));
     egui::Grid::new("cjkwarichubreak").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
-        crate::rtl::label(ui, crate::i18n::tr(lang, "Characters Before Break:"));
+        ui.label(crate::i18n::tr(lang, "Characters Before Break:"));
         char_count(ui, d, cf, "warichuCharsBeforeBreak", (0.0, 100.0));
         ui.end_row();
-        crate::rtl::label(ui, crate::i18n::tr(lang, "Characters After Break:"));
+        ui.label(crate::i18n::tr(lang, "Characters After Break:"));
         char_count(ui, d, cf, "warichuCharsAfterBreak", (0.0, 100.0));
         ui.end_row();
     });
@@ -654,18 +657,19 @@ fn para_value(d: &Dialog, pv: &Value, key: &str) -> Value {
 /// A paragraph attribute from `opts` (value, label); `current` is the value shown.
 fn para_choice(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, key: &str, current: &str, opts: &[(&str, &str)]) {
     let shown = opts.iter().find(|o| o.0 == current).map_or("", |o| crate::i18n::tr(lang, o.1));
-    egui::ComboBox::from_id_salt(("cjkp", key)).selected_text(crate::rtl::widget(ui, shown)).width(220.0).show_ui(ui, |ui| {
+    egui::ComboBox::from_id_salt(("cjkp", key)).selected_text(shown).width(220.0).show_ui(ui, |ui| {
         for (v, label) in opts {
-            if ui.selectable_label(*v == current, crate::rtl::widget(ui, crate::i18n::tr(lang, label))).clicked() {
+            if ui.selectable_label(*v == current, crate::i18n::tr(lang, label)).clicked() {
                 d.fields.insert(format!("p.{key}"), json!(v));
             }
         }
     });
+    crate::widgets::name_combo(ui, ("cjkp", key), "cjkp");
 }
 
 fn para_check(ui: &mut egui::Ui, d: &mut Dialog, pv: &Value, key: &str, label: &str) {
     let mut on = para_value(d, pv, key).as_bool().unwrap_or(false);
-    if ui.checkbox(&mut on, crate::rtl::widget(ui, label)).changed() {
+    if ui.checkbox(&mut on, label).changed() {
         d.fields.insert(format!("p.{key}"), json!(on));
     }
 }
@@ -726,26 +730,27 @@ pub(super) fn mojikumi_sets(doc: &designcraft_doc::Document, current: &str) -> V
 /// rensuuji, rotated roman in vertical text, line-end ideographic spaces and roman word breaks.
 fn japanese_composition(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, cf: &CharFields, pv: &Value, doc: &designcraft_doc::Document) {
     egui::Grid::new("cjkcomp").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
-        crate::rtl::label(ui, crate::i18n::tr(lang, "Kinsoku Set:"));
+        ui.label(crate::i18n::tr(lang, "Kinsoku Set:"));
         let sets = kinsoku_sets(doc);
         // `null`: no set given, so the composer's default rules apply.
         let name = para_value(d, pv, "kinsoku").get("name").and_then(Value::as_str).map(str::to_string);
         let shown = name.as_deref().map_or_else(|| crate::i18n::tr(lang, "Default Rules").to_string(), |n| kinsoku_label(lang, n));
-        egui::ComboBox::from_id_salt("cjkkinsoku").selected_text(crate::rtl::widget(ui, shown)).width(220.0).show_ui(ui, |ui| {
+        egui::ComboBox::from_id_salt("cjkkinsoku").selected_text(shown).width(220.0).show_ui(ui, |ui| {
             // `style.paragraph.edit` takes `null` as the default rules, also over a Based On set.
-            if ui.selectable_label(name.is_none(), crate::rtl::widget(ui, crate::i18n::tr(lang, "Default Rules"))).clicked() {
+            if ui.selectable_label(name.is_none(), crate::i18n::tr(lang, "Default Rules")).clicked() {
                 d.fields.insert("p.kinsoku".into(), Value::Null);
             }
             for k in &sets {
-                if ui.selectable_label(name.as_deref() == Some(k.name.as_str()), crate::rtl::widget(ui, kinsoku_label(lang, &k.name))).clicked()
+                if ui.selectable_label(name.as_deref() == Some(k.name.as_str()), kinsoku_label(lang, &k.name)).clicked()
                     && let Ok(v) = serde_json::to_value(k)
                 {
                     d.fields.insert("p.kinsoku".into(), v);
                 }
             }
         });
+        crate::widgets::name_combo(ui, "cjkkinsoku", "cjkkinsoku");
         ui.end_row();
-        crate::rtl::label(ui, crate::i18n::tr(lang, "Kinsoku Type:"));
+        ui.label(crate::i18n::tr(lang, "Kinsoku Type:"));
         let kind = para_value(d, pv, "kinsokuType");
         let kind = match kind.as_str().unwrap_or("") {
             "KinsokuPushInFirst" => "",
@@ -766,7 +771,7 @@ fn japanese_composition(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, cf: &Char
             ],
         );
         ui.end_row();
-        crate::rtl::label(ui, crate::i18n::tr(lang, "Hanging Type:"));
+        ui.label(crate::i18n::tr(lang, "Hanging Type:"));
         let hang = para_value(d, pv, "kinsokuHang").as_str().unwrap_or("none").to_string();
         para_choice(lang, ui, d, "kinsokuHang", &hang, &[("none", "None"), ("regular", "Standard"), ("force", "Force")]);
         ui.end_row();
@@ -774,21 +779,22 @@ fn japanese_composition(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, cf: &Char
     para_check(ui, d, pv, "bunriKinshi", crate::i18n::tr(lang, "Bunri-Kinshi"));
     ui.add_space(4.0);
     egui::Grid::new("cjkcomp2").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
-        crate::rtl::label(ui, crate::i18n::tr(lang, "Mojikumi Set:"));
+        ui.label(crate::i18n::tr(lang, "Mojikumi Set:"));
         let raw = para_value(d, pv, "mojikumi");
         let current = mojikumi_value(raw.as_str().unwrap_or("")).to_string();
         let sets = mojikumi_sets(doc, &current);
         let label = |l: &str| if l.is_empty() { crate::i18n::tr(lang, "None").to_string() } else { l.to_string() };
         let shown = sets.iter().find(|s| s.0 == current).map_or_else(String::new, |s| label(s.1.as_str()));
-        egui::ComboBox::from_id_salt("cjkmojikumi").selected_text(crate::rtl::widget(ui, shown)).width(220.0).show_ui(ui, |ui| {
+        egui::ComboBox::from_id_salt("cjkmojikumi").selected_text(shown).width(220.0).show_ui(ui, |ui| {
             for (v, l) in &sets {
-                if ui.selectable_label(*v == current, crate::rtl::widget(ui, label(l.as_str()))).clicked() {
+                if ui.selectable_label(*v == current, label(l.as_str())).clicked() {
                     d.fields.insert("p.mojikumi".into(), json!(v));
                 }
             }
         });
+        crate::widgets::name_combo(ui, "cjkmojikumi", "cjkmojikumi");
         ui.end_row();
-        crate::rtl::label(ui, crate::i18n::tr(lang, "Leading Model:"));
+        ui.label(crate::i18n::tr(lang, "Leading Model:"));
         // Space below (`akiBelow`) measures the leading from the em box top, space above from its
         // bottom (`cjk_line_reference` in compose).
         let mut opts = vec![
@@ -832,14 +838,14 @@ fn grid_settings(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, pv: &Value) {
     ];
     let on = cur != GridAlign::None;
     grid("cjkgrid").show(ui, |ui| {
-        crate::rtl::label(ui, tr(lang, "Grid Alignment:"));
+        ui.label(tr(lang, "Grid Alignment:"));
         let shown = if on { REFERENCES.iter().find(|r| r.0 == reference).map_or("", |r| r.1) } else { "None" };
-        egui::ComboBox::from_id_salt("cjkgridalign").selected_text(crate::rtl::widget(ui, tr(lang, shown))).width(220.0).show_ui(ui, |ui| {
-            if ui.selectable_label(!on, crate::rtl::widget(ui, tr(lang, "None"))).clicked() {
+        egui::ComboBox::from_id_salt("cjkgridalign").selected_text(tr(lang, shown)).width(220.0).show_ui(ui, |ui| {
+            if ui.selectable_label(!on, tr(lang, "None")).clicked() {
                 set(d, GridAlign::None);
             }
             for (r, label) in REFERENCES {
-                if ui.selectable_label(on && *r == reference, crate::rtl::widget(ui, tr(lang, label))).clicked() {
+                if ui.selectable_label(on && *r == reference, tr(lang, label)).clicked() {
                     if !on {
                         set(d, GridAlign::AllLines);
                     }
@@ -849,17 +855,18 @@ fn grid_settings(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, pv: &Value) {
                 }
             }
         });
+        crate::widgets::name_combo(ui, "cjkgridalign", "cjkgridalign");
         ui.end_row();
     });
     let mut first = cur == GridAlign::FirstLineOnly;
-    let check = egui::Checkbox::new(&mut first, crate::rtl::widget(ui, tr(lang, "Align Only First Line to Grid")));
+    let check = egui::Checkbox::new(&mut first, tr(lang, "Align Only First Line to Grid"));
     if ui.add_enabled(on, check).changed() {
         set(d, if first { GridAlign::FirstLineOnly } else { GridAlign::AllLines });
     }
     ui.add_space(4.0);
     let lines = para_value(d, pv, "gridGyoudori").as_u64().unwrap_or(0);
     grid("cjkgyoudori").show(ui, |ui| {
-        crate::rtl::label(ui, tr(lang, "Gyoudori:"));
+        ui.label(tr(lang, "Gyoudori:"));
         ui.horizontal(|ui| {
             // Empty or 0: automatic (as many grid lines as the leading needs).
             let field = crate::widgets::NumField::number("gridGyoudori", (lines > 0).then_some(lines as f64), "", 0)
@@ -870,14 +877,14 @@ fn grid_settings(lang: &str, ui: &mut egui::Ui, d: &mut Dialog, pv: &Value) {
                 d.fields.insert("p.gridGyoudori".into(), json!(n.map_or(0, |n| n.round().clamp(0.0, 100.0) as u64)));
             }
             if lines == 0 {
-                crate::rtl::label(ui, tr(lang, "Auto"));
+                ui.label(tr(lang, "Auto"));
             }
         });
         ui.end_row();
     });
     // No effect while gyoudori is automatic.
     let mut block = para_value(d, pv, "paragraphGyoudori").as_bool().unwrap_or(false);
-    if ui.add_enabled(lines > 0, egui::Checkbox::new(&mut block, crate::rtl::widget(ui, tr(lang, "Use Paragraph Gyoudori")))).changed() {
+    if ui.add_enabled(lines > 0, egui::Checkbox::new(&mut block, tr(lang, "Use Paragraph Gyoudori"))).changed() {
         d.fields.insert("p.paragraphGyoudori".into(), json!(block));
     }
 }

@@ -31,7 +31,7 @@ use designcraft_geom::{Affine, BezPath, Point, Rect, Unit, Vec2};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub use catalog::{SPLIT_IN_TWO_COLUMNS, TOOL_GROUPS, ToolInfo, tool_for_shortcut, tool_info};
+pub use catalog::{SPLIT_IN_TWO_COLUMNS, TOOL_GROUPS, ToolInfo, tool_info};
 pub use layout::{CanvasLayout, SpreadSlot};
 pub use nav::ZoomTool;
 
@@ -477,8 +477,10 @@ pub trait Tool: Send {
     fn ime_preedit(&mut self, _cx: &ToolContext, _text: &str, _active_chars: Option<std::ops::Range<usize>>) -> Vec<Action> {
         vec![]
     }
-    /// The IME committed `text`: it replaces the marked text and is typed as one step.
-    fn ime_commit(&mut self, _cx: &ToolContext, _text: &str) -> Vec<Action> {
+    /// The IME committed `text`: it replaces the marked text and is typed as one step. `around`
+    /// is the UTF-8 bytes before and after the marked (or selected) text that the IME replaces
+    /// too, in the same step (macOS press-and-hold accents replace the letter typed before).
+    fn ime_commit(&mut self, _cx: &ToolContext, _text: &str, _around: [usize; 2]) -> Vec<Action> {
         vec![]
     }
     /// End a composition from outside the IME (a click, another command): the marked text stays

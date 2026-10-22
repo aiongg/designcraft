@@ -45,7 +45,7 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
     let mut edit: Option<(usize, usize, String)> = None;
     let words = story.text.split_whitespace().count().to_string();
     egui::Window::new(crate::i18n::tr(&app.ui.language, "Story Editor — {count} words").replace("{count}", &words))
-        .id(egui::Id::new("story_editor"))
+        .id(egui::Id::unique("story_editor"))
         .open(&mut open)
         .default_size(vec2(560.0, 520.0))
         .show(ctx, |ui| {
@@ -68,7 +68,7 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
                         let rect = egui::Rect::from_min_size(egui::pos2(column.min.x, out.galley_pos.y + y), vec2(130.0, 14.0));
                         ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
                             let name = crate::i18n::style_name(&app.ui.language, &para.style);
-                            crate::rtl::label(ui, egui::RichText::new(name).size(11.0).color(t.text_dim));
+                            ui.label(egui::RichText::new(name).size(11.0).color(t.text_dim));
                         });
                     }
                     if r.changed() {
@@ -86,12 +86,10 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
                 if let Some(o) = overset {
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
-                        ui.label(crate::rtl::widget(
-                            ui,
+                        ui.label(
                             egui::RichText::new(crate::i18n::tr(&app.ui.language, "OVERSET")).color(egui::Color32::from_rgb(230, 40, 40)).strong(),
-                        ));
-                        crate::rtl::label(
-                            ui,
+                        );
+                        ui.label(
                             egui::RichText::new(
                                 crate::i18n::tr(&app.ui.language, "{count} characters don't fit")
                                     .replace("{count}", &story.text[o.min(story.text.len())..].chars().count().to_string()),

@@ -300,7 +300,7 @@ pub fn set_zoom(app: &mut DesignApp, z: f64) {
 /// motion keeps its key to its end: the wheel is smoothed over a few frames, and a trackpad swipe
 /// coasts on after the key is let go.
 fn wheel_alt(ui: &egui::Ui) -> bool {
-    let id = egui::Id::new("canvas_wheel_alt");
+    let id = egui::Id::unique("canvas_wheel_alt");
     // Alt, and whether a trackpad swipe is under way.
     let (mut alt, mut swipe): (bool, bool) = ui.data(|d| d.get_temp(id)).unwrap_or_default();
     ui.input(|i| {
@@ -376,7 +376,7 @@ fn navigation_space(app: &mut DesignApp, ctx: &egui::Context) -> bool {
 }
 
 fn spring_zoom_mode(app: &DesignApp, ctx: &egui::Context, space: bool) -> bool {
-    let down = ctx.data(|d| d.get_temp::<bool>(egui::Id::new(("canvas_pointer_down", app.pane)))).unwrap_or(false);
+    let down = ctx.data(|d| d.get_temp::<bool>(egui::Id::unique(("canvas_pointer_down", app.pane)))).unwrap_or(false);
     space && ctx.input(|i| i.modifiers.command) && !down && !app.session.tool_busy()
 }
 
@@ -388,7 +388,7 @@ struct SpringZoom {
 
 /// Lend the Zoom tool the gesture; the selected tool and document selection stay intact.
 fn spring_zoom_input(app: &mut DesignApp, ui: &egui::Ui, resp: &egui::Response, xf: &Xf, active: bool) -> bool {
-    let id = egui::Id::new(("canvas_spring_zoom", app.pane));
+    let id = egui::Id::unique(("canvas_spring_zoom", app.pane));
     let mut zoom: SpringZoom = ui.data(|d| d.get_temp(id)).unwrap_or_default();
     if !ui.input(|i| i.focused) {
         ui.data_mut(|d| d.remove::<SpringZoom>(id));
@@ -526,13 +526,14 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
             painter.add(egui::Shape::mesh(mesh));
         }
     }
+    crate::separations::paint(app, ui.ctx(), &painter, &xf, &layout, screen);
     let hair = 1.0 / ui.ctx().pixels_per_point();
     for slot in &layout.slots {
         painter.rect_stroke(xf.rect(slot.bounds), 0.0, Stroke::new(hair, Color32::from_rgb(0x4a, 0x4a, 0x4a)), StrokeKind::Outside);
     }
     if !preview {
-        let drag = ui.data(|d| d.get_temp::<GuideDrag>(egui::Id::new(GUIDE_DRAG)));
-        let press = ui.data(|d| d.get_temp::<GuidePress>(egui::Id::new(GUIDE_PRESS)));
+        let drag = ui.data(|d| d.get_temp::<GuideDrag>(egui::Id::unique(GUIDE_DRAG)));
+        let press = ui.data(|d| d.get_temp::<GuidePress>(egui::Id::unique(GUIDE_PRESS)));
         let moving = drag.as_ref().zip(press).and_then(|(g, press)| moving_guides(app, &xf, rect, g, press));
         draw_guides(app, &painter, &xf, &doc, &layout, &t, moving.as_ref());
         if let Some(g) = drag
@@ -611,8 +612,8 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
         let space = navigation_space(app, ui.ctx());
         let zoom = spring_zoom_mode(app, ui.ctx(), space);
         let middle = ui.input(|i| i.pointer.middle_down());
-        let alt_hand: bool = ui.data(|d| d.get_temp(egui::Id::new(("canvas_alt_hand", app.pane)))).unwrap_or(false);
-        let tool_drag: bool = ui.data(|d| d.get_temp(egui::Id::new(("canvas_pointer_down", app.pane)))).unwrap_or(false);
+        let alt_hand: bool = ui.data(|d| d.get_temp(egui::Id::unique(("canvas_alt_hand", app.pane)))).unwrap_or(false);
+        let tool_drag: bool = ui.data(|d| d.get_temp(egui::Id::unique(("canvas_pointer_down", app.pane)))).unwrap_or(false);
         let alt_text = wants_text && !tool_drag && ui.input(|i| i.modifiers.alt);
         let c = if middle || alt_hand {
             Cursor::HandGrab
@@ -624,7 +625,7 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
             app.session.cursor(xf.to_canvas(p), ui.input(|i| mods(i, false)), app.view_info())
         };
         // A column guide that a press would drag, or one being dragged: a resize cursor across it.
-        let dragging = ui.data(|d| d.get_temp::<ColumnDrag>(egui::Id::new((COLUMN_DRAG, app.pane)))).map(|g| g.spread);
+        let dragging = ui.data(|d| d.get_temp::<ColumnDrag>(egui::Id::unique((COLUMN_DRAG, app.pane)))).map(|g| g.spread);
         let column = dragging.or_else(|| {
             let menu_open = context_menu_open(ui.ctx());
             (!space && !zoom && !middle && !alt_hand && !tool_drag && !menu_open && xf.rot == 0)
@@ -682,7 +683,6 @@ fn screen_options(app: &DesignApp, layout: &CanvasLayout, preview: bool, ppp: f6
         note_indicators: !preview && app.session.prefs.show_note_anchors,
         change_markup: !preview && app.session.prefs.show_added_text,
         tag_markers: !preview && app.ui.tag_markers,
-        plate: app.ui.separation,
         highlight_keeps: !preview && app.session.prefs.highlight_keeps,
         highlight_custom_tracking: !preview && app.session.prefs.highlight_custom_tracking,
         quality: app.ui.display_quality,
@@ -715,7 +715,6 @@ fn grid_areas(layout: &CanvasLayout) -> Vec<(designcraft_doc::SpreadRef, DRect)>
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DisplayKey {
     quality: designcraft_render::DisplayQuality,
-    separation: Option<u8>,
     rich_black: bool,
     overprint_preview: bool,
     proof_colors: bool,
@@ -733,7 +732,6 @@ fn display_key(app: &DesignApp) -> DisplayKey {
     let (ui, prefs) = (&app.ui, &app.session.prefs);
     DisplayKey {
         quality: ui.display_quality,
-        separation: ui.separation,
         rich_black: ui.rich_black,
         overprint_preview: ui.overprint_preview,
         proof_colors: ui.proof_colors,
@@ -941,10 +939,6 @@ fn render_worker_spawn(ctx: &egui::Context) -> Option<crate::render_worker::Work
 fn upload(app: &mut DesignApp, ctx: &egui::Context, mut img: designcraft_render::Rendered) {
     if app.ui.proof_colors {
         designcraft_render::proof_view(&mut img, &app.ui.proof_setup);
-    }
-    // Plates render from source colours; the ink limit is estimated from the composite.
-    if app.ui.separation.is_none() && app.ui.ink_limit.is_some() {
-        designcraft_render::separation_view(&mut img, None, app.ui.ink_limit);
     }
     let ci = egui::ColorImage::from_rgba_premultiplied([img.width as usize, img.height as usize], &img.pixels);
     let ci = crate::widgets::fit_texture(ci, ctx.input(|i| i.max_texture_side));
@@ -1575,7 +1569,7 @@ fn draw_text_selection(
 /// A text field had keyboard focus when this frame began, per window: egui keeps one focus per
 /// viewport, so a field focused in the main window must not mute the second window's canvas.
 fn field_focused_id(ctx: &egui::Context) -> egui::Id {
-    egui::Id::new("canvas_field_focused").with(ctx.viewport_id())
+    egui::Id::unique("canvas_field_focused").with(ctx.viewport_id())
 }
 
 /// Called before the panels draw. A panel field gives up focus on Enter or Tab while it draws,
@@ -1689,10 +1683,10 @@ fn draw_inverse_highlight(
     );
     let (w, h) = (((bbox.width() * ppp).round() as u32).clamp(1, 8192), ((bbox.height() * ppp).round() as u32).clamp(1, 8192));
     let Some(st) = app.session.active() else { return };
-    let key = egui::Id::new(("inverse_sel", st.uid, st.revision, std::sync::Arc::as_ptr(&st.doc) as usize, story.0))
+    let key = egui::Id::unique(("inverse_sel", st.uid, st.revision, std::sync::Arc::as_ptr(&st.doc) as usize, story.0))
         .with((runs.iter().map(|r| r.2.len() + r.3.len() * 7919).sum::<usize>(), w, h))
         .with((bbox.min.x.to_bits(), bbox.min.y.to_bits(), xf.zoom.to_bits(), st.selection.text.map(|t| (t.anchor, t.focus))));
-    let cache_id = egui::Id::new("inverse_sel_tex");
+    let cache_id = egui::Id::unique("inverse_sel_tex");
     let cached: Option<(egui::Id, egui::TextureHandle)> = ctx.data(|d| d.get_temp(cache_id));
     let tex = match cached {
         Some((k, t)) if k == key => t,
@@ -1914,7 +1908,7 @@ fn draw_content_ghost(painter: &egui::Painter, xf: &Xf, doc: &Document, layout: 
 /// A screen-resolution proxy of a placed graphic for the ghost, cached per asset.
 fn ghost_texture(ctx: &egui::Context, doc: &Document, g: &designcraft_doc::Graphic) -> Option<egui::TextureHandle> {
     let asset = doc.assets.get(&g.asset)?;
-    let key = egui::Id::new(("content_ghost", std::sync::Arc::as_ptr(&asset.data) as usize, asset.data.len(), asset.page));
+    let key = egui::Id::unique(("content_ghost", std::sync::Arc::as_ptr(&asset.data) as usize, asset.data.len(), asset.page));
     if let Some(t) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(key)) {
         return Some(t);
     }
@@ -1991,7 +1985,7 @@ fn draw_rulers(app: &DesignApp, ui: &egui::Ui, full: Rect, rect: Rect, xf: &Xf, 
     // While the zero point is dragged out of the corner, the rulers measure from where it would
     // land (kept on the pasteboard, as the engine keeps it) and crosshair lines show the spot.
     // Cmd-dragged, the lines are the two guides it makes; locked, a plain drag does nothing.
-    let dragged = ui.data(|d| d.get_temp::<Pos2>(egui::Id::new((ZERO_POINT_DRAG, app.pane)))).filter(|p| !corner.contains(*p));
+    let dragged = ui.data(|d| d.get_temp::<Pos2>(egui::Id::unique((ZERO_POINT_DRAG, app.pane)))).filter(|p| !corner.contains(*p));
     let guides = ui.input(|i| i.modifiers.command);
     let moving = dragged.filter(|_| !guides && !doc.settings.zero_point_locked).and_then(|p| zero_point_at(app, xf, p));
     let cross = if guides { dragged } else { moving.map(|(_, c)| xf.to_screen(c)) };
@@ -2150,7 +2144,7 @@ fn ruler_units_menu(app: &mut DesignApp, ui: &mut egui::Ui, which: RulerMenu, cu
     let tr = |s: &str| crate::i18n::tr(&lang, s).to_string();
     if which == RulerMenu::Both {
         let label = tr(if locked { "Unlock Zero Point" } else { "Lock Zero Point" });
-        if ui.button(crate::rtl::widget(ui, format!("   {label}"))).clicked() {
+        if ui.button(format!("   {label}")).clicked() {
             let _ = app.run("view.lockZeroPoint", json!({"on": !locked}));
             ui.close();
         }
@@ -2161,7 +2155,7 @@ fn ruler_units_menu(app: &mut DesignApp, ui: &mut egui::Ui, which: RulerMenu, cu
     for u in RULER_UNITS.into_iter().chain(extra) {
         let label = tr(u.label());
         let text = if Some(u) == cur { format!("✓ {label}") } else { format!("   {label}") };
-        if ui.button(crate::rtl::widget(ui, text)).clicked() {
+        if ui.button(text).clicked() {
             let p = match which {
                 RulerMenu::Horizontal => json!({"horizontalUnits": u}),
                 RulerMenu::Vertical => json!({"verticalUnits": u}),
@@ -2173,14 +2167,11 @@ fn ruler_units_menu(app: &mut DesignApp, ui: &mut egui::Ui, which: RulerMenu, cu
     }
     ui.separator();
     let hide = format!("   {}", tr("Hide Rulers"));
-    if ui
-        .add(egui::Button::new(crate::rtl::widget(ui, hide)).shortcut_text(crate::menus::shortcut_of(app, "view.rulers").unwrap_or_default()))
-        .clicked()
-    {
+    if ui.add(egui::Button::new(hide).shortcut_text(crate::menus::shortcut_of(app, "view.rulers").unwrap_or_default())).clicked() {
         let _ = app.run("view.rulers", json!({}));
         ui.close();
     }
-    if which == RulerMenu::Horizontal && ui.button(crate::rtl::widget(ui, format!("   {}", tr("Delete All Guides on Spread")))).clicked() {
+    if which == RulerMenu::Horizontal && ui.button(format!("   {}", tr("Delete All Guides on Spread"))).clicked() {
         crate::menus::activate(app, "app.deleteAllGuides", &Value::Null);
         ui.close();
     }
@@ -2195,7 +2186,7 @@ struct MenuRequest {
 
 /// The popup id of the canvas context menu in split-view pane `pane`.
 fn context_menu_id(pane: u8) -> egui::Id {
-    egui::Id::new(("canvas_context_menu", pane))
+    egui::Id::unique(("canvas_context_menu", pane))
 }
 
 /// Was a canvas context menu open (in either pane of this window) when this frame began?
@@ -2203,7 +2194,7 @@ fn context_menu_id(pane: u8) -> egui::Id {
 /// click or key still belongs to the menu. Popups are per window (viewport), and so is input.
 pub fn context_menu_open(ctx: &egui::Context) -> bool {
     let pass = ctx.cumulative_pass_nr();
-    let key = egui::Id::new("canvas_context_menu_open").with(ctx.viewport_id());
+    let key = egui::Id::unique("canvas_context_menu_open").with(ctx.viewport_id());
     if let Some((p, open)) = ctx.data(|d| d.get_temp::<(u64, bool)>(key))
         && p == pass
     {
@@ -2339,7 +2330,7 @@ fn scrollbars(app: &mut DesignApp, ui: &mut egui::Ui, outer: Rect, screen: Rect,
     let mut hot = [false; 2];
     for (n, vertical) in [true, false].into_iter().enumerate() {
         let (track, thumb, k) = scrollbar_rects(outer, screen, cb, vertical);
-        let id = egui::Id::new(("canvas_scrollbar", app.pane, vertical));
+        let id = egui::Id::unique(("canvas_scrollbar", app.pane, vertical));
         let resp = ui.interact(track, id, Sense::click_and_drag());
         let grab_id = id.with("grab");
         if resp.drag_started() {
@@ -2423,10 +2414,10 @@ fn handle_input(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, r
     // see the primary button.
     // A column guide drag keeps the pointer until the button is up, whatever Space or a menu does
     // meanwhile.
-    if ui.data(|d| d.get_temp::<ColumnDrag>(egui::Id::new((COLUMN_DRAG, app.pane)))).is_some() && column_guide_drag(app, ui, resp, rect, &xf) {
+    if ui.data(|d| d.get_temp::<ColumnDrag>(egui::Id::unique((COLUMN_DRAG, app.pane)))).is_some() && column_guide_drag(app, ui, resp, rect, &xf) {
         return;
     }
-    let tool_drag: bool = ui.data(|d| d.get_temp(egui::Id::new(("canvas_pointer_down", app.pane)))).unwrap_or(false);
+    let tool_drag: bool = ui.data(|d| d.get_temp(egui::Id::unique(("canvas_pointer_down", app.pane)))).unwrap_or(false);
     let hand = space && !ui.input(|i| i.modifiers.command);
     if !tool_drag && ((hand && resp.dragged()) || resp.dragged_by(egui::PointerButton::Middle)) {
         let d = xf.unrotate_delta(resp.drag_delta());
@@ -2437,7 +2428,7 @@ fn handle_input(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, r
     }
     // Editing text (Space types a space): Alt held at the press gives the Hand tool until the
     // button is released, and the caret stays. Alt pressed later in a text drag copies the text.
-    let alt_hand_id = egui::Id::new(("canvas_alt_hand", app.pane));
+    let alt_hand_id = egui::Id::unique(("canvas_alt_hand", app.pane));
     let mut alt_hand: bool = ui.data(|d| d.get_temp(alt_hand_id)).unwrap_or(false);
     let (press, alt, primary_down) = ui.input(|i| (i.pointer.primary_pressed(), i.modifiers.alt, i.pointer.primary_down()));
     if press && alt && wants_text && !tool_drag && !menu_open && resp.hovered() {
@@ -2468,9 +2459,9 @@ fn handle_input(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, r
     let vi = app.view_info();
     let pos = |p: Pos2| xf.to_canvas(p);
     let mut events: Vec<PointerEvent> = Vec::new();
-    let down_id = egui::Id::new(("canvas_pointer_down", app.pane));
+    let down_id = egui::Id::unique(("canvas_pointer_down", app.pane));
     let mut down: bool = ui.data(|d| d.get_temp(down_id)).unwrap_or(false);
-    let clicks_id = egui::Id::new(("canvas_clicks", app.pane));
+    let clicks_id = egui::Id::unique(("canvas_clicks", app.pane));
     let (pressed, released, origin, latest, now) =
         ui.input(|i| (i.pointer.primary_pressed(), i.pointer.primary_released(), i.pointer.press_origin(), i.pointer.latest_pos(), i.time));
     let in_view = |o: Pos2| if xf.rot == 0 { rect.contains(o) } else { resp.rect.contains(o) };
@@ -2495,7 +2486,7 @@ fn handle_input(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, r
         events.push(PointerEvent { kind: PointerKind::Drag, pos: pos(p), mods: m, clicks: 1 });
     }
     // Power Zoom: holding the Hand tool still for half a second turns the press into one.
-    let hold_id = egui::Id::new(("canvas_hold", app.pane));
+    let hold_id = egui::Id::unique(("canvas_hold", app.pane));
     if down && !released && app.session.tool_id() == "hand" && !m.alt {
         let (now, origin_pos) = ui.input(|i| (i.time, i.pointer.press_origin()));
         let (start, fired): (f64, bool) = ui.data(|d| d.get_temp(hold_id)).unwrap_or((now, false));
@@ -2554,21 +2545,31 @@ fn handle_input(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, r
     // Keyboard for the active tool. A field focused when the frame began keeps this frame's keys.
     let field_id = field_focused_id(ui.ctx());
     let field = ui.ctx().text_edit_focused() || ui.data(|d| d.get_temp::<bool>(field_id)).unwrap_or(false);
-    if menu_open || modal_open(app) || (field && !resp.has_focus()) || !keyboard_pane(app) {
+    if !keyboard_pane(app) {
         return;
     }
-    // Keys of a frame that began composing are the IME's too (a Backspace that empties the marked
-    // text must not delete the character before it).
-    let composing_at_start = app.session.tool_composing();
-    let evs = ui.input(|i| i.events.clone());
+    let ctx = ui.ctx().clone();
+    let blocked = menu_open || modal_open(app) || (field && !resp.has_focus());
+    let editing = !blocked && app.session.wants_text();
+    // The composer takes the events the IME uses; while editing, its edits are the text tool's
+    // keyboard, in the order the platform sent them.
+    sync_composer(app, &ctx);
+    let edits = app.ime.update(&ctx, editing);
+    let plain_paste = ui.input(|i| i.modifiers.shift);
+    if editing || app.session.tool_composing() {
+        type_text(app, edits, plain_paste);
+    }
+    app.ime_discard |= app.ime.interrupted();
+    if blocked || editing {
+        return;
+    }
     // Native only: egui-winit sends a ⌘+V chord as a paste without its key press, so the modifiers
-    // held at the paste tell Paste in Place from Paste. The web also gets the key press, and the
-    // shortcut table has already run the command. A chord's modifiers may be released in the same
-    // frame, hence the modifiers held at each event.
+    // held at the paste tell Paste in Place from Paste. A chord's modifiers may be released in the
+    // same frame, hence the modifiers held at each event.
     #[cfg(not(target_arch = "wasm32"))]
     let mut held =
         ui.data(|d| d.get_temp::<(egui::Modifiers, egui::Modifiers)>(modifiers_id())).map_or_else(|| ui.input(|i| i.modifiers), |(start, _)| start);
-    for e in evs {
+    for e in ui.input(|i| i.events.clone()) {
         #[cfg(not(target_arch = "wasm32"))]
         let chord = {
             if let egui::Event::ModifiersChanged(m) = &e {
@@ -2576,27 +2577,7 @@ fn handle_input(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, r
             }
             if matches!(e, egui::Event::Paste(_)) { crate::menus::paste_chord_command(app, held) } else { None }
         };
-        let composing = composing_at_start || app.session.tool_composing();
         match e {
-            egui::Event::Ime(ime) if wants_text => ime_event(app, ime, vi),
-            // Keys the IME passes through come as text only while nothing is marked.
-            egui::Event::Text(t) if wants_text && !composing => {
-                let _ = app.run("text.insert", json!({"text": t}));
-            }
-            // The IME owns the keyboard until it commits: no typing, clipboard or editing keys.
-            egui::Event::Text(_) | egui::Event::Paste(_) | egui::Event::Copy | egui::Event::Cut | egui::Event::Key { .. } if composing => {}
-            egui::Event::Paste(t) if wants_text => {
-                // Formatted when the system clipboard still holds what was copied here;
-                // Shift (⇧⌘V) pastes without formatting.
-                let plain = ui.input(|i| i.modifiers.shift);
-                let id = if plain { "edit.pasteWithoutFormatting" } else { "edit.paste" };
-                let _ = app.run(id, json!({"text": t}));
-            }
-            egui::Event::Copy | egui::Event::Cut if wants_text => {
-                // `run` puts the copied text on the system clipboard.
-                let id = if matches!(e, egui::Event::Cut) { "edit.cut" } else { "edit.copy" };
-                let _ = app.run(id, json!({}));
-            }
             // Paste in Place's chord (⌘⌥⇧V unless rebound) arrives as a paste too.
             #[cfg(not(target_arch = "wasm32"))]
             egui::Event::Paste(_) if chord.is_some() => {
@@ -2618,30 +2599,7 @@ fn handle_input(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, r
                     crate::menus::activate(app, id, &params);
                 }
             }
-            egui::Event::Key { key, pressed: true, modifiers, .. } => {
-                let k = match key {
-                    egui::Key::ArrowLeft => Some(ToolKey::Left),
-                    egui::Key::ArrowRight => Some(ToolKey::Right),
-                    egui::Key::ArrowUp => Some(ToolKey::Up),
-                    egui::Key::ArrowDown => Some(ToolKey::Down),
-                    egui::Key::Enter => Some(ToolKey::Enter),
-                    egui::Key::Escape => Some(ToolKey::Escape),
-                    egui::Key::Backspace => Some(ToolKey::Backspace),
-                    egui::Key::Delete => Some(ToolKey::Delete),
-                    egui::Key::Tab => Some(ToolKey::Tab),
-                    egui::Key::Home => Some(ToolKey::Home),
-                    egui::Key::End => Some(ToolKey::End),
-                    _ => None,
-                };
-                if let Some(k) = k {
-                    let m = Mods { shift: modifiers.shift, alt: modifiers.alt, cmd: modifiers.command, ctrl: modifiers.ctrl, space: false };
-                    let handled = app.session.tool_key(k, m, vi).unwrap_or(false);
-                    if !handled && k == ToolKey::Escape {
-                        let _ = app.run("edit.deselectAll", json!({}));
-                    }
-                    app.after_engine();
-                }
-            }
+            egui::Event::Key { key, pressed: true, modifiers, .. } => tool_key(app, key, modifiers, vi),
             _ => {}
         }
     }
@@ -2660,34 +2618,110 @@ fn keyboard_pane(app: &DesignApp) -> bool {
     app.pane == app.focus_pane
 }
 
-/// One input method event for the text caret: marked text previews in the story, a commit types.
-fn ime_event(app: &mut DesignApp, e: egui::ImeEvent, vi: designcraft_engine::ViewInfo) {
-    let r = match e {
-        egui::ImeEvent::Preedit { text, active_range_chars } => {
-            app.ime_marked = Some(text.clone()).filter(|t| !t.is_empty());
-            app.session.tool_preedit(&text, active_range_chars, vi).map_err(|e| e.to_string())
-        }
-        // A bare line break confirms the composition (Enter with some IMEs): the marked text, not
-        // a new paragraph.
-        egui::ImeEvent::Commit(t) if t == "\n" || t == "\r" => {
-            keep_marked_text(app);
-            Ok(())
-        }
-        egui::ImeEvent::Commit(t) => {
-            app.ime_marked = None;
-            app.session.tool_ime_commit(&t, vi).map_err(|e| e.to_string())
-        }
-        // The web text agent's corrections and mobile Backspace: characters around the caret go.
-        egui::ImeEvent::DeleteSurrounding { before_chars, after_chars } if !app.session.tool_composing() => {
-            delete_surrounding(app, before_chars, after_chars)
-        }
-        // `Enabled` and `Disabled` carry nothing: the IME is on while `ime_output` sets `ime`.
-        _ => Ok(()),
-    };
-    if let Err(e) = r {
-        app.status(e);
+/// A key for the active tool (caret movement, nudging, Backspace); Escape it leaves alone
+/// deselects.
+fn tool_key(app: &mut DesignApp, key: egui::Key, modifiers: egui::Modifiers, vi: designcraft_engine::ViewInfo) {
+    let Some(k) = tool_key_of(key) else { return };
+    let m = Mods { shift: modifiers.shift, alt: modifiers.alt, cmd: modifiers.command, ctrl: modifiers.ctrl, space: false };
+    let handled = app.session.tool_key(k, m, vi).unwrap_or(false);
+    if !handled && k == ToolKey::Escape {
+        let _ = app.run("edit.deselectAll", json!({}));
     }
     app.after_engine();
+}
+
+/// The tool key a key press is, if any: the keys that move the caret or edit around it.
+fn tool_key_of(key: egui::Key) -> Option<ToolKey> {
+    Some(match key {
+        egui::Key::ArrowLeft => ToolKey::Left,
+        egui::Key::ArrowRight => ToolKey::Right,
+        egui::Key::ArrowUp => ToolKey::Up,
+        egui::Key::ArrowDown => ToolKey::Down,
+        egui::Key::Enter => ToolKey::Enter,
+        egui::Key::Escape => ToolKey::Escape,
+        egui::Key::Backspace => ToolKey::Backspace,
+        egui::Key::Delete => ToolKey::Delete,
+        egui::Key::Tab => ToolKey::Tab,
+        egui::Key::Home => ToolKey::Home,
+        egui::Key::End => ToolKey::End,
+        _ => return None,
+    })
+}
+
+/// The composer's edits at the text caret: marked text previews in the story, a commit types
+/// (with the text the IME replaces around it, as one undo step), keys go to the tool.
+fn type_text(app: &mut DesignApp, edits: Vec<craft_ui::ime::Edit>, plain_paste: bool) {
+    use craft_ui::ime::Edit;
+    let vi = app.view_info();
+    let trace = std::env::var_os("DESIGNCRAFT_DEBUG_KEYS").is_some();
+    for edit in edits {
+        log::debug!("text edit {edit:?}");
+        if trace {
+            eprintln!("text edit {edit:?} (pending deletion {:?})", app.ime_around);
+        }
+        // A pending deletion waits for its text. macOS sends the deletion of an accent picked with
+        // the letter's own key before that key's press, so only a key that moves the caret or
+        // edits drops it.
+        let keeps = match &edit {
+            Edit::Preedit { .. } | Edit::Insert(_) | Edit::DeleteSurroundingBytes { .. } => true,
+            Edit::Key { key, .. } => tool_key_of(*key).is_none(),
+            _ => false,
+        };
+        if !keeps {
+            app.ime_around = [0, 0];
+        }
+        let r = match edit {
+            Edit::Preedit { text, active } => app.session.tool_preedit(&text, active, vi).map_err(|e| e.to_string()),
+            Edit::Insert(text) => {
+                let pending = std::mem::take(&mut app.ime_around);
+                let around = whole_chars_around(app, pending);
+                app.session.tool_ime_replace(&text, around, vi).map_err(|e| e.to_string())
+            }
+            Edit::DeleteSurroundingBytes { before_bytes, after_bytes } => {
+                app.ime_around = [before_bytes, after_bytes];
+                Ok(())
+            }
+            Edit::Key { key, modifiers, .. } => {
+                tool_key(app, key, modifiers, vi);
+                Ok(())
+            }
+            Edit::LineBreak { modifiers } => {
+                tool_key(app, egui::Key::Enter, modifiers, vi);
+                Ok(())
+            }
+            // Formatted when the system clipboard still holds what was copied here; Shift (⇧⌘V)
+            // pastes without formatting.
+            Edit::Paste(text) => {
+                let id = if plain_paste { "edit.pasteWithoutFormatting" } else { "edit.paste" };
+                app.run(id, json!({"text": text})).map(drop)
+            }
+            // `run` puts the copied text on the system clipboard.
+            Edit::Copy => app.run("edit.copy", json!({})).map(drop),
+            Edit::Cut => app.run("edit.cut", json!({})).map(drop),
+            Edit::DeleteSurrounding { before_chars, after_chars } => delete_surrounding(app, before_chars, after_chars),
+        };
+        if let Err(e) = r {
+            app.status(e);
+        }
+    }
+    app.after_engine();
+}
+
+/// The bytes of the whole characters inside `around` (UTF-8 bytes before and after the selected
+/// text): a character a count ends inside stays.
+fn whole_chars_around(app: &DesignApp, around: [usize; 2]) -> [usize; 2] {
+    if around == [0, 0] {
+        return around;
+    }
+    let Some((text, r)) = app.session.active().and_then(|d| {
+        let t = d.selection.text?;
+        Some((d.doc.text_story(t.story, t.cell)?.text.as_str(), t.range()))
+    }) else {
+        return [0, 0];
+    };
+    let (Some(before), Some(after)) = (text.get(..r.start), text.get(r.end..)) else { return [0, 0] };
+    let (b, a) = craft_ui::ime::surrounding_chars(before, after, around[0], around[1]);
+    [before.chars().rev().take(b).map(char::len_utf8).sum(), after.chars().take(a).map(char::len_utf8).sum()]
 }
 
 /// Delete `before` characters before the caret and `after` after it (sizes come from the browser:
@@ -2701,17 +2735,12 @@ fn delete_surrounding(app: &mut DesignApp, before: usize, after: usize) -> Resul
     Ok(())
 }
 
-/// End a composition outside the IME (a click away, the canvas losing the keyboard): the marked
-/// text stays as typed, and the system IME is told to drop its copy.
-pub(crate) fn keep_marked_text(app: &mut DesignApp) {
-    if app.ime_marked.take().is_some() {
-        app.ime_discard = true;
-    }
-    if app.session.tool_composing() {
-        if let Err(e) = app.session.end_composition() {
-            app.status(e.to_string());
-        }
-        app.after_engine();
+/// The engine ends a composition on its own (a click in the canvas, a tool switch, a command),
+/// keeping the marked text as typed: the composer drops its copy and tells the IME to.
+fn sync_composer(app: &mut DesignApp, ctx: &egui::Context) {
+    if app.ime.is_composing() && !app.session.tool_composing() {
+        app.ime.discard(ctx);
+        app.ime_around = [0, 0];
     }
 }
 
@@ -2722,25 +2751,24 @@ fn ime_output(app: &mut DesignApp, ctx: &egui::Context, xf: &Xf) {
     if !keyboard_pane(app) {
         return;
     }
+    sync_composer(app, ctx);
     // A text field, dialog or Quick Apply has the keyboard: egui's own text editing serves the IME.
     let ours = app.session.wants_text() && !ctx.text_edit_focused() && !modal_open(app);
     let caret = if ours { app.session.tool_ime_caret(app.view_info()) } else { None };
-    let Some((a, b)) = caret else {
-        // The IME goes away with its marked text: keep that text as typed, like a click away.
-        keep_marked_text(app);
-        return;
-    };
-    let r = Rect::from_two_pos(xf.to_screen(a), xf.to_screen(b)).expand(1.0);
-    // The composition ended outside the IME (a click, a command): the IME drops what it has marked.
-    let interrupt = app.ime_marked.is_some() && !app.session.tool_composing();
-    if interrupt {
-        app.ime_marked = None;
-        app.ime_discard = true;
+    match caret {
+        Some((a, b)) => {
+            app.ime.set_caret(ctx, Rect::from_two_pos(xf.to_screen(a), xf.to_screen(b)).expand(1.0));
+            app.canvas_ime = true;
+        }
+        None => {
+            // The editing ended in this pass: the IME goes now, its marked text kept as typed.
+            let edits = app.ime.update(ctx, false);
+            if app.session.tool_composing() {
+                type_text(app, edits, false);
+            }
+        }
     }
-    app.canvas_ime = true;
-    ctx.output_mut(|o| {
-        o.ime = Some(egui::output::IMEOutput { purpose: egui::IMEPurpose::Normal, rect: r, cursor_rect: r, should_interrupt_composition: interrupt });
-    });
+    app.ime_discard |= app.ime.interrupted();
 }
 
 /// View → Show Hidden Characters: ¶ paragraph ends, » tabs, · spaces, ¬ forced line breaks, # end of story.
@@ -2815,7 +2843,7 @@ fn draw_flattener_preview(painter: &egui::Painter, xf: &Xf, doc: &Document, layo
 /// story version).
 fn draw_dynamic_spelling(app: &DesignApp, ctx: &egui::Context, painter: &egui::Painter, xf: &Xf, doc: &Document, layout: &CanvasLayout) {
     for story in doc.stories.values() {
-        let key = egui::Id::new(("dyn_spell", std::sync::Arc::as_ptr(story) as usize, doc.user_words.len()));
+        let key = egui::Id::unique(("dyn_spell", std::sync::Arc::as_ptr(story) as usize, doc.user_words.len()));
         let bad: std::sync::Arc<Vec<std::ops::Range<usize>>> = match ctx.data(|d| d.get_temp(key)) {
             Some(v) => v,
             None => {
@@ -2875,7 +2903,7 @@ const ZERO_POINT_DRAG: &str = "canvas_zero_point_drag";
 /// Cmd-dragged (Ctrl elsewhere), it makes a horizontal and a vertical guide instead.
 /// Holds the pointer position while dragging; returns true while it owns the pointer.
 fn zero_point_drag(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, rect: Rect, xf: &Xf) -> bool {
-    let id = egui::Id::new((ZERO_POINT_DRAG, app.pane));
+    let id = egui::Id::unique((ZERO_POINT_DRAG, app.pane));
     let corner = Rect::from_min_max(resp.rect.min, rect.min);
     let (pressed, released, down, origin, latest, dbl, command) = ui.input(|i| {
         (
@@ -3176,7 +3204,7 @@ fn guide_at(app: &DesignApp, xf: &Xf, p: Pos2) -> Option<(designcraft_doc::Sprea
 /// the guide is selected and the object is not. Returns true from the press to the release, so
 /// the tools never see that press.
 fn guide_drag(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, rect: Rect, xf: &Xf) -> bool {
-    let id = egui::Id::new(GUIDE_DRAG);
+    let id = egui::Id::unique(GUIDE_DRAG);
     let (pressed, released, origin, latest) =
         ui.input(|i| (i.pointer.primary_pressed(), i.pointer.primary_released(), i.pointer.press_origin(), i.pointer.latest_pos()));
     let mut drag: Option<GuideDrag> = ui.data(|d| d.get_temp(id));
@@ -3205,7 +3233,7 @@ fn guide_drag(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, rec
             if !shift && !selected {
                 let _ = app.run("guide.select", json!({"spread": r, "page": pi, "index": gi}));
             }
-            ui.data_mut(|d| d.insert_temp(egui::Id::new(GUIDE_PRESS), GuidePress { origin: o, shift }));
+            ui.data_mut(|d| d.insert_temp(egui::Id::unique(GUIDE_PRESS), GuidePress { origin: o, shift }));
             drag = Some(GuideDrag { orientation, from: Some((r, pi, gi)), at: Some(o), mods: egui::Modifiers::NONE });
         }
     }
@@ -3224,8 +3252,8 @@ fn guide_drag(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, rec
     }
     ui.data_mut(|d| d.remove::<GuideDrag>(id));
     let press: Option<GuidePress> = ui.data_mut(|d| {
-        let press = d.get_temp(egui::Id::new(GUIDE_PRESS));
-        d.remove::<GuidePress>(egui::Id::new(GUIDE_PRESS));
+        let press = d.get_temp(egui::Id::unique(GUIDE_PRESS));
+        d.remove::<GuidePress>(egui::Id::unique(GUIDE_PRESS));
         press
     });
     let Some(p) = g.at else { return true };
@@ -3487,7 +3515,7 @@ fn snap_gutter(app: &DesignApp, g: &ColumnDrag, want: f64, shift: bool, zoom: f6
 /// move its gutter, both guides together; Escape puts it back. One undo step per drag. Returns
 /// true while it owns the pointer.
 fn column_guide_drag(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, rect: Rect, xf: &Xf) -> bool {
-    let id = egui::Id::new((COLUMN_DRAG, app.pane));
+    let id = egui::Id::unique((COLUMN_DRAG, app.pane));
     let (pressed, released, origin, latest, shift, escape) = ui.input(|i| {
         (
             i.pointer.primary_pressed(),
@@ -3939,7 +3967,7 @@ mod tests {
     }
 
     fn wheel(phase: egui::TouchPhase, up: f32, modifiers: egui::Modifiers) -> egui::Event {
-        egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: vec2(0.0, up), phase, modifiers }
+        egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: vec2(0.0, up), phase, modifiers, source: egui::MouseWheelSource::Unknown }
     }
 
     // Plays `events` with the pointer at `at`, a frame each, and lets the motion settle.
@@ -4826,7 +4854,7 @@ mod tests {
         primary(&mut h, ruler, true);
         h.event(egui::Event::PointerMoved(dest));
         h.run_steps(2);
-        let g = h.ctx.data(|d| d.get_temp::<GuideDrag>(egui::Id::new(GUIDE_DRAG))).expect("dragging");
+        let g = h.ctx.data(|d| d.get_temp::<GuideDrag>(egui::Id::unique(GUIDE_DRAG))).expect("dragging");
         assert_eq!(g.orientation, designcraft_doc::Orientation::Horizontal);
         assert!(guide_readout(h.state(), &xf, &g).is_some_and(|t| t.starts_with("Y: ")));
         primary(&mut h, dest, false);
@@ -5295,10 +5323,70 @@ mod tests {
         assert!(!h.state().session.tool_composing());
         assert!(h.output().platform_output.ime.as_ref().is_some_and(|i| i.should_interrupt_composition));
         assert!(h.state_mut().take_ime_discard());
+        // The input method's late commit of the accent it was told to drop isn't typed again.
+        h.event(egui::Event::Ime(egui::ImeEvent::Commit("˜".into())));
+        h.run_steps(2);
+        assert_eq!(text(&h), "Tí˜");
         // Another tool takes no text: the input method is off.
         h.state_mut().run("tool.select", json!({"tool": "selection"})).unwrap();
         h.run_steps(2);
         assert!(h.output().platform_output.ime.is_none());
+    }
+
+    /// Holding E on a Mac and picking è replaces the "e" already typed: the input method deletes
+    /// it by byte count with the commit, as one undo step. Without that the story reads "eè".
+    /// macOS sends the deletion of an accent picked with the letter's own key before that key's
+    /// press: an empty commit, then the key, then its text. The key between them doesn't drop it.
+    #[test]
+    fn press_and_hold_deletion_survives_the_key_that_types_the_accent() {
+        let (mut h, id) = typing("ẫ");
+        h.state_mut().run("text.placeCaret", json!({"frame": id, "point": [390.0, 80.0]})).unwrap();
+        h.run_steps(2);
+        let text = |h: &Harness<'_, DesignApp>| h.state().session.doc().unwrap().doc.stories.values().map(|s| s.text.clone()).collect::<String>();
+        h.event(egui::Event::Text("e".into()));
+        h.run_steps(2);
+        assert_eq!(text(&h), "ẫe");
+        h.event(egui::Event::Ime(egui::ImeEvent::DeleteSurroundingBytes { before_bytes: 1, after_bytes: 0 }));
+        h.event(egui::Event::Ime(egui::ImeEvent::Commit(String::new())));
+        h.event(egui::Event::Key {
+            key: egui::Key::E,
+            physical_key: Some(egui::Key::E),
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        h.event(egui::Event::Text("è".into()));
+        h.event(egui::Event::Key {
+            key: egui::Key::E,
+            physical_key: Some(egui::Key::E),
+            pressed: false,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        h.run_steps(2);
+        assert_eq!(text(&h), "ẫè");
+    }
+
+    #[test]
+    fn press_and_hold_accents_replace_the_letter_typed() {
+        let (mut h, id) = typing("ẫ");
+        h.state_mut().run("text.placeCaret", json!({"frame": id, "point": [390.0, 80.0]})).unwrap();
+        h.run_steps(2);
+        let text = |h: &Harness<'_, DesignApp>| h.state().session.doc().unwrap().doc.stories.values().map(|s| s.text.clone()).collect::<String>();
+        h.event(egui::Event::Text("e".into()));
+        h.run_steps(2);
+        assert_eq!(text(&h), "ẫe");
+        h.event(egui::Event::Ime(egui::ImeEvent::DeleteSurroundingBytes { before_bytes: 1, after_bytes: 0 }));
+        h.event(egui::Event::Ime(egui::ImeEvent::Commit("è".into())));
+        h.run_steps(2);
+        assert_eq!(text(&h), "ẫè");
+        h.state_mut().run("edit.undo", json!({})).unwrap();
+        assert_eq!(text(&h), "ẫe", "the deletion and the commit undo together");
+        // Only whole characters inside the count go: one it ends inside stays.
+        h.event(egui::Event::Ime(egui::ImeEvent::DeleteSurroundingBytes { before_bytes: 2, after_bytes: 0 }));
+        h.event(egui::Event::Ime(egui::ImeEvent::Commit("o".into())));
+        h.run_steps(2);
+        assert_eq!(text(&h), "ẫo");
     }
 
     #[test]
@@ -5606,6 +5694,25 @@ mod tests {
         assert!(typed.contains("がく") && typed.contains("しょうこ") && !typed.contains('\n'), "{typed:?}");
     }
 
+    /// The Enter that confirms a word is the input method's: it doesn't also start a paragraph.
+    /// The next Enter does.
+    #[test]
+    fn the_enter_that_confirms_a_composition_types_no_return() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        let ctx = egui::Context::default();
+        let sid = typing_app(&mut app, &ctx, "");
+        let enter = |pressed| egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed, repeat: false, modifiers: Default::default() };
+        ime_frame(&mut app, &ctx, vec![preedit("にほん", 3)]);
+        ime_frame(&mut app, &ctx, vec![preedit("", 0), egui::Event::Ime(egui::ImeEvent::Commit("日本".into())), enter(true), enter(false)]);
+        assert_eq!(story_text(&mut app, &sid), "日本");
+        crate::menus::activate(&mut app, "edit.undo", &Value::Null);
+        assert_eq!(story_text(&mut app, &sid), "", "one Undo takes back the committed word");
+        crate::menus::activate(&mut app, "edit.redo", &Value::Null);
+        ime_frame(&mut app, &ctx, vec![]);
+        ime_frame(&mut app, &ctx, vec![enter(true), enter(false)]);
+        assert!(story_text(&mut app, &sid).starts_with("日本\n"), "{:?}", story_text(&mut app, &sid));
+    }
+
     #[test]
     fn baseline_grid_lines_are_the_ones_on_the_page() {
         // A start far above the page used to be walked line by line, without end.
@@ -5778,7 +5885,7 @@ mod scrollbar_tests {
         let h = window();
         let rect = h.state().app.canvas_rect.unwrap();
         for vertical in [true, false] {
-            let r = h.ctx.read_response(egui::Id::new(("canvas_scrollbar", 0u8, vertical))).expect("scrollbar").rect;
+            let r = h.ctx.read_response(egui::Id::unique(("canvas_scrollbar", 0u8, vertical))).expect("scrollbar").rect;
             let (track, thumb, k) = bar(&h, vertical);
             assert_eq!(r, track);
             assert!(k > 0.0, "the zoomed-in view scrolls");
@@ -5830,7 +5937,7 @@ mod scrollbar_tests {
         let (_, v1, _) = bar(&h, true);
         let (_, h1, _) = bar(&h, false);
         assert!(v1.min.y > v0.min.y && h1.min.x > h0.min.x, "{v0:?} → {v1:?}, {h0:?} → {h1:?}");
-        let r = h.ctx.read_response(egui::Id::new(("canvas_scrollbar", 0u8, true))).expect("scrollbar");
+        let r = h.ctx.read_response(egui::Id::unique(("canvas_scrollbar", 0u8, true))).expect("scrollbar");
         assert_eq!(r.rect, bar(&h, true).0);
     }
 

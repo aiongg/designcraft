@@ -17,6 +17,7 @@ pub mod dock;
 pub mod effects_dialog;
 pub mod i18n;
 pub mod icons;
+pub mod keys;
 pub mod menus;
 mod modal_drag;
 mod new_document;
@@ -25,9 +26,10 @@ mod panel_docking;
 pub mod panels;
 mod prefs;
 pub mod render_worker;
-mod rtl;
 mod section_options;
+pub mod separations;
 mod shortcut_import;
+mod shortcuts_dialog;
 pub mod story_editor;
 pub mod taskbar;
 pub mod theme;
@@ -44,6 +46,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 pub use control::{ControlRequest, ControlResponse};
+pub use prefs::ReadPreferences;
 
 pub type ReadFn = Box<dyn Fn(&str) -> Result<Vec<u8>, String>>;
 pub type WriteFn = Box<dyn FnMut(&str, &[u8]) -> Result<(), String>>;
@@ -88,6 +91,59 @@ pub struct Services {
     pub clipboard_text: Option<ClipboardFn>,
 }
 
+/// Closed panels, each with where it goes back, in craft-ui's `Workspace::hidden` shape
+/// (`[[panel, location], …]`). A floating panel's entry is where Dock Panel returns it.
+/// Files from before this shape hold an object keyed by panel; it still loads.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct HiddenPanels(pub Vec<(String, craft_ui::docking::Location<String>)>);
+
+impl<'de> Deserialize<'de> for HiddenPanels {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Shape {
+            List(Vec<(String, craft_ui::docking::Location<String>)>),
+            Keyed(std::collections::BTreeMap<String, craft_ui::docking::Location<String>>),
+        }
+        let entries = match Shape::deserialize(deserializer)? {
+            Shape::List(entries) => entries,
+            Shape::Keyed(entries) => entries.into_iter().collect(),
+        };
+        let mut hidden = Self::default();
+        for (panel, location) in entries {
+            hidden.insert(panel, location);
+        }
+        Ok(hidden)
+    }
+}
+
+impl HiddenPanels {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+    pub fn contains_key(&self, panel: &str) -> bool {
+        self.0.iter().any(|(p, _)| p == panel)
+    }
+    pub fn get(&self, panel: &str) -> Option<&craft_ui::docking::Location<String>> {
+        self.0.iter().find(|(p, _)| p == panel).map(|(_, location)| location)
+    }
+    /// Record where `panel` goes back, replacing an earlier entry.
+    pub fn insert(&mut self, panel: String, location: craft_ui::docking::Location<String>) {
+        self.remove(&panel);
+        self.0.push((panel, location));
+    }
+    pub fn remove(&mut self, panel: &str) {
+        self.0.retain(|(p, _)| p != panel);
+    }
+    pub fn keys(&self) -> impl Iterator<Item = &String> {
+        self.0.iter().map(|(p, _)| p)
+    }
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ScreenMode {
@@ -115,9 +171,9 @@ pub struct SavedWorkspace {
     /// Custom panel membership and placement; absent in older workspace files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub docking: Option<craft_ui::docking::Layout<String>>,
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub docking_hidden: std::collections::BTreeMap<String, craft_ui::docking::Location<String>>,
-    /// The workspace's own icon column (see [`UiState::icon_groups`]).
+    #[serde(default, skip_serializing_if = "HiddenPanels::is_empty")]
+    pub docking_hidden: HiddenPanels,
+    /// The workspace's own iconic column (see [`UiState::icon_groups`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon_groups: Option<Vec<Vec<String>>>,
     /// Saved with New Workspace › Capture › Panel Locations off: choosing the workspace leaves the
@@ -146,7 +202,7 @@ fn default_zone() -> f64 {
 pub struct PdfExportSettings {
     /// Preset (one of the five presets, or "Custom" after a manual edit).
     pub preset: String,
-    /// PDF standard (`none`, `x4`, `a2b`).
+    /// PDF standard (`none`, `x1a`, `x4`, `a2b`).
     pub standard: String,
     /// Compression › Compress images (JPEG).
     pub compress_images: bool,
@@ -236,11 +292,9 @@ pub struct UiState {
     pub flattener: String,
     /// File › Export PDF… options (persisted; see `PdfExportSettings`).
     pub pdf_export: PdfExportSettings,
-    /// View › Separations Preview: a process plate (0–3) and/or an ink limit (total, 0–4).
+    /// View › Separations Preview: the plate shown and the ink limit; `None` is off.
     #[serde(skip)]
-    pub separation: Option<u8>,
-    #[serde(skip)]
-    pub ink_limit: Option<f32>,
+    pub separations: Option<separations::Separations>,
     /// View › Display Performance.
     pub display_quality: designcraft_render::DisplayQuality,
     /// Preferences › Interface › UI scaling (1 = 100%).
@@ -250,33 +304,54 @@ pub struct UiState {
     pub rich_black: bool,
     /// View › Overprint Preview.
     pub overprint_preview: bool,
-    /// Edit › Keyboard Shortcuts: command id → shortcut ("" = none), over the defaults.
-    pub shortcuts: std::collections::BTreeMap<String, String>,
+    /// Edit › Keyboard Shortcuts: the active shortcut set's changes to the default shortcuts, which
+    /// the keymap uses. Saved as `shortcuts` and `shortcutsMore` (see `prefs::saved_shortcuts`),
+    /// which earlier versions read.
+    #[serde(flatten, with = "prefs::saved_shortcuts")]
+    pub shortcuts: craft_keymap::Overrides,
+    /// The user's named shortcut sets and which one is active (see `shortcuts_dialog`).
+    #[serde(deserialize_with = "prefs::lenient_sets")]
+    pub shortcut_sets: craft_keymap::Profiles,
     pub control_bar: bool,
     pub tools_double_column: bool,
-    /// Expanded right-dock panel group tab.
+    /// The front tab of the default layout's Properties · Pages · Layers group. `dock_tab`,
+    /// `open_panel`, `floating`, `dock_expanded` and `icon_groups` describe a workspace's
+    /// default layout (`panel_docking::default_layout`).
     pub dock_tab: String,
-    /// Panel opened from the collapsed icon column (flyout).
+    /// The panel it opens below that group (Printing and Proofing: Swatches).
     pub open_panel: Option<String>,
-    /// Panels torn off the dock into their own floating windows: (panel id, top-left position).
+    /// Its floating panels, and the float-only panels' windows (Type › Tabs): (panel id,
+    /// top-left position). A customized layout holds its own floating panels.
     pub floating: Vec<(String, [f32; 2])>,
-    /// Shared panel layout after the user customizes the legacy dock.
+    /// The panel layout once the user customizes it; `None` is the workspace's default layout
+    /// (`panel_docking::default_layout`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub docking: Option<craft_ui::docking::Layout<String>>,
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub docking_hidden: std::collections::BTreeMap<String, craft_ui::docking::Location<String>>,
+    #[serde(default, skip_serializing_if = "HiddenPanels::is_empty")]
+    pub docking_hidden: HiddenPanels,
+    /// The panel (or the canvas) last clicked or selected in the docking layout, while the panel
+    /// stays where the user left it.
+    #[serde(skip)]
+    pub docking_focused: Option<String>,
     /// Invalidates in-flight gestures when a workspace is replaced.
     #[serde(skip)]
     pub docking_generation: u64,
     /// One-frame reveal request; z-order is never persisted.
     #[serde(skip)]
     pub docking_raise: Option<String>,
-    /// Last explicitly revealed customized panel, for the legacy closePanel control.
+    /// The panel last revealed explicitly, which `ui.set closePanel` closes.
     #[serde(skip)]
     pub docking_opened: Option<String>,
+    /// The panel whose iconic-column flyout is open, as of the last frame or a command that
+    /// opened it.
+    #[serde(skip)]
+    pub docking_flyout: Option<String>,
+    /// Auto-Collapse Iconic Panels: a flyout closes on Escape or a click outside it.
+    pub dock_auto_collapse: bool,
+    /// Whether the default layout's outer column is expanded (false: collapsed to icons).
     pub dock_expanded: bool,
-    /// A workspace's iconic panel groups (Essentials Classic), shown with their names in the icon
-    /// column instead of every panel; `None` is the full icon column.
+    /// A workspace's iconic panel groups (Essentials Classic), shown with their names in the
+    /// iconic column instead of every panel; `None` is one icon per panel.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon_groups: Option<Vec<Vec<String>>>,
     pub units: Unit,
@@ -389,13 +464,13 @@ impl Default for UiState {
             language: String::new(),
             flattener: String::new(),
             pdf_export: PdfExportSettings::default(),
-            separation: None,
-            ink_limit: None,
+            separations: None,
             display_quality: designcraft_render::DisplayQuality::High,
             ui_scale: 1.0,
             rich_black: true,
             overprint_preview: false,
             shortcuts: Default::default(),
+            shortcut_sets: Default::default(),
             control_bar: false,
             tools_double_column: false,
             dock_tab: "properties".into(),
@@ -406,6 +481,9 @@ impl Default for UiState {
             docking_generation: 0,
             docking_raise: None,
             docking_opened: None,
+            docking_flyout: None,
+            dock_auto_collapse: true,
+            docking_focused: None,
             dock_expanded: true,
             icon_groups: None,
             units: Unit::Picas,
@@ -513,6 +591,7 @@ impl CanvasCache {
             display_key: None,
             patcher: designcraft_render::Renderer::new(),
             patches: 0,
+            separations: separations::Preview::default(),
         }
     }
 }
@@ -544,6 +623,8 @@ pub struct CanvasCache {
     pub patcher: designcraft_render::Renderer,
     /// Partial repaints / full renders since start (perf readout).
     pub patches: u64,
+    /// View › Separations Preview: the visible spreads' plates.
+    pub separations: separations::Preview,
 }
 
 #[derive(Default, Clone, Copy, Debug, Serialize)]
@@ -585,14 +666,13 @@ pub struct DesignApp {
     pub story_editor: Option<story_editor::Target>,
     control_rx: Option<Receiver<ControlRequest>>,
     pending_shots: Vec<(u64, Option<String>, Sender<ControlResponse>, f64)>,
+    /// Screenshots the backend has taken, by token, until `collect_screenshots` hands them out.
+    taken_shots: std::sync::Arc<std::sync::Mutex<Vec<(u64, std::sync::Arc<egui::ColorImage>)>>>,
     queued_shots: Vec<(u64, f64, u32)>,
     shot_token: u64,
     styled: bool,
-    /// The interface language the UI fonts were installed for (it orders the CJK fallbacks).
+    /// The interface language the UI fonts were installed for.
     fonts_lang: String,
-    /// The installed CJK faces are among the UI fonts (false while the system fonts are still
-    /// being cataloged: the fonts are installed again when they are).
-    fonts_system: bool,
     pub restyle: bool,
     fonts_ready: bool,
     /// Files the operating system asked to open (macOS Finder, Dock, Open With), opened once the
@@ -605,8 +685,16 @@ pub struct DesignApp {
     pub(crate) pending_window_commands: Vec<egui::ViewportCommand>,
     /// The host installed a native menu bar (macOS): don't draw menus in the window.
     pub native_menu: bool,
-    /// Shortcuts the native menu handles (skip them in the egui shortcut handler).
-    pub native_shortcuts: std::collections::HashSet<String>,
+    /// The commands the native menu bar gives a key equivalent, with that shortcut: the egui
+    /// shortcut handler leaves that key to the bar and runs the command's other bindings itself.
+    pub native_shortcuts: std::collections::HashMap<String, String>,
+    /// Every command's shortcuts, with the user's changes (`ui.shortcuts`) applied.
+    pub keymap: craft_keymap::Keymap,
+    pub(crate) key_dispatcher: craft_keymap::egui::Dispatcher,
+    /// The open Keyboard Shortcuts dialog.
+    pub(crate) shortcut_dialog: Option<Box<shortcuts_dialog::Host>>,
+    /// Answers the user gave in an import review (item → command), for later imports.
+    pub(crate) shortcut_answers: std::collections::BTreeMap<String, craft_keymap::CommandRef>,
     last_time: f64,
     /// When recovery data was last written (seconds, egui time).
     pub last_recovery: f64,
@@ -619,9 +707,11 @@ pub struct DesignApp {
     /// (no native menu: without it the paste keys produce no paste event), or what it held then
     /// (native menu). It is never pasted as text: Paste with it pastes the copied objects.
     object_clip_text: Option<String>,
-    /// The marked text the system IME last sent (`None` once it commits or clears). When the
-    /// composition ends some other way (a click, a tool switch), the IME is told to drop it.
-    pub(crate) ime_marked: Option<String>,
+    /// The input method at the text caret: marked text, commits and the keys it uses.
+    pub(crate) ime: craft_ui::ime::Composer,
+    /// UTF-8 bytes before and after the selected text that the IME's next commit replaces
+    /// (`Edit::DeleteSurroundingBytes`, sent just before the commit), so both are one undo step.
+    pub(crate) ime_around: [usize; 2],
     /// The system IME must drop its marked text (see [`Self::take_ime_discard`]).
     pub(crate) ime_discard: bool,
     /// The canvas asked for the system IME in the last frame (the web build's text input has the
@@ -679,11 +769,11 @@ impl DesignApp {
             story_editor: None,
             control_rx: None,
             pending_shots: vec![],
+            taken_shots: Default::default(),
             queued_shots: vec![],
             shot_token: 0,
             styled: false,
             fonts_lang: String::new(),
-            fonts_system: false,
             restyle: false,
             fonts_ready: false,
             os_documents: Vec::new(),
@@ -693,12 +783,17 @@ impl DesignApp {
             pending_window_commands: vec![],
             native_menu: false,
             native_shortcuts: Default::default(),
+            keymap: keys::new_keymap(craft_keymap::Overrides::new()),
+            key_dispatcher: craft_keymap::egui::Dispatcher::new(),
+            shortcut_dialog: None,
+            shortcut_answers: Default::default(),
             last_time: 0.0,
             last_recovery: 0.0,
             egui_ctx: None,
             in_control: false,
             object_clip_text: None,
-            ime_marked: None,
+            ime: craft_ui::ime::Composer::new(),
+            ime_around: [0, 0],
             ime_discard: false,
             canvas_ime: false,
             quit_requested: false,
@@ -1093,6 +1188,27 @@ impl DesignApp {
         }
     }
 
+    /// Applies `ui.shortcuts` to the keymap when they differ, e.g. after preferences were loaded,
+    /// and rebuilds it when the shortcut platform changed (the web build learns the browser's
+    /// operating system on the first frame). Outside the Keyboard Shortcuts dialog the active
+    /// shortcut set takes `ui.shortcuts` too: an earlier version may have changed them.
+    pub fn sync_keymap(&mut self) {
+        if self.shortcut_dialog.is_none() {
+            keys::store_in_set(&mut self.ui);
+        }
+        if self.keymap.platform() != keys::platform() {
+            self.keymap = keys::new_keymap(self.ui.shortcuts.clone());
+        } else if *self.keymap.overrides() != self.ui.shortcuts {
+            self.keymap.set_overrides(self.ui.shortcuts.clone());
+        }
+    }
+
+    /// Whether the Keyboard Shortcuts dialog is recording keys: a native menu bar pauses its key
+    /// equivalents meanwhile, so the keys reach the dialog.
+    pub fn shortcut_recording(&self) -> bool {
+        self.shortcut_dialog.as_ref().is_some_and(|d| d.recording())
+    }
+
     pub fn select_tool(&mut self, id: &str) {
         let _ = self.run("tool.select", json!({"tool": id}));
         self.ui.flyout = None;
@@ -1103,6 +1219,8 @@ impl DesignApp {
         if self.egui_ctx.is_none() {
             self.egui_ctx = Some(ctx.clone());
         }
+        keys::note_platform(ctx);
+        self.sync_keymap();
         self.window_maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
         if !self.color_applied {
             self.color_applied = true;
@@ -1118,20 +1236,16 @@ impl DesignApp {
             // The UI scale is a preference (applied above); egui's own Cmd+Plus/Minus/0 would rescale the
             // whole window instead of the canvas, only to be reset next frame.
             ctx.options_mut(|o| o.zoom_with_keyboard = false);
-            self.fonts_system = theme::install_fonts(ctx, &self.ui.language);
+            theme::install_fonts(ctx, &self.ui.language);
             self.fonts_lang = self.ui.language.clone();
             self.styled = true;
             self.restyle = true;
         } else {
-            if self.fonts_lang != self.ui.language || (!self.fonts_system && theme::system_fonts_ready()) {
-                self.fonts_system = theme::install_fonts(ctx, &self.ui.language);
+            if self.fonts_lang != self.ui.language {
+                theme::install_fonts(ctx, &self.ui.language);
                 self.fonts_lang = self.ui.language.clone();
             }
             self.fonts_ready = true;
-        }
-        if !self.fonts_system {
-            // The font scan runs in the background: look again shortly.
-            ctx.request_repaint_after(std::time::Duration::from_millis(250));
         }
         if self.restyle {
             theme::apply(ctx, &theme::Tokens::for_brightness(self.ui.brightness));
@@ -1162,7 +1276,7 @@ impl DesignApp {
         if !self.synthetic.is_empty() || !self.control_synthetic.is_empty() {
             ctx.request_repaint();
         }
-        self.collect_screenshots(ctx);
+        self.collect_screenshots();
         self.issue_screenshots(ctx);
         if self.fonts_ready {
             menus::shortcuts(self, ctx);
@@ -1468,6 +1582,63 @@ impl DesignApp {
         raw.events.extend(events.drain(..n));
     }
 
+    /// The document area: the start screen, or the document tabs over one or two canvas panes.
+    pub(crate) fn canvas_area(&mut self, ui: &mut egui::Ui, presenting: bool) {
+        let t = theme::Tokens::get(ui.ctx());
+        if self.session.active().is_none() {
+            chrome::start_screen(self, ui);
+            return;
+        }
+        if !presenting {
+            chrome::doc_tabs(self, ui);
+        }
+        let split_layout = (self.split && !presenting)
+            .then(|| {
+                craft_ui::layout::split_rect(
+                    ui.available_rect_before_wrap(),
+                    craft_ui::layout::SplitAxis::Horizontal,
+                    craft_ui::layout::SplitSize::Ratio(0.5),
+                    2.0,
+                    0.0,
+                )
+            })
+            .flatten();
+        if let Some(layout) = split_layout {
+            // Two panes with a divider; each has its own view (zoom, scroll) and render cache.
+            ui.painter().rect_filled(layout.divider, 0.0, t.border);
+            // Resolve the clicked pane before either canvas handles this frame's keys.
+            if let Some(p) = ui.input(|i| i.pointer.any_pressed().then(|| i.pointer.interact_pos()).flatten()) {
+                if layout.first.contains(p) {
+                    self.focus_pane = 0;
+                } else if layout.second.contains(p) {
+                    self.focus_pane = 1;
+                }
+            }
+            for (k, half) in [layout.first, layout.second].into_iter().enumerate() {
+                self.switch_pane(k as u8);
+                // A new pane starts at the other pane's view.
+                if k == 1 && self.view().is_none() {
+                    self.switch_pane(0);
+                    let v = self.view().copied();
+                    self.switch_pane(1);
+                    if let (Some(mut v), Some(m)) = (v, self.view_mut()) {
+                        v.fitted = false;
+                        *m = v;
+                    }
+                }
+                ui.scope_builder(egui::UiBuilder::new().max_rect(half), |ui| canvas::show(self, ui));
+            }
+            self.switch_pane(self.focus_pane);
+        } else {
+            self.switch_pane(0);
+            // With a second window, the main one takes the focus back when clicked.
+            if !self.second_window || (ui.input(|i| i.pointer.any_pressed()) && ui.ui_contains_pointer()) {
+                self.focus_pane = 0;
+            }
+            canvas::show(self, ui);
+        }
+    }
+
     /// Lay out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
@@ -1481,7 +1652,7 @@ impl DesignApp {
         let t = theme::Tokens::get(&ctx);
         let presenting = self.ui.screen_mode == ScreenMode::Presentation;
         if presenting || self.ui.hidden_panels != 0 {
-            panel_docking::cancel_gesture(self, &ctx);
+            panel_docking::cancel_gesture(&ctx);
         }
         canvas::begin_frame(&ctx);
         let dbg = std::env::var_os("DESIGNCRAFT_DEBUG_LAYOUT").is_some();
@@ -1503,62 +1674,13 @@ impl DesignApp {
             if self.ui.hidden_panels != 1 {
                 toolbar::show(self, ui);
             }
-            if self.ui.hidden_panels == 0 {
-                dock::show(self, ui);
-            }
         }
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.pasteboard)).show(ui, |ui| {
-            if self.session.active().is_none() {
-                chrome::start_screen(self, ui);
-                return;
-            }
-            if !presenting {
-                chrome::doc_tabs(self, ui);
-            }
-            let split_layout = (self.split && !presenting)
-                .then(|| {
-                    craft_ui::layout::split_rect(
-                        ui.available_rect_before_wrap(),
-                        craft_ui::layout::SplitAxis::Horizontal,
-                        craft_ui::layout::SplitSize::Ratio(0.5),
-                        2.0,
-                        0.0,
-                    )
-                })
-                .flatten();
-            if let Some(layout) = split_layout {
-                // Two panes with a divider; each has its own view (zoom, scroll) and render cache.
-                ui.painter().rect_filled(layout.divider, 0.0, t.border);
-                // Resolve the clicked pane before either canvas handles this frame's keys.
-                if let Some(p) = ui.input(|i| i.pointer.any_pressed().then(|| i.pointer.interact_pos()).flatten()) {
-                    if layout.first.contains(p) {
-                        self.focus_pane = 0;
-                    } else if layout.second.contains(p) {
-                        self.focus_pane = 1;
-                    }
-                }
-                for (k, half) in [layout.first, layout.second].into_iter().enumerate() {
-                    self.switch_pane(k as u8);
-                    // A new pane starts at the other pane's view.
-                    if k == 1 && self.view().is_none() {
-                        self.switch_pane(0);
-                        let v = self.view().copied();
-                        self.switch_pane(1);
-                        if let (Some(mut v), Some(m)) = (v, self.view_mut()) {
-                            v.fitted = false;
-                            *m = v;
-                        }
-                    }
-                    ui.scope_builder(egui::UiBuilder::new().max_rect(half), |ui| canvas::show(self, ui));
-                }
-                self.switch_pane(self.focus_pane);
+            // The panel layout holds the canvas as its protected `canvas` panel.
+            if presenting || self.ui.hidden_panels != 0 {
+                self.canvas_area(ui, presenting);
             } else {
-                self.switch_pane(0);
-                // With a second window, the main one takes the focus back when clicked.
-                if !self.second_window || (ui.input(|i| i.pointer.any_pressed()) && ui.ui_contains_pointer()) {
-                    self.focus_pane = 0;
-                }
-                canvas::show(self, ui);
+                panel_docking::show(self, ui);
             }
         });
         // New Window: pane 1 in a window of its own.
@@ -1598,8 +1720,7 @@ impl DesignApp {
         }
         // Tab, Shift+Tab and Presentation hide the floating panels with the docked ones.
         if !presenting && self.ui.hidden_panels == 0 {
-            dock::flyout(self, &ctx);
-            dock::floating(self, &ctx);
+            dock::float_only_windows(self, &ctx);
         }
         story_editor::show(self, &ctx);
         dialogs::show(self, &ctx);
@@ -1638,7 +1759,11 @@ impl DesignApp {
         self.queued_shots.retain_mut(|(token, at, frames)| {
             *frames += 1;
             if now >= *at && *frames >= 3 {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::new(*token)));
+                let (token, taken, repaint) = (*token, std::sync::Arc::clone(&self.taken_shots), ctx.clone());
+                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::ScreenshotCallback::new(move |image| {
+                    taken.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push((token, image));
+                    repaint.request_repaint();
+                })));
                 false
             } else {
                 true
@@ -1649,23 +1774,11 @@ impl DesignApp {
         }
     }
 
-    fn collect_screenshots(&mut self, ctx: &egui::Context) {
+    fn collect_screenshots(&mut self) {
         if self.pending_shots.is_empty() {
             return;
         }
-        let events: Vec<_> = ctx.input(|i| {
-            i.raw
-                .events
-                .iter()
-                .filter_map(|e| match e {
-                    egui::Event::Screenshot { user_data, image, .. } => {
-                        let token = user_data.data.as_ref().and_then(|d| d.downcast_ref::<u64>()).copied()?;
-                        Some((token, image.clone()))
-                    }
-                    _ => None,
-                })
-                .collect()
-        });
+        let events = std::mem::take(&mut *self.taken_shots.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
         for (token, image) in events {
             if let Some(i) = self.pending_shots.iter().position(|(t, ..)| *t == token) {
                 let (_, path, reply, _) = self.pending_shots.remove(i);
@@ -1782,10 +1895,10 @@ mod tests {
             app,
         );
         h.run_steps(4);
-        let bar = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("control_bar")).unwrap().outer_rect;
+        let bar = crate::panel_outer_rect(&h, "control_bar").unwrap();
         assert!(bar.height() > 40.0, "{bar:?}");
         // The X/Y/W/H group: its second row holds Y: and H:.
-        let group = h.ctx.read_response(egui::Id::new(("object_control", "dimensions"))).unwrap().rect;
+        let group = h.ctx.read_response(egui::Id::unique(("object_control", "dimensions"))).unwrap().rect;
         assert!(bar.contains(group.left_top()), "the X/Y/W/H group {group:?} is in the Control panel {bar:?}");
         assert!(group.bottom() <= bar.bottom(), "X/Y/W/H group {group:?} hangs below the Control panel {bar:?}");
     }
@@ -2711,6 +2824,13 @@ mod import_warning_tests {
     }
 }
 
+/// The outer rect of the side or top panel `name` (its id salt) that the app shows in the
+/// harness's `Ui`, from egui's memory. egui keys a panel's state by its parent's scope and its salt.
+#[cfg(test)]
+pub(crate) fn panel_outer_rect<S>(h: &egui_kittest::Harness<'_, S>, name: &str) -> Option<egui::Rect> {
+    egui::containers::panel::PanelState::load(&h.ctx, h.ui_id().with_salt(egui::IdSalt::new(name))).map(|s| s.outer_rect)
+}
+
 /// The whole window in a headless test harness, at a chosen window size.
 #[cfg(test)]
 pub(crate) mod test_window {
@@ -2764,13 +2884,14 @@ pub(crate) mod test_window {
             delta,
             phase: egui::TouchPhase::Move,
             modifiers: egui::Modifiers::NONE,
+            source: egui::MouseWheelSource::Unknown,
         });
         h.run_steps(10);
     }
 
     /// The outer rect of a side or top panel, from egui's memory.
     pub fn panel_rect(h: &Harness<'static, Window>, id: &str) -> egui::Rect {
-        egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new(id)).map(|s| s.outer_rect).unwrap()
+        crate::panel_outer_rect(h, id).unwrap()
     }
 
     /// A primary click at `pos`, then a few frames.

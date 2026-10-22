@@ -12,6 +12,7 @@ pub mod library;
 pub mod notes;
 pub mod pages;
 pub mod properties;
+pub mod separations;
 pub mod styles;
 pub mod swatches;
 pub mod table;
@@ -292,7 +293,7 @@ fn swatch_menu_font() -> egui::FontId {
 pub fn swatch_menu_row(ui: &mut egui::Ui, doc: &designcraft_doc::Document, name: &str, current: &str, width: f32) -> bool {
     let t = Tokens::get(ui.ctx());
     let (row, resp) = ui.allocate_exact_size(vec2(width, SWATCH_MENU_ROW_H), egui::Sense::click());
-    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, name == current, name));
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, name == current, name));
     let hovered = resp.hovered();
     if hovered {
         ui.painter().rect_filled(row, 2.0, t.accent_strong);
@@ -304,8 +305,7 @@ pub fn swatch_menu_row(ui: &mut egui::Ui, doc: &designcraft_doc::Document, name:
     crate::widgets::paint_chip(ui.painter(), chip, c, g);
     // A name too long for the list is cut at the row's end.
     let text = ui.painter().with_clip_rect(ui.clip_rect().intersect(row.shrink2(vec2(2.0, 0.0))));
-    crate::rtl::paint(
-        &text,
+    text.text(
         row.min + vec2(SWATCH_MENU_TEXT_X, SWATCH_MENU_ROW_H / 2.0),
         egui::Align2::LEFT_CENTER,
         name,
@@ -402,9 +402,9 @@ pub fn font_combo(
 /// readers hear as a combo box with the current family as its value. Returns the font picked.
 pub fn font_popup(app: &mut DesignApp, field: &egui::Response, menu: &[designcraft_fonts::FamilyInfo], current: &str) -> Option<FontPick> {
     let shown = if current.is_empty() { "—".to_string() } else { font_label(app, menu, current) };
+    let name = crate::i18n::tr(&app.ui.language, "Font");
     field.widget_info(|| {
-        let mut info = egui::WidgetInfo::new(egui::WidgetType::ComboBox);
-        info.enabled = true;
+        let mut info = egui::WidgetInfo::labeled(egui::Role::ComboBox, true, name);
         info.current_text_value = Some(shown.clone());
         info
     });
@@ -458,6 +458,7 @@ pub fn font_style_picker(app: &mut DesignApp, ui: &mut egui::Ui, family: &str, c
             }
         }
     });
+    crate::widgets::name_combo(ui, "font_style", "font_style");
     if let Some(s) = pick {
         let _ = app.run("type.char", json!({"attrs": {"fontStyle": s}}));
     }
@@ -468,13 +469,14 @@ pub fn para_style_picker(app: &mut DesignApp, ui: &mut egui::Ui, current: &str, 
     let mut pick = None;
     let shown = crate::i18n::style_name(&app.ui.language, current);
     let label = if overridden { format!("{shown}+") } else { shown.to_string() };
-    egui::ComboBox::from_id_salt("para_style").selected_text(crate::rtl::widget(ui, label)).width(width).show_ui(ui, |ui| {
+    egui::ComboBox::from_id_salt("para_style").selected_text(label).width(width).show_ui(ui, |ui| {
         for n in names.iter().filter(|n| *n != designcraft_doc::NO_PARA_STYLE) {
-            if ui.selectable_label(n == current, crate::rtl::widget(ui, crate::i18n::style_name(&app.ui.language, n))).clicked() {
+            if ui.selectable_label(n == current, crate::i18n::style_name(&app.ui.language, n)).clicked() {
                 pick = Some(n.clone());
             }
         }
     });
+    crate::widgets::name_combo(ui, "para_style", "para_style");
     if let Some(n) = pick {
         let _ = app.run("style.paragraph.apply", json!({"name": n, "clearOverrides": false}));
     }
@@ -783,6 +785,15 @@ mod font_menu_ui_tests {
             assert_eq!(count, 3, "{name}: the font fields are shown");
             for k in 0..count {
                 h.state_mut().app.run("type.char", json!({"attrs": {"fontFamily": designcraft_fonts::DEFAULT_FAMILY}})).unwrap();
+                h.run_steps(4);
+                // A short Properties group (below it, the workspace's open panel) scrolls to the field.
+                let mut nodes: Vec<_> = h
+                    .query_all_by(|n| n.role() == egui::accesskit::Role::ComboBox && n.value().as_deref() == Some(designcraft_fonts::DEFAULT_FAMILY))
+                    .collect();
+                nodes.sort_by(|a, b| a.rect().min.y.total_cmp(&b.rect().min.y).then(a.rect().min.x.total_cmp(&b.rect().min.x)));
+                if let Some(node) = nodes.get(k) {
+                    node.scroll_to_me();
+                }
                 h.run_steps(4);
                 let at = fields(&h, designcraft_fonts::DEFAULT_FAMILY)[k];
                 search_in_menu(&mut h, at, &format!("{name}, field {k}"));

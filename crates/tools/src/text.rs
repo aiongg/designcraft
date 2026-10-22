@@ -436,20 +436,25 @@ impl Tool for TypeTool {
         out
     }
 
-    fn ime_commit(&mut self, cx: &ToolContext, text: &str) -> Vec<Action> {
+    fn ime_commit(&mut self, cx: &ToolContext, text: &str, around: [usize; 2]) -> Vec<Action> {
         let text: String = text.chars().map(|c| if c == '\r' { '\n' } else { c }).filter(|c| !c.is_control() || matches!(c, '\n' | '\t')).collect();
         // The marked text goes; the result is typed in its place like any typing: one command,
-        // one undo step.
+        // one undo step, which also deletes the text the IME replaces around it.
         let mut out = if self.preedit.take().is_some() { vec![Action::Cancel] } else { vec![] };
-        if !text.is_empty() && cx.selection.text.is_some() {
-            out.push(Action::Exec("text.insert".into(), json!({"text": text})));
+        if (!text.is_empty() || around != [0, 0]) && cx.selection.text.is_some() {
+            let mut p = json!({"text": text});
+            if around != [0, 0] {
+                p["before"] = around[0].into();
+                p["after"] = around[1].into();
+            }
+            out.push(Action::Exec("text.insert".into(), p));
         }
         out
     }
 
     fn ime_end(&mut self, cx: &ToolContext) -> Vec<Action> {
         match self.preedit.as_ref().map(|p| p.text.clone()) {
-            Some(text) => self.ime_commit(cx, &text),
+            Some(text) => self.ime_commit(cx, &text, [0, 0]),
             None => vec![],
         }
     }

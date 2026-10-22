@@ -17,19 +17,18 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
         .and_then(|a| a["chars"]["conditions"].as_array().map(|v| v.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()))
         .unwrap_or_default();
     if conditions.is_empty() {
-        ui.label(crate::rtl::widget(
-            ui,
+        ui.label(
             egui::RichText::new(crate::i18n::tr(&app.ui.language, "No conditions. Create one, then select text and click it to apply."))
                 .size(11.0)
                 .color(t.text_dim),
-        ));
+        );
     }
     for c in &conditions {
         let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::hover());
         // Visibility (eye).
         let eye = egui::Rect::from_min_size(row.min + vec2(2.0, 3.0), vec2(16.0, 16.0));
-        let er = ui.interact(eye, ui.id().with(("cond_eye", &c.name)), Sense::click()).on_hover_ui(|ui| {
-            crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Show / hide text with this condition"));
+        let er = ui.interact(eye, ui.scope_id().with(("cond_eye", &c.name)), Sense::click()).on_hover_ui(|ui| {
+            ui.label(crate::i18n::tr(&app.ui.language, "Show / hide text with this condition"));
         });
         if c.visible {
             crate::icons::paint(ui.painter(), eye, "eye", t.text_dim);
@@ -47,7 +46,7 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
         }
         // Name (click: toggle on the selected text) and indicator colour.
         let name_r = egui::Rect::from_min_max(row.min + vec2(42.0, 0.0), row.max - vec2(24.0, 0.0));
-        let nr = ui.interact(name_r, ui.id().with(("cond_name", &c.name)), Sense::click());
+        let nr = ui.interact(name_r, ui.scope_id().with(("cond_name", &c.name)), Sense::click());
         if nr.hovered() {
             ui.painter().rect_filled(name_r, 0.0, t.hover);
         }
@@ -65,22 +64,18 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
             }
         }
         nr.context_menu(|ui| {
-            if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Delete Condition"))).clicked() {
+            if ui.button(crate::i18n::tr(&app.ui.language, "Delete Condition")).clicked() {
                 let _ = app.run("condition.delete", json!({"name": c.name}));
                 ui.close();
             }
         });
     }
     ui.add_space(6.0);
-    let id = egui::Id::new("new_condition_name");
+    let id = egui::Id::unique("new_condition_name");
     let mut name: String = ui.data(|d| d.get_temp(id)).unwrap_or_default();
     ui.horizontal(|ui| {
-        ui.add(
-            egui::TextEdit::singleline(&mut name)
-                .hint_text(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "New condition name")))
-                .desired_width(150.0),
-        );
-        if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "New"))).clicked() && !name.trim().is_empty() {
+        ui.add(egui::TextEdit::singleline(&mut name).hint_text(crate::i18n::tr(&app.ui.language, "New condition name")).desired_width(150.0));
+        if ui.button(crate::i18n::tr(&app.ui.language, "New")).clicked() && !name.trim().is_empty() {
             match app.run("condition.new", json!({"name": name.trim()})) {
                 Ok(_) => name.clear(),
                 Err(e) => app.status_error("Conditional Text", e),
@@ -88,10 +83,7 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
         }
     });
     ui.data_mut(|d| d.insert_temp(id, name));
-    if has_text
-        && !applied.is_empty()
-        && ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Remove Conditions from Selection"))).clicked()
-    {
+    if has_text && !applied.is_empty() && ui.button(crate::i18n::tr(&app.ui.language, "Remove Conditions from Selection")).clicked() {
         let _ = app.run("condition.apply", json!({"name": null, "only": true}));
     }
 }

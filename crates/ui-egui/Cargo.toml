@@ -10,7 +10,10 @@ description = "DesignCraft egui frontend (InDesign-style UI); swappable — noth
 workspace = true
 
 [dependencies]
-craft-ui = { workspace = true }
+craft-ui = { workspace = true, features = ["system_fonts"] }
+craft-i18n = { workspace = true }
+craft-fonts-build = { workspace = true }
+craft-keymap = { workspace = true }
 designcraft-geom = { workspace = true }
 designcraft-color = { workspace = true }
 designcraft-doc = { workspace = true }
@@ -19,10 +22,9 @@ designcraft-compose = { workspace = true }
 designcraft-render = { workspace = true }
 designcraft-tools = { workspace = true }
 designcraft-engine = { workspace = true }
-unicode-bidi = { workspace = true }
-unicode-bidi-mirroring = { workspace = true }
-unicode-segmentation = { workspace = true }
-egui = { workspace = true }
+craft-prepress = { workspace = true }
+# Monochrome emoji and symbols (⚠, ✓) on every platform, as egui 0.36 bundled by default.
+egui = { workspace = true, features = ["monochrome_emoji_fonts"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 log = { workspace = true }
@@ -36,5 +38,6 @@ egui_kittest = { workspace = true, features = ["wgpu", "snapshot"] }
 designcraft-fonts = { workspace = true, features = ["testing"] }
 
 [build-dependencies]
+craft-fonts-build = { workspace = true, features = ["subset"] }
 serde_json = { workspace = true }
 toml = "1"

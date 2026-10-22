@@ -204,7 +204,11 @@ fn percent(ui: &mut egui::Ui, d: &mut Dialog, path: &[&str]) {
 
 fn angle(ui: &mut egui::Ui, d: &mut Dialog, path: &[&str], enabled: bool, global: f64) {
     let mut v = if enabled { num(d, path) } else { global };
-    let r = ui.add_enabled(enabled, egui::DragValue::new(&mut v).range(-180.0..=180.0).suffix("°").max_decimals(1));
+    let drag = egui::DragValue::new(&mut v).max_decimals(1);
+    let field = craft_ui::localized::LocalizedDragValue::new(drag, crate::widgets::locale_numbers())
+        .range(-180.0..=180.0)
+        .unit(craft_ui::localized::Unit::new("{n}°"));
+    let r = ui.add_enabled(enabled, field);
     if r.changed() {
         set(d, path, json!(v));
     }
@@ -218,7 +222,7 @@ fn flag(ui: &mut egui::Ui, d: &mut Dialog, path: &[&str], label: &str) {
         }
         cur.as_bool().unwrap_or(false)
     };
-    if ui.checkbox(&mut v, crate::rtl::widget(ui, label)).changed() {
+    if ui.checkbox(&mut v, label).changed() {
         set(d, path, json!(v));
     }
 }
@@ -243,11 +247,12 @@ fn swatch(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog, path: &[&str]) {
             }
         }
     });
+    crate::widgets::name_combo(ui, ("fx_swatch", path.join(".")), "fx_swatch");
 }
 
 fn heading(ui: &mut egui::Ui, text: &str) {
     ui.add_space(6.0);
-    crate::rtl::label(ui, egui::RichText::new(text).font(semibold(12.0)));
+    ui.label(egui::RichText::new(text).font(semibold(12.0)));
 }
 
 /// Distance and angle as an X (`y`: false) or Y offset: InDesign's, the shadow falls away from
@@ -274,8 +279,8 @@ fn page_ui(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog, page: &str) {
     let tr = |s: &str| crate::i18n::tr(&lang, s).to_string();
     let unit = app.session.active().map_or(Unit::Points, |st| st.doc.settings.horizontal_units);
     let global = app.session.active().map_or(120.0, |st| st.doc.settings.global_light);
-    let row = |ui: &mut egui::Ui, l: &str| crate::rtl::label(ui, tr(l));
-    crate::rtl::label(ui, egui::RichText::new(tr(PAGES.iter().find(|p| p.0 == page).map_or("Transparency", |p| p.1))).font(semibold(14.0)));
+    let row = |ui: &mut egui::Ui, l: &str| ui.label(tr(l));
+    ui.label(egui::RichText::new(tr(PAGES.iter().find(|p| p.0 == page).map_or("Transparency", |p| p.1))).font(semibold(14.0)));
     let grid = |id: &str| egui::Grid::new(("fx_grid", id.to_string())).num_columns(4).spacing([8.0, 6.0]);
     match page {
         "transparency" => {
@@ -290,6 +295,7 @@ fn page_ui(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog, page: &str) {
                         }
                     }
                 });
+                crate::widgets::name_combo(ui, "fx_blend", "fx_blend");
                 row(ui, "Opacity:");
                 let mut o = d.fields.get("opacity").and_then(Value::as_f64).unwrap_or(1.0) * 100.0;
                 if ui.add_sized([70.0, 20.0], egui::DragValue::new(&mut o).range(0.0..=100.0).suffix("%").max_decimals(0)).changed() {
@@ -321,7 +327,7 @@ fn page_ui(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog, page: &str) {
                 row(ui, "Y Offset:");
                 offset(ui, d, key, unit, global, true);
                 ui.end_row();
-                crate::rtl::label(ui, "");
+                ui.label("");
                 flag(ui, d, &[key, "globalLight"], &tr("Use Global Light"));
                 ui.end_row();
             });
@@ -358,6 +364,7 @@ fn page_ui(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog, page: &str) {
                             }
                         }
                     });
+                    crate::widgets::name_combo(ui, "fx_glow_mode", "fx_glow_mode");
                     ui.end_row();
                 }
                 row(ui, "Color:");
@@ -389,6 +396,7 @@ fn page_ui(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog, page: &str) {
                             }
                         },
                     );
+                    crate::widgets::name_combo(ui, "fx_technique", "fx_technique");
                     ui.end_row();
                     row(ui, "Source:");
                     let mut center = d.fields.get("fx").is_some_and(|f| f["innerGlow"]["center"].as_bool().unwrap_or(false));
@@ -400,6 +408,7 @@ fn page_ui(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog, page: &str) {
                             }
                         }
                     });
+                    crate::widgets::name_combo(ui, "fx_source", "fx_source");
                 }
                 ui.end_row();
             });
@@ -453,7 +462,7 @@ fn page_ui(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog, page: &str) {
                 ui.end_row();
                 row(ui, "Size:");
                 measure(ui, d, &["satin", "size"], unit);
-                crate::rtl::label(ui, "");
+                ui.label("");
                 flag(ui, d, &["satin", "invert"], &tr("Invert"));
                 ui.end_row();
             });
@@ -481,6 +490,7 @@ fn page_ui(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog, page: &str) {
                         }
                     }
                 });
+                crate::widgets::name_combo(ui, "fx_corners", "fx_corners");
                 ui.end_row();
             });
         }
@@ -530,6 +540,7 @@ fn page_ui(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog, page: &str) {
                         }
                     }
                 });
+                crate::widgets::name_combo(ui, "fx_gtype", "fx_gtype");
                 row(ui, "Angle:");
                 angle(ui, d, &["gradientFeather", "angle"], true, global);
                 ui.end_row();
@@ -554,10 +565,11 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
     let lang = app.ui.language.clone();
     let tr = |s: &str| crate::i18n::tr(&lang, s).to_string();
     ui.horizontal(|ui| {
-        crate::rtl::label(ui, tr("Settings for:"));
+        ui.label(tr("Settings for:"));
         // Stroke, Fill and Text levels aren't in the document model yet: the object only.
         ui.add_enabled_ui(false, |ui| {
             egui::ComboBox::from_id_salt("fx_level").selected_text(tr("Object")).width(110.0).show_ui(ui, |_| {});
+            crate::widgets::name_combo(ui, "fx_level", "fx_level");
         });
     });
     ui.add_space(6.0);
@@ -593,7 +605,7 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
                 });
             }
             ui.add_space(8.0);
-            crate::rtl::label(ui, egui::RichText::new(summary(&lang, d)).size(11.0).color(crate::theme::Tokens::get(ui.ctx()).text_dim));
+            ui.label(egui::RichText::new(summary(&lang, d)).size(11.0).color(crate::theme::Tokens::get(ui.ctx()).text_dim));
         });
         ui.add_space(16.0);
         ui.vertical(|ui| {
@@ -603,11 +615,11 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
     });
     ui.add_space(10.0);
     let mut p = d.fields.get("preview").and_then(Value::as_bool).unwrap_or(false);
-    if ui.checkbox(&mut p, crate::rtl::widget(ui, tr("Preview"))).changed() {
+    if ui.checkbox(&mut p, tr("Preview")).changed() {
         d.fields.insert("preview".into(), json!(p));
     }
     if let Some(st) = d.fields.get("status").and_then(Value::as_str) {
-        crate::rtl::label(ui, egui::RichText::new(st).color(crate::theme::Tokens::get(ui.ctx()).text_dim));
+        ui.label(egui::RichText::new(st).color(crate::theme::Tokens::get(ui.ctx()).text_dim));
     }
     preview(app, d);
 }

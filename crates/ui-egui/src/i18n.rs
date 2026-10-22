@@ -74,6 +74,7 @@ const TABLE: &[(&str, [&str; 5])] = &[
         ],
     ),
     ("Close", ["Schließen", "Fermer", "Cerrar", "閉じる", "关闭"]),
+    ("Dismiss", ["Ausblenden", "Ignorer", "Descartar", "閉じる", "关闭"]),
     ("Save", ["Speichern", "Enregistrer", "Guardar", "保存", "保存"]),
     ("Save As…", ["Speichern unter …", "Enregistrer sous…", "Guardar como…", "別名で保存…", "另存为…"]),
     ("Save a Copy…", ["Kopie speichern …", "Enregistrer une copie…", "Guardar una copia…", "コピーを保存…", "保存副本…"]),
@@ -131,6 +132,111 @@ const TABLE: &[(&str, [&str; 5])] = &[
     ),
     ("Minimize", ["Minimieren", "Réduire", "Minimizar", "最小化", "最小化"]),
     ("Collapse to Icons", ["Auf Symbole minimieren", "Réduire en icônes", "Contraer a iconos", "アイコンパネルに折りたたむ", "折叠为图标"]),
+    // Docking chrome (craft-ui labels in DesignCraft's wording, `panel_docking::DOCK_LABELS`).
+    ("Group with", ["Gruppieren mit", "Grouper avec", "Agrupar con", "次とグループ化", "编组到"]),
+    ("Panels", ["Bedienfelder", "Panneaux", "Paneles", "パネル", "面板"]),
+    (
+        "Resize panels",
+        ["Größe der Bedienfelder ändern", "Redimensionner les panneaux", "Cambiar tamaño de los paneles", "パネルのサイズを変更", "调整面板大小"],
+    ),
+    (
+        "Resize panel window",
+        [
+            "Größe des Bedienfeldfensters ändern",
+            "Redimensionner la fenêtre de panneau",
+            "Cambiar tamaño de la ventana de panel",
+            "パネルウィンドウのサイズを変更",
+            "调整面板窗口大小",
+        ],
+    ),
+    (
+        "Move tab group",
+        ["Registerkartengruppe verschieben", "Déplacer le groupe d'onglets", "Mover grupo de fichas", "タブグループを移動", "移动选项卡组"],
+    ),
+    ("Expand", ["Erweitern", "Développer", "Expandir", "展開", "展开"]),
+    (
+        "Float Tab Group",
+        [
+            "Registerkartengruppe lösen",
+            "Détacher le groupe d'onglets",
+            "Hacer flotante el grupo de fichas",
+            "タブグループをフローティング表示",
+            "浮动选项卡组",
+        ],
+    ),
+    (
+        "Group Tab Group with",
+        [
+            "Registerkartengruppe gruppieren mit",
+            "Grouper le groupe d'onglets avec",
+            "Agrupar grupo de fichas con",
+            "タブグループを次とグループ化",
+            "将选项卡组编组到",
+        ],
+    ),
+    (
+        "Move panel column",
+        ["Bedienfeldspalte verschieben", "Déplacer la colonne de panneaux", "Mover columna de paneles", "パネル列を移動", "移动面板列"],
+    ),
+    ("Expand Panels", ["Bedienfelder erweitern", "Développer les panneaux", "Expandir paneles", "パネルを展開", "展开面板"]),
+    (
+        "Move panel window",
+        ["Bedienfeldfenster verschieben", "Déplacer la fenêtre de panneau", "Mover ventana de panel", "パネルウィンドウを移動", "移动面板窗口"],
+    ),
+    (
+        "Close panel window",
+        ["Bedienfeldfenster schließen", "Fermer la fenêtre de panneau", "Cerrar ventana de panel", "パネルウィンドウを閉じる", "关闭面板窗口"],
+    ),
+    ("Undock Panel", ["Bedienfeld abdocken", "Désancrer le panneau", "Desacoplar panel", "パネルのドッキングを解除", "取消停靠面板"]),
+    (
+        "Undock Panel Group",
+        [
+            "Bedienfeldgruppe abdocken",
+            "Désancrer le groupe de panneaux",
+            "Desacoplar grupo de paneles",
+            "パネルグループのドッキングを解除",
+            "取消停靠面板组",
+        ],
+    ),
+    (
+        "Close Panel Group",
+        ["Bedienfeldgruppe schließen", "Fermer le groupe de panneaux", "Cerrar grupo de paneles", "パネルグループを閉じる", "关闭面板组"],
+    ),
+    (
+        "Close Other Panels in Group",
+        [
+            "Andere Bedienfelder der Gruppe schließen",
+            "Fermer les autres panneaux du groupe",
+            "Cerrar los demás paneles del grupo",
+            "グループ内の他のパネルを閉じる",
+            "关闭组中的其他面板",
+        ],
+    ),
+    ("Maximize Frame", ["Bereich maximieren", "Agrandir la zone", "Maximizar área", "領域を最大化", "最大化区域"]),
+    (
+        "Restore Frame Size",
+        ["Bereichsgröße wiederherstellen", "Restaurer la taille de la zone", "Restaurar tamaño del área", "領域のサイズを元に戻す", "恢复区域大小"],
+    ),
+    (
+        "Move Panel to New Window",
+        [
+            "Bedienfeld in neues Fenster verschieben",
+            "Déplacer le panneau dans une nouvelle fenêtre",
+            "Mover panel a una ventana nueva",
+            "パネルを新規ウィンドウに移動",
+            "将面板移到新窗口",
+        ],
+    ),
+    (
+        "Auto-Collapse Iconic Panels",
+        [
+            "Symbolbedienfelder automatisch minimieren",
+            "Réduire automatiquement les panneaux d’icônes",
+            "Contraer automáticamente los paneles de iconos",
+            "アイコンパネルを自動的に折りたたむ",
+            "自动折叠图标面板",
+        ],
+    ),
     ("Panel Options", ["Bedienfeldoptionen", "Options du panneau", "Opciones de panel", "パネルオプション", "面板选项"]),
     ("Panel Options…", ["Bedienfeldoptionen…", "Options du panneau…", "Opciones de panel…", "パネルオプション…", "面板选项…"]),
     ("Show Thumbnails", ["Miniaturen anzeigen", "Afficher les vignettes", "Mostrar miniaturas", "サムネールを表示", "显示缩览图"]),
@@ -284,6 +390,10 @@ const TABLE: &[(&str, [&str; 5])] = &[
     ("Settings for:", ["Einstellungen für:", "Paramètres pour :", "Ajustes para:", "設定対象：", "设置："]),
     ("Transparency", ["Transparenz", "Transparence", "Transparencia", "透明", "透明度"]),
     ("Transparency…", ["Transparenz…", "Transparence…", "Transparencia…", "透明…", "透明度…"]),
+    (
+        "Transparency Flattener",
+        ["Transparenzreduzierung", "Aplatissement de la transparence", "Acoplador de transparencia", "透明の分割・統合", "透明度拼合"],
+    ),
     ("Basic Blending", ["Grundlegendes Füllen", "Fusion de base", "Fusión básica", "基本的な描画モード", "基本混合"]),
     ("Opacity:", ["Deckkraft:", "Opacité :", "Opacidad:", "不透明度：", "不透明度："]),
     ("Blending", ["Füllmethode", "Fusion", "Fusión", "描画モード", "混合"]),
@@ -1129,6 +1239,7 @@ const TABLE: &[(&str, [&str; 5])] = &[
     ),
     ("Paragraph Style:", ["Paragraph Style:", "Style de paragraphe :", "Paragraph Style:", "Paragraph Style:", "段落样式："]),
     ("PDF/A-2b", ["PDF/A-2b", "PDF/A-2b", "PDF/A-2b", "PDF/A-2b", "PDF/A-2b"]),
+    ("PDF/X-1a:2003", ["PDF/X-1a:2003", "PDF/X-1a:2003", "PDF/X-1a:2003", "PDF/X-1a:2003", "PDF/X-1a:2003"]),
     ("PDF/X-4", ["PDF/X-4", "PDF/X-4", "PDF/X-4", "PDF/X-4", "PDF/X-4"]),
     ("Place PDF", ["Place PDF", "Importer un PDF", "Place PDF", "Place PDF", "置入PDF"]),
     ("Plain Text", ["Plain Text", "Texte brut", "Plain Text", "Plain Text", "纯文本"]),
@@ -1784,7 +1895,7 @@ const TABLE: &[(&str, [&str; 5])] = &[
         ],
     ),
     ("Flattener Preview", ["Flattener Preview", "Aperçu de l'aplatissement", "Flattener Preview", "Flattener Preview", "拼合器预览"]),
-    ("Float Panel", ["Float Panel", "Détacher le panneau", "Float Panel", "Float Panel", "浮动面板"]),
+    ("Float Panel", ["Bedienfeld lösen", "Détacher le panneau", "Hacer flotante el panel", "パネルをフローティング表示", "浮动面板"]),
     ("Fonts in Document", ["Fonts in Document", "Polices du document", "Fonts in Document", "Fonts in Document", "文档中的字体"]),
     ("Footnotes", ["Footnotes", "Notes de bas de page", "Footnotes", "Footnotes", "脚注"]),
     ("Form Fields", ["Form Fields", "Champs de formulaire", "Form Fields", "Form Fields", "表单域"]),
@@ -4425,9 +4536,20 @@ const TABLE: &[(&str, [&str; 5])] = &[
     ),
 ];
 
-/// Interface direction; independent of document binding and paragraph direction.
+/// Whether the interface runs right to left for the interface language `lang`: from the language's
+/// script, unless `CRAFT_UI_DIRECTION` forces a direction. The same direction
+/// [`crate::theme::install_fonts`] applies to egui's own chrome. Independent of document binding
+/// and paragraph direction.
 pub fn is_rtl(lang: &str) -> bool {
-    lang == "ar"
+    use craft_ui::direction;
+    direction::resolve(if lang.is_empty() { "en" } else { lang }, direction::Setting::Language) == direction::Direction::Rtl
+}
+
+/// A user-provided name isolated for embedding in interface text, so a Latin product name or
+/// suffix beside it can't change the name's internal reading order. Names without right-to-left
+/// letters stay as they are.
+pub fn isolate(text: &str) -> String {
+    if text.chars().any(designcraft_fonts::is_rtl) { craft_i18n::isolate(text) } else { text.to_owned() }
 }
 
 /// A Japanese, Chinese or Korean interface language (`zh-tw` included): CJK features are shown by
@@ -4535,14 +4657,45 @@ pub fn tr_context<'a>(lang: &str, s: &'a str, context: &str) -> &'a str {
     tr(lang, s)
 }
 
+/// Every interface string, as (language, English key, text), and each language's own name.
 #[cfg(test)]
-pub(crate) fn ukrainian_catalog() -> Vec<&'static str> {
-    uk::TABLE.iter().map(|(_, text)| *text).chain(uk::CONTEXT.iter().map(|(_, _, text)| *text)).collect()
-}
-
-#[cfg(test)]
-pub(crate) fn russian_catalog() -> Vec<&'static str> {
-    ru::TABLE.iter().map(|(_, text)| *text).chain(ru::CONTEXT.iter().map(|(_, _, text)| *text)).collect()
+pub(crate) fn catalog_entries() -> Vec<(&'static str, &'static str, &'static str)> {
+    let shared = ["de", "fr", "es", "ja", "zh"];
+    let tables: [(&str, &[(&str, &str)]); 11] = [
+        ("ar", ar::TABLE),
+        ("cs", cs::TABLE),
+        ("de", de::TABLE),
+        ("fr", fr::TABLE),
+        ("it", it::TABLE),
+        ("ja", ja::TABLE),
+        ("ka", ka::TABLE),
+        ("pl", pl::TABLE),
+        ("pt-br", pt_br::TABLE),
+        ("ru", ru::TABLE),
+        ("uk", uk::TABLE),
+    ];
+    let contexts: [(&str, &[(&str, &str, &str)]); 6] =
+        [("ar", ar::CONTEXT), ("cs", cs::CONTEXT), ("ja", ja::CONTEXT), ("pl", pl::CONTEXT), ("ru", ru::CONTEXT), ("uk", uk::CONTEXT)];
+    let mut entries: Vec<(&str, &str, &str)> = Vec::new();
+    for (key, texts) in TABLE {
+        entries.extend(shared.iter().zip(texts).map(|(lang, text)| (*lang, *key, *text)));
+    }
+    for (key, _, texts) in CONTEXT {
+        entries.extend(shared.iter().zip(texts).map(|(lang, text)| (*lang, *key, *text)));
+    }
+    for (lang, table) in tables {
+        entries.extend(table.iter().map(|(key, text)| (lang, *key, *text)));
+        // English shows the keys themselves.
+        entries.extend(table.iter().map(|(key, _)| ("", *key, *key)));
+    }
+    for (lang, table) in contexts {
+        entries.extend(table.iter().map(|(key, _, text)| (lang, *key, *text)));
+    }
+    for (key, forms) in cs::PLURALS {
+        entries.extend(forms.iter().map(|text| ("cs", *key, *text)));
+    }
+    entries.extend(LANGUAGES.iter().map(|(code, name)| (*code, "language name", *name)));
+    entries
 }
 
 /// Ukrainian, Russian, Polish and Georgian put the category before the value in count captions
@@ -4727,6 +4880,8 @@ mod tests {
         for table in [ar::TABLE, de::TABLE, it::TABLE, ja::TABLE, pt_br::TABLE, uk::TABLE, ru::TABLE, cs::TABLE] {
             keys.extend(table.iter().map(|(key, _)| *key));
         }
+        // The Keyboard Shortcuts dialog's strings (craft-keymap) reach `tr` too.
+        keys.extend(crate::shortcuts_dialog::strings());
         let stale: Vec<_> = catalog.keys().filter(|k| !keys.contains(*k)).collect();
         assert!(stale.is_empty(), "French entries for unknown keys: {stale:?}");
         let placeholders = |s: &str| {
@@ -4869,6 +5024,8 @@ mod tests {
         keys.extend(pt_br::TABLE.iter().map(|(key, _)| *key));
         // A new English string falls back to English until it is translated, so only stale
         // entries (keys no catalog knows any more) fail.
+        // The Keyboard Shortcuts dialog's strings (craft-keymap) reach `tr` too.
+        keys.extend(crate::shortcuts_dialog::strings());
         let stale: Vec<_> = catalog.keys().filter(|k| !keys.contains(*k)).collect();
         assert!(stale.is_empty(), "Ukrainian entries for unknown keys: {stale:?}");
         let placeholders =
@@ -4954,6 +5111,8 @@ mod tests {
         keys.extend(uk::TABLE.iter().map(|(key, _)| *key));
         // A new English string falls back to English until it is translated, so only stale
         // entries (keys no catalog knows any more) fail.
+        // The Keyboard Shortcuts dialog's strings (craft-keymap) reach `tr` too.
+        keys.extend(crate::shortcuts_dialog::strings());
         let stale: Vec<_> = catalog.keys().filter(|k| !keys.contains(*k)).collect();
         assert!(stale.is_empty(), "Russian entries for unknown keys: {stale:?}");
         let placeholders =
@@ -5019,6 +5178,8 @@ mod tests {
             keys.extend(table.iter().map(|(key, _)| *key));
         }
         // A new English string falls back to English until it is translated; only stale entries fail.
+        // The Keyboard Shortcuts dialog's strings (craft-keymap) reach `tr` too.
+        keys.extend(crate::shortcuts_dialog::strings());
         let stale: Vec<_> = catalog.keys().filter(|k| !keys.contains(*k)).collect();
         assert!(stale.is_empty(), "Polish entries for unknown keys: {stale:?}");
         let placeholders =
@@ -5163,6 +5324,8 @@ mod tests {
         let keys = interface_strings();
         // A new English string falls back to English until it is translated, so only stale
         // entries (keys nothing passes to `tr` any more) fail.
+        // The Keyboard Shortcuts dialog's strings (craft-keymap) reach `tr` too.
+        keys.extend(crate::shortcuts_dialog::strings());
         let stale: Vec<_> = catalog.keys().filter(|k| !keys.contains(*k)).collect();
         assert!(stale.is_empty(), "Czech entries for unknown keys: {stale:?}");
         let placeholders =
@@ -5268,5 +5431,23 @@ mod tests {
                 assert_ne!(tr(code, key), key, "{code}: {key}");
             }
         }
+    }
+
+    /// egui lays interface text out in bidi order itself: an isolated Arabic document name keeps
+    /// its internal right-to-left order beside the Latin app name and the zoom suffix.
+    #[test]
+    fn isolated_arabic_names_keep_their_order_in_latin_chrome() {
+        let ctx = egui::Context::default();
+        ctx.begin_pass(egui::RawInput::default());
+        let name = isolate("ملف (PDF 123) جديد");
+        // (text, a Latin letter beside the name, whether it sits left of the name)
+        for (text, latin, left) in [(format!("DesignCraft — {name}"), 'D', true), (format!("{name} @ 89%"), '@', false)] {
+            let galley = ctx.fonts_mut(|f| f.layout_no_wrap(text.clone(), egui::FontId::proportional(15.0), egui::Color32::WHITE));
+            let glyphs: Vec<_> = galley.rows.iter().flat_map(|row| &row.glyphs).collect();
+            let x = |c| glyphs.iter().find(|g| g.chr == c).map(|g| g.pos.x).unwrap();
+            assert!(x('ج') < x('P') && x('P') < x('ف'), "{text}");
+            assert_eq!(x(latin) < x('ج'), left, "{text}");
+        }
+        ctx.end_pass().textures_delta.clear();
     }
 }

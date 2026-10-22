@@ -31,7 +31,7 @@ const MAC_LIGHTS_LEFT: f32 = 10.0;
 pub const MAC_CONTENT_LEFT: f32 = MAC_LIGHTS_LEFT + 2.0 * MAC_LIGHT_PITCH + MAC_LIGHT + (MAC_APP_BAR - MAC_LIGHT) / 2.0;
 
 fn search_id() -> egui::Id {
-    egui::Id::new("app_bar_search")
+    egui::Id::unique("app_bar_search")
 }
 
 /// Whether the application bar's search field had the keyboard last frame. Escape takes egui's
@@ -81,7 +81,7 @@ fn search_field(app: &mut DesignApp, ui: &mut egui::Ui) {
         (false, false, false, false)
     };
     let lang = app.ui.language.clone();
-    let hint = crate::rtl::widget(ui, egui::RichText::new(crate::i18n::tr(&lang, "Search")).color(t.text_dim));
+    let hint = egui::RichText::new(crate::i18n::tr(&lang, "Search")).color(t.text_dim);
     let field = egui::Rect::from_min_max(r.min + vec2(19.0, 0.0), r.max - vec2(3.0, 0.0));
     let resp = ui
         .put(
@@ -94,7 +94,7 @@ fn search_field(app: &mut DesignApp, ui: &mut egui::Ui) {
                 .text_color(t.text)
                 .hint_text(hint)
                 .desired_width(field.width())
-                .vertical_align(egui::Align::Center)
+                .align(egui::Align2::LEFT_CENTER)
                 // Return runs the highlighted match instead of leaving the field.
                 .return_key(None),
         )
@@ -130,10 +130,10 @@ fn search_field(app: &mut DesignApp, ui: &mut egui::Ui) {
                     let size = vec2(300.0, 22.0);
                     ui.set_width(size.x);
                     if items.is_empty() {
-                        crate::rtl::label(ui, egui::RichText::new(crate::i18n::tr(&lang, "No matching commands")).color(t.text_dim));
+                        ui.label(egui::RichText::new(crate::i18n::tr(&lang, "No matching commands")).color(t.text_dim));
                     }
                     for (k, it) in items.iter().enumerate() {
-                        let mut b = egui::Button::new(crate::rtl::widget(ui, it.label.as_str())).frame(false).min_size(size);
+                        let mut b = egui::Button::new(it.label.as_str()).frame(false).min_size(size);
                         if let Some(sc) = &it.shortcut {
                             b = b.shortcut_text(crate::menus::shortcut_text(sc));
                         }
@@ -219,12 +219,12 @@ pub fn app_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
                     egui::pos2(full.min.x - left as f32, full.min.y),
                     egui::pos2(full.max.x - caption_w, full.min.y + bar + APP_BAR_BAND),
                 );
-                let response = ui.interact(drag, egui::Id::new("window_title_drag"), Sense::click_and_drag());
+                let response = ui.interact(drag, egui::Id::unique("window_title_drag"), Sense::click_and_drag());
                 // Only from an empty part of the bar: the lower band, or the gap between the menus
                 // and the tools (as they were last frame). A menu title pressed and dragged doesn't
                 // move the window, as with native title bars.
-                let (gap0, gap1) =
-                    ui.data(|d| (d.get_temp::<f32>(egui::Id::new("app_bar_menus_end")), d.get_temp::<f32>(egui::Id::new("app_bar_tools_start"))));
+                let (gap0, gap1) = ui
+                    .data(|d| (d.get_temp::<f32>(egui::Id::unique("app_bar_menus_end")), d.get_temp::<f32>(egui::Id::unique("app_bar_tools_start"))));
                 let empty = |p: egui::Pos2| p.y >= full.min.y + bar || matches!((gap0, gap1), (Some(a), Some(b)) if p.x >= a && p.x <= b);
                 let from_empty = ui.input(|i| i.pointer.press_origin().or(i.pointer.interact_pos())).is_some_and(empty);
                 if response.double_clicked() && from_empty {
@@ -245,7 +245,7 @@ pub fn app_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
             ui.scope_builder(egui::UiBuilder::new().max_rect(scrolled), |ui| {
                 // The right-hand controls' width, measured last frame: in a window too narrow for them
                 // and the menus they follow the menus, and the bar scrolls sideways.
-                let tools_w_id = ui.id().with("tools_width");
+                let tools_w_id = ui.scope_id().with("tools_width");
                 let tools_w: f32 = ui.data(|d| d.get_temp(tools_w_id)).unwrap_or(0.0);
                 crate::widgets::overflow_scrolling(ui);
                 // (Drag-scrolling is touch-only by default, so a mouse drag on the bar moves the window.)
@@ -264,7 +264,7 @@ pub fn app_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
                         }
                         menus_end = ui.min_rect().max.x;
                         // Where the menus end on screen (moves as a narrow bar scrolls).
-                        ui.data_mut(|d| d.insert_temp(egui::Id::new("app_bar_menus_end"), menus_end));
+                        ui.data_mut(|d| d.insert_temp(egui::Id::unique("app_bar_menus_end"), menus_end));
                         let size = vec2(tools_slot_width(ui.available_width(), tools_w), ui.available_height());
                         let tools = ui.allocate_ui_with_layout(size, egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.add_space(4.0);
@@ -272,55 +272,41 @@ pub fn app_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
                             ui.add_space(8.0);
                             let current = app.ui.workspace.clone();
                             let shown = crate::i18n::workspace_name(&app.ui.language, &current);
-                            crate::menus::menu_button(
-                                ui,
-                                crate::rtl::widget(ui, egui::RichText::new(format!("{shown} ▾")).font(semibold(11.5)).color(t.text)),
-                                |ui| {
-                                    let customs: Vec<String> = app.ui.custom_workspaces.iter().map(|w| w.name.clone()).collect();
-                                    for w in crate::menus::WORKSPACES.iter().map(|w| w.to_string()).chain(customs.iter().cloned()) {
-                                        if ui
-                                            .selectable_label(w == current, crate::rtl::widget(ui, crate::i18n::workspace_name(&app.ui.language, &w)))
-                                            .clicked()
-                                        {
-                                            let _ = app.run("window.workspace", json!({"name": w}));
-                                            ui.close();
+                            crate::menus::menu_button(ui, egui::RichText::new(format!("{shown} ▾")).font(semibold(11.5)).color(t.text), |ui| {
+                                let customs: Vec<String> = app.ui.custom_workspaces.iter().map(|w| w.name.clone()).collect();
+                                for w in crate::menus::WORKSPACES.iter().map(|w| w.to_string()).chain(customs.iter().cloned()) {
+                                    if ui.selectable_label(w == current, crate::i18n::workspace_name(&app.ui.language, &w)).clicked() {
+                                        let _ = app.run("window.workspace", json!({"name": w}));
+                                        ui.close();
+                                    }
+                                }
+                                ui.separator();
+                                if ui
+                                    .button(format!(
+                                        "{} {}",
+                                        crate::i18n::tr(&app.ui.language, "Reset"),
+                                        crate::i18n::workspace_name(&app.ui.language, &current)
+                                    ))
+                                    .clicked()
+                                {
+                                    let _ = app.run("window.resetWorkspace", json!({}));
+                                    ui.close();
+                                }
+                                if ui.button(crate::i18n::tr(&app.ui.language, "New Workspace…")).clicked() {
+                                    let _ = app.run("window.newWorkspace", json!({}));
+                                    ui.close();
+                                }
+                                if !customs.is_empty() {
+                                    crate::menus::menu_button(ui, crate::i18n::tr(&app.ui.language, "Delete Workspace"), |ui| {
+                                        for w in &customs {
+                                            if ui.button(w).clicked() {
+                                                let _ = app.run("window.deleteWorkspace", json!({"name": w}));
+                                                ui.close();
+                                            }
                                         }
-                                    }
-                                    ui.separator();
-                                    if ui
-                                        .button(crate::rtl::widget(
-                                            ui,
-                                            format!(
-                                                "{} {}",
-                                                crate::i18n::tr(&app.ui.language, "Reset"),
-                                                crate::i18n::workspace_name(&app.ui.language, &current)
-                                            ),
-                                        ))
-                                        .clicked()
-                                    {
-                                        let _ = app.run("window.resetWorkspace", json!({}));
-                                        ui.close();
-                                    }
-                                    if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "New Workspace…"))).clicked() {
-                                        let _ = app.run("window.newWorkspace", json!({}));
-                                        ui.close();
-                                    }
-                                    if !customs.is_empty() {
-                                        crate::menus::menu_button(
-                                            ui,
-                                            crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Delete Workspace")),
-                                            |ui| {
-                                                for w in &customs {
-                                                    if ui.button(w).clicked() {
-                                                        let _ = app.run("window.deleteWorkspace", json!({"name": w}));
-                                                        ui.close();
-                                                    }
-                                                }
-                                            },
-                                        );
-                                    }
-                                },
-                            );
+                                    });
+                                }
+                            });
                             ui.add_space(6.0);
                             if icons::button(ui, "share", 22.0, false, crate::i18n::tr(&app.ui.language, "Share")).clicked() {
                                 app.status(crate::i18n::tr(&app.ui.language, "Export a PDF, IDML or package to share — no cloud account needed."));
@@ -331,7 +317,7 @@ pub fn app_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
                                 let _ = app.run("help.discord", json!({}));
                             }
                             tools_start = ui.min_rect().min.x;
-                            ui.data_mut(|d| d.insert_temp(egui::Id::new("app_bar_tools_start"), tools_start));
+                            ui.data_mut(|d| d.insert_temp(egui::Id::unique("app_bar_tools_start"), tools_start));
                             ui.min_rect().width()
                         });
                         if (tools.inner - tools_w).abs() > 0.5 {
@@ -343,11 +329,11 @@ pub fn app_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
             });
             // Centred title.
             let title = match app.session.active() {
-                Some(d) => format!("DesignCraft — {}", crate::rtl::isolate(&d.title())),
+                Some(d) => format!("DesignCraft — {}", crate::i18n::isolate(&d.title())),
                 None => "DesignCraft".to_string(),
             };
             // Centred between the menus and the right-hand controls; left out when it won't fit.
-            let galley = crate::rtl::plain(ui.ctx(), &title, egui::FontId::proportional(11.5), t.text);
+            let galley = ui.painter().layout_no_wrap(title.clone(), egui::FontId::proportional(11.5), t.text);
             let w = galley.size().x;
             let cx = full.center().x;
             if cx - w / 2.0 > menus_end + 12.0 && cx + w / 2.0 < tools_start - 12.0 {
@@ -373,8 +359,8 @@ fn caption_buttons(app: &mut DesignApp, ui: &mut egui::Ui) {
         [("window.close", "Close"), ("window.maximize", if maximized { "Restore" } else { "Maximize" }), ("window.minimize", "Minimize")]
     {
         let (rect, _) = ui.allocate_exact_size(vec2(CAPTION_BUTTON_W, APP_BAR), Sense::hover());
-        let response = ui.interact(rect, egui::Id::new(command), Sense::click());
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
+        let response = ui.interact(rect, egui::Id::unique(command), Sense::click());
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
         let hovered = response.hovered();
         if hovered {
             ui.painter().rect_filled(rect, 0.0, if command == "window.close" { t.caption_close } else { t.hover });
@@ -430,7 +416,7 @@ pub(crate) fn resize_borders(app: &mut DesignApp, ui: &mut egui::Ui) {
         ("west", rect(r.left(), r.top() + corner, r.left() + edge, r.bottom() - corner), egui::CursorIcon::ResizeHorizontal),
         ("east", rect(r.right() - edge, r.top() + corner, r.right(), r.bottom() - corner), egui::CursorIcon::ResizeHorizontal),
     ] {
-        let response = ui.interact(region, egui::Id::new(("window_resize", name)), Sense::drag()).on_hover_cursor(cursor);
+        let response = ui.interact(region, egui::Id::unique(("window_resize", name)), Sense::drag()).on_hover_cursor(cursor);
         if response.drag_started_by(egui::PointerButton::Primary) {
             let _ = app.run("window.resize", json!({"edge": name}));
             app.flush_window_commands(ui.ctx());
@@ -521,17 +507,15 @@ fn control_page(app: &mut DesignApp, ui: &mut egui::Ui) {
     let landscape = pg.width > pg.height;
     ui.vertical(|ui| {
         let cur = panels::properties::preset_name(pg.width, pg.height);
-        egui::ComboBox::from_id_salt("ctl_page_preset").selected_text(crate::rtl::widget(ui, crate::i18n::tr(&lang, cur))).width(130.0).show_ui(
-            ui,
-            |ui| {
-                for (name, w, h) in panels::properties::PAGE_PRESETS {
-                    if ui.selectable_label(cur == *name, crate::rtl::widget(ui, crate::i18n::tr(&lang, name))).clicked() {
-                        let (w, h) = if landscape { (h, w) } else { (w, h) };
-                        let _ = app.run("layout.pageSize", json!({"pages": [n], "width": w, "height": h, "anchor": anchor}));
-                    }
+        egui::ComboBox::from_id_salt("ctl_page_preset").selected_text(crate::i18n::tr(&lang, cur)).width(130.0).show_ui(ui, |ui| {
+            for (name, w, h) in panels::properties::PAGE_PRESETS {
+                if ui.selectable_label(cur == *name, crate::i18n::tr(&lang, name)).clicked() {
+                    let (w, h) = if landscape { (h, w) } else { (w, h) };
+                    let _ = app.run("layout.pageSize", json!({"pages": [n], "width": w, "height": h, "anchor": anchor}));
                 }
-            },
-        );
+            }
+        });
+        crate::widgets::name_combo(ui, "ctl_page_preset", "ctl_page_preset");
         ui.horizontal(|ui| {
             for (icon, tip, want) in [("orient-portrait", "Portrait", false), ("orient-landscape", "Landscape", true)] {
                 if crate::widgets::icon_toggle(ui, icon, landscape == want, crate::i18n::tr(&lang, tip)).clicked() && landscape != want {
@@ -544,21 +528,19 @@ fn control_page(app: &mut DesignApp, ui: &mut egui::Ui) {
     ui.vertical(|ui| {
         caption(ui, crate::i18n::tr(&lang, "Liquid Page Rule:"));
         let label = panels::interactive::liquid_rule_label(pg.liquid);
-        egui::ComboBox::from_id_salt("ctl_page_rule").selected_text(crate::rtl::widget(ui, crate::i18n::tr(&lang, label))).width(150.0).show_ui(
-            ui,
-            |ui| {
-                for (r, l) in panels::interactive::LIQUID_RULES {
-                    if ui.selectable_label(pg.liquid == r, crate::rtl::widget(ui, crate::i18n::tr(&lang, l))).clicked() && pg.liquid != r {
-                        let _ = app.run("liquid.pageRule", json!({"rule": r, "pages": [n]}));
-                    }
+        egui::ComboBox::from_id_salt("ctl_page_rule").selected_text(crate::i18n::tr(&lang, label)).width(150.0).show_ui(ui, |ui| {
+            for (r, l) in panels::interactive::LIQUID_RULES {
+                if ui.selectable_label(pg.liquid == r, crate::i18n::tr(&lang, l)).clicked() && pg.liquid != r {
+                    let _ = app.run("liquid.pageRule", json!({"rule": r, "pages": [n]}));
                 }
-            },
-        );
+            }
+        });
+        crate::widgets::name_combo(ui, "ctl_page_rule", "ctl_page_rule");
     });
     vsep(ui);
     ui.vertical(|ui| {
         let mut overlay = pg.show_parent_overlay;
-        if ui.checkbox(&mut overlay, crate::rtl::widget(ui, crate::i18n::tr(&lang, "Show Parent Page Overlay"))).changed() {
+        if ui.checkbox(&mut overlay, crate::i18n::tr(&lang, "Show Parent Page Overlay")).changed() {
             let _ = app.run("layout.pageOptions", json!({"pages": [n], "showParentOverlay": overlay}));
         }
     });
@@ -657,7 +639,7 @@ fn control_text(app: &mut DesignApp, ui: &mut egui::Ui) {
         panels::para_style_picker(app, ui, &ps, ov > 0, 170.0);
         let hy = para["hyphenate"].as_bool().unwrap_or(true);
         let mut h = hy;
-        if ui.checkbox(&mut h, crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Hyphenate"))).changed() {
+        if ui.checkbox(&mut h, crate::i18n::tr(&app.ui.language, "Hyphenate")).changed() {
             let _ = app.run("type.para", json!({"attrs": {"hyphenate": h}}));
         }
     });
@@ -688,26 +670,28 @@ pub fn doc_tabs(app: &mut DesignApp, ui: &mut egui::Ui) {
         let suffix = if is_active && app.ui.screen_mode == crate::ScreenMode::Preview { " [Preview]" } else { "" };
         let color = if is_active { t.text_strong } else { t.text_dim };
         // The name gives way first; the dirty marker and zoom stay readable.
-        let zoom_label = crate::rtl::plain(ui.ctx(), &format!(" @ {:.0}%{suffix}", zoom * 100.0), semibold(11.5), color);
-        let name = format!("{}{}", if *dirty { "*" } else { "" }, crate::rtl::isolate(title));
+        let zoom_label = ui.painter().layout_no_wrap(format!(" @ {:.0}%{suffix}", zoom * 100.0), semibold(11.5), color);
+        let name = format!("{}{}", if *dirty { "*" } else { "" }, crate::i18n::isolate(title));
         let name_max = max_w - DOC_TAB_PAD - zoom_label.size().x;
-        let galley = crate::rtl::truncated(ui.ctx(), &name, semibold(11.5), color, name_max);
+        let mut job = egui::text::LayoutJob::simple_singleline(name, semibold(11.5), color);
+        job.wrap = egui::text::TextWrapping::truncate_at_width(name_max.max(0.0));
+        let galley = ui.painter().layout_job(job);
         let elided = galley.elided;
         let w = (galley.size().x + zoom_label.size().x + DOC_TAB_PAD).max(if is_active { 210.0 } else { 150.0 }).min(max_w);
         let r = egui::Rect::from_min_size(egui::pos2(x, bar.min.y), vec2(w, 28.0));
-        let resp = ui.interact(r, ui.id().with(("doctab", i)), Sense::click());
-        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, title));
+        let resp = ui.interact(r, ui.scope_id().with(("doctab", i)), Sense::click());
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, title));
         let resp = if elided {
             resp.on_hover_ui(|ui| {
-                let _ = crate::rtl::label(ui, title);
+                let _ = ui.label(title);
             })
         } else {
             resp
         };
         ui.painter().rect_filled(r, 0.0, if is_active { t.panel } else { t.tab_strip });
         let cr = egui::Rect::from_center_size(egui::pos2(r.min.x + 18.0, r.center().y), vec2(14.0, 14.0));
-        let cresp = ui.interact(cr, ui.id().with(("docclose", i)), Sense::click());
-        cresp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("{close_label} {title}")));
+        let cresp = ui.interact(cr, ui.scope_id().with(("docclose", i)), Sense::click());
+        cresp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, format!("{close_label} {title}")));
         ui.painter().text(
             cr.center(),
             egui::Align2::CENTER_CENTER,
@@ -735,12 +719,9 @@ pub fn doc_tabs(app: &mut DesignApp, ui: &mut egui::Ui) {
     }
 }
 
-/// Show the Preflight panel. `window.panel` toggles a panel that is already open, so it runs
-/// only when Preflight isn't showing.
+/// Show the Preflight panel.
 fn show_preflight(app: &mut DesignApp) {
-    if app.ui.open_panel.as_deref() != Some("preflight")
-        && let Err(e) = app.run("window.panel", json!({"panel": "preflight"}))
-    {
+    if let Err(e) = app.run("window.panel", json!({"panel": "preflight"})) {
         app.status(e);
     }
 }
@@ -799,7 +780,7 @@ pub fn status_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
                     crate::canvas::go_to_page(app, n - 1);
                 }
                 ui.add_space(12.0);
-                crate::rtl::label(ui, egui::RichText::new(crate::i18n::tr(&app.ui.language, "[Basic] (working) ▾")).font(small.clone()));
+                ui.label(egui::RichText::new(crate::i18n::tr(&app.ui.language, "[Basic] (working) ▾")).font(small.clone()));
                 ui.add_space(8.0);
                 // Preflight: overset text is an error.
                 let errors = panels::preflight_errors(app);
@@ -852,27 +833,20 @@ pub fn start_screen(app: &mut DesignApp, ui: &mut egui::Ui) {
             egui::Align::Min
         })),
         |ui| {
-            ui.label(crate::rtl::widget(
-                ui,
-                egui::RichText::new(crate::i18n::tr(&app.ui.language, "Welcome to DesignCraft")).font(semibold(28.0)).color(t.text_strong),
-            ));
-            ui.label(crate::rtl::widget(
-                ui,
+            ui.label(egui::RichText::new(crate::i18n::tr(&app.ui.language, "Welcome to DesignCraft")).font(semibold(28.0)).color(t.text_strong));
+            ui.label(
                 egui::RichText::new(crate::i18n::tr(&app.ui.language, "Page layout for print and screen — fast, open and scriptable."))
                     .size(15.0)
                     .color(t.text_dim),
-            ));
+            );
             ui.add_space(24.0);
             ui.horizontal(|ui| {
                 if ui
                     .add(
-                        egui::Button::new(crate::rtl::widget(
-                            ui,
-                            egui::RichText::new(crate::i18n::tr(&app.ui.language, "  New file  ")).size(14.0).color(Color32::WHITE),
-                        ))
-                        .fill(t.accent_strong)
-                        .corner_radius(16.0)
-                        .min_size(vec2(0.0, 32.0)),
+                        egui::Button::new(egui::RichText::new(crate::i18n::tr(&app.ui.language, "  New file  ")).size(14.0).color(Color32::WHITE))
+                            .fill(t.accent_strong)
+                            .corner_radius(16.0)
+                            .min_size(vec2(0.0, 32.0)),
                     )
                     .clicked()
                 {
@@ -880,7 +854,7 @@ pub fn start_screen(app: &mut DesignApp, ui: &mut egui::Ui) {
                 }
                 if ui
                     .add(
-                        egui::Button::new(crate::rtl::widget(ui, egui::RichText::new(crate::i18n::tr(&app.ui.language, "  Open  ")).size(14.0)))
+                        egui::Button::new(egui::RichText::new(crate::i18n::tr(&app.ui.language, "  Open  ")).size(14.0))
                             .corner_radius(16.0)
                             .min_size(vec2(0.0, 32.0)),
                     )
@@ -890,12 +864,9 @@ pub fn start_screen(app: &mut DesignApp, ui: &mut egui::Ui) {
                 }
                 if ui
                     .add(
-                        egui::Button::new(crate::rtl::widget(
-                            ui,
-                            egui::RichText::new(crate::i18n::tr(&app.ui.language, "  Open sample magazine  ")).size(14.0),
-                        ))
-                        .corner_radius(16.0)
-                        .min_size(vec2(0.0, 32.0)),
+                        egui::Button::new(egui::RichText::new(crate::i18n::tr(&app.ui.language, "  Open sample magazine  ")).size(14.0))
+                            .corner_radius(16.0)
+                            .min_size(vec2(0.0, 32.0)),
                     )
                     .clicked()
                 {
@@ -906,10 +877,7 @@ pub fn start_screen(app: &mut DesignApp, ui: &mut egui::Ui) {
             community_card(app, ui);
             recent_files(app, ui);
             ui.add_space(24.0);
-            ui.label(crate::rtl::widget(
-                ui,
-                egui::RichText::new(crate::i18n::tr(&app.ui.language, "Start a new document")).font(semibold(15.0)).color(t.text_strong),
-            ));
+            ui.label(egui::RichText::new(crate::i18n::tr(&app.ui.language, "Start a new document")).font(semibold(15.0)).color(t.text_strong));
             ui.add_space(8.0);
             ui.horizontal_wrapped(|ui| {
                 for p in designcraft_doc::build::PRESETS.iter().filter(|p| p.intent == designcraft_doc::Intent::Print) {
@@ -949,10 +917,7 @@ fn recent_files(app: &mut DesignApp, ui: &mut egui::Ui) {
     }
     let t = Tokens::get(ui.ctx());
     ui.add_space(24.0);
-    ui.label(crate::rtl::widget(
-        ui,
-        egui::RichText::new(crate::i18n::tr(&app.ui.language, "Recent files")).font(semibold(15.0)).color(t.text_strong),
-    ));
+    ui.label(egui::RichText::new(crate::i18n::tr(&app.ui.language, "Recent files")).font(semibold(15.0)).color(t.text_strong));
     ui.add_space(8.0);
     let rows: Vec<(usize, String)> = app.session.prefs.recent_files.iter().take(START_SCREEN_RECENT).cloned().enumerate().collect();
     let mut open = None;
@@ -1017,7 +982,7 @@ pub(crate) fn recent_file_stat(ctx: &egui::Context, path: &str) -> RecentStat {
 }
 
 fn recent_file_stat_at(ctx: &egui::Context, path: &str, now: f64) -> RecentStat {
-    let key = egui::Id::new(("recent_stat", path));
+    let key = egui::Id::unique(("recent_stat", path));
     if let Some(st) = ctx.data(|d| d.get_temp::<RecentStat>(key))
         && (0.0..RECENT_STAT_MS).contains(&(now - st.checked))
     {
@@ -1032,7 +997,7 @@ fn recent_file_stat_at(ctx: &egui::Context, path: &str, now: f64) -> RecentStat 
 /// The texture of a recent file's saved first-page picture, decoded once per file version.
 fn recent_preview_texture(ctx: &egui::Context, path: &str, modified: Option<std::time::SystemTime>) -> Option<egui::TextureHandle> {
     type Cached = (Option<std::time::SystemTime>, Option<egui::TextureHandle>);
-    let key = egui::Id::new(("recent_preview", path));
+    let key = egui::Id::unique(("recent_preview", path));
     if let Some((m, tex)) = ctx.data(|d| d.get_temp::<Cached>(key))
         && m == modified
     {
@@ -1064,16 +1029,14 @@ fn community_card(app: &mut DesignApp, ui: &mut egui::Ui) {
             ui.vertical(|ui| {
                 ui.set_max_width(text_width);
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
-                ui.label(crate::rtl::widget(
-                    ui,
+                ui.label(
                     egui::RichText::new(crate::i18n::tr(&app.ui.language, "Join the ArtCraft community")).font(semibold(14.0)).color(t.text_strong),
-                ));
-                ui.label(crate::rtl::widget(
-                    ui,
+                );
+                ui.label(
                     egui::RichText::new(crate::i18n::tr(&app.ui.language, "Get help, share your layouts and shape what we build next."))
                         .size(12.0)
                         .color(t.text_dim),
-                ));
+                );
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     for (text, id) in [("DesignCraft page", "help.appPage"), ("GitHub", "help.github"), ("getartcraft.com", "help.website")] {
@@ -1143,7 +1106,7 @@ mod tests {
 
     /// The rect of an object Control panel group.
     fn group(h: &egui_kittest::Harness<'static, test_window::Window>, id: &str) -> egui::Rect {
-        h.ctx.read_response(egui::Id::new(("object_control", id))).unwrap().rect
+        h.ctx.read_response(egui::Id::unique(("object_control", id))).unwrap().rect
     }
 
     /// The rect of the node with this label, preferring the one in the Control bar's row: the
@@ -1250,15 +1213,15 @@ mod tests {
         h.run_steps(3);
         h.get_by_label("Preflight Panel…").click();
         h.run_steps(3);
-        // Preflight is not a dock tab: `window.panel` shows it as its own panel.
-        assert_eq!(h.state().app.ui.open_panel.as_deref(), Some("preflight"));
-        h.get_by_label("Preflight");
+        // Preflight is in the iconic column: `window.panel` shows it.
+        assert!(crate::panel_docking::showing(&h.state().app, "preflight"));
+        assert!(h.query_all_by_label("Preflight").count() >= 2, "its icon and its tab in the flyout");
         // With the panel already showing, the entry keeps it open.
         h.get_by_label("No errors ▾").click();
         h.run_steps(3);
         h.get_by_label("Preflight Panel…").click();
         h.run_steps(3);
-        assert_eq!(h.state().app.ui.open_panel.as_deref(), Some("preflight"));
+        assert!(crate::panel_docking::showing(&h.state().app, "preflight"));
     }
 
     /// As in InDesign, double-clicking the preflight count (or its light) shows the panel.
@@ -1272,15 +1235,18 @@ mod tests {
         count.click();
         count.click();
         h.run_steps(3);
-        assert_eq!(h.state().app.ui.open_panel.as_deref(), Some("preflight"));
-        h.get_by_label("Preflight");
+        assert!(crate::panel_docking::showing(&h.state().app, "preflight"));
+        assert!(h.query_all_by_label("Preflight").count() >= 2, "its icon and its tab in the flyout");
         assert!(h.query_by_label("Preflight Panel…").is_none(), "the menu isn't left open");
-        // A double-click with the panel already showing keeps it open.
+        // A double-click with the panel already showing keeps it open (the first click closes
+        // its flyout, the double-click opens it again). Past the double-click time, so the
+        // clicks are not counted with the ones before.
+        h.run_steps(30);
         let count = h.get_by_label("No errors ▾");
         count.click();
         count.click();
         h.run_steps(3);
-        assert_eq!(h.state().app.ui.open_panel.as_deref(), Some("preflight"));
+        assert!(crate::panel_docking::showing(&h.state().app, "preflight"));
     }
 
     /// A very long document name made its tab grow past the window, hiding the close button
@@ -1582,7 +1548,7 @@ mod tests {
         }
 
         fn caption_center(&self, id: &str) -> egui::Pos2 {
-            self.ctx.read_response(egui::Id::new(id)).unwrap().rect.center()
+            self.ctx.read_response(egui::Id::unique(id)).unwrap().rect.center()
         }
     }
 
@@ -1606,7 +1572,7 @@ mod tests {
     #[test]
     fn title_area_drags_and_double_clicks_but_menus_do_not_drag() {
         let mut h = WindowHarness::new();
-        let title = h.ctx.read_response(egui::Id::new("window_title_drag")).unwrap().rect;
+        let title = h.ctx.read_response(egui::Id::unique("window_title_drag")).unwrap().rect;
         assert!(title.width() > 0.0, "there is a drag region between menus and tools");
         let p = title.center();
         let mut commands = h.press(p);
@@ -1656,8 +1622,8 @@ mod tests {
         h.size = vec2(640.0, 560.0);
         h.frame(vec![]);
         h.frame(vec![]);
-        let rect = |h: &WindowHarness, id: &str| h.ctx.read_response(egui::Id::new(id)).unwrap().rect;
-        let menus_end = |h: &WindowHarness| h.ctx.data(|d| d.get_temp::<f32>(egui::Id::new("app_bar_menus_end"))).unwrap();
+        let rect = |h: &WindowHarness, id: &str| h.ctx.read_response(egui::Id::unique(id)).unwrap().rect;
+        let menus_end = |h: &WindowHarness| h.ctx.data(|d| d.get_temp::<f32>(egui::Id::unique("app_bar_menus_end"))).unwrap();
         let (close, menus0) = (rect(&h, "window.close"), menus_end(&h));
         assert!(close.left() >= 0.0 && close.right() <= h.size.x, "{close:?}");
         let p = egui::pos2(200.0, 18.0);
@@ -1668,6 +1634,7 @@ mod tests {
                 delta: vec2(0.0, -3000.0),
                 phase: egui::TouchPhase::Move,
                 modifiers: egui::Modifiers::NONE,
+                source: egui::MouseWheelSource::Unknown,
             },
         ]);
         for _ in 0..10 {
@@ -1686,8 +1653,8 @@ mod tests {
         h.size = vec2(900.0, 560.0);
         h.frame(vec![]);
         h.frame(vec![]);
-        let drag = h.ctx.read_response(egui::Id::new("window_title_drag")).unwrap().rect;
-        let close = h.ctx.read_response(egui::Id::new("window.close")).unwrap().rect;
+        let drag = h.ctx.read_response(egui::Id::unique("window_title_drag")).unwrap().rect;
+        let close = h.ctx.read_response(egui::Id::unique("window.close")).unwrap().rect;
         assert!(drag.right() <= close.left() + 0.5, "{drag:?} {close:?}");
         let p = egui::pos2(450.0, APP_BAR + APP_BAR_BAND / 2.0);
         assert!(drag.contains(p), "{drag:?}");
@@ -1703,7 +1670,7 @@ mod tests {
         h.frame(vec![]);
         h.frame(vec![]);
         for id in ["window.minimize", "window.maximize", "window.close"] {
-            let rect = h.ctx.read_response(egui::Id::new(id)).unwrap().rect;
+            let rect = h.ctx.read_response(egui::Id::unique(id)).unwrap().rect;
             assert!(rect.left() >= 0.0 && rect.right() <= h.size.x, "{id}: {rect:?}");
             let p = rect.center();
             assert!(!h.click(p).is_empty(), "{id} remains clickable");

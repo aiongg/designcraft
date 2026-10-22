@@ -707,6 +707,8 @@ fn imports_hand_written_fixture() {
     assert_eq!(gradient.kind, designcraft_color::GradientKind::Radial);
     assert_eq!(gradient.stops[1].color, Color::cmyk(0.1, 0.2, 0.3, 0.4));
     assert!((gradient.stops[0].midpoint - 0.3).abs() < 1e-6);
+    assert_eq!(gradient.stops[0].swatch.as_deref(), Some("Brand"), "a stop on a swatch keeps it");
+    assert_eq!(gradient.stops[1].swatch, None, "an unnamed color stays plain");
     // The parent rectangle used an unnamed colour → value-named swatch.
     let mr = &d.parents[0].items[0];
     assert_eq!(mr.fill.swatch, "C=10 M=20 Y=30 K=40");
@@ -986,6 +988,29 @@ fn round_trips_small_document() {
     assert_eq!(oval.fill.swatch, "Brand 30");
     assert!((oval.opacity - 0.5).abs() < 1e-6);
     assert!(back.swatch("Brand 30").is_some());
+}
+
+#[test]
+fn gradient_stops_keep_their_swatches_through_a_round_trip() {
+    use designcraft_color::{ColorType, Gradient, GradientKind, GradientStop};
+    let mut d = Document::new(&NewDocument::default());
+    let gold = Color::cmyk(0.0, 0.3, 0.9, 0.1);
+    d.swatches.push(Swatch { value: SwatchValue::Color { color: gold, color_type: ColorType::Spot }, ..Swatch::color("Gold", gold) });
+    d.swatches.push(Swatch { value: SwatchValue::Tint { base: "Gold".into(), tint: 0.4 }, ..Swatch::color("Gold 40%", gold) });
+    let on = |offset: f32, name: &str| GradientStop {
+        swatch: Some(name.into()),
+        ..GradientStop::new(offset, designcraft_color::swatch::resolve(&d.swatches, name, 1.0).unwrap())
+    };
+    let stops = vec![on(0.0, "Gold"), on(0.3, "Gold 40%"), GradientStop::new(0.6, Color::cmyk(0.5, 0.0, 0.0, 0.0)), on(1.0, "[Paper]")];
+    d.swatches.push(Swatch {
+        value: SwatchValue::Gradient { gradient: Gradient { kind: GradientKind::Linear, stops } },
+        ..Swatch::color("Gold fade", gold)
+    });
+    let back = import_idml(&export_idml(&d)).unwrap();
+    let SwatchValue::Gradient { gradient } = &back.swatch("Gold fade").unwrap().value else { panic!("gradient") };
+    let names: Vec<Option<&str>> = gradient.stops.iter().map(|s| s.swatch.as_deref()).collect();
+    assert_eq!(names, [Some("Gold"), Some("Gold 40%"), None, Some("[Paper]")]);
+    assert_eq!(gradient.stops[2].color, Color::cmyk(0.5, 0.0, 0.0, 0.0));
 }
 
 #[test]
@@ -4275,6 +4300,47 @@ fn custom_column_positions_import_and_round_trip() {
     assert_eq!(import_idml(&export_idml(&even)).unwrap().spreads[0].pages[0].columns.positions, None);
 }
 
+/// Cell Options › Text › First Baseline, set by a cell style that a table style applies to its body
+/// region (cells with `[None]` take it from there) and overridden on one cell.
+const FIRST_BASELINE_STYLES: &str = r#"<idPkg:Styles xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging">
+<RootCellStyleGroup>
+  <CellStyle Self="CellStyle/$ID/[None]" Name="$ID/[None]"/>
+  <CellStyle Self="cs-cap" Name="Cap" FirstBaselineOffset="CapHeight" MinimumFirstBaselineOffset="2" VerticalJustification="CenterAlign"/>
+  <CellStyle Self="cs-cap-child" Name="CapChild" FillTint="50"><Properties><BasedOn type="object">cs-cap</BasedOn></Properties></CellStyle>
+</RootCellStyleGroup>
+<RootParagraphStyleGroup/>
+<RootTableStyleGroup>
+  <TableStyle Self="ts" Name="Tbl" BodyRegionCellStyle="cs-cap-child"/>
+</RootTableStyleGroup></idPkg:Styles>"#;
+
+const FIRST_BASELINE_STORY: &str = r#"<idPkg:Story xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging">
+<Story Self="s1"><ParagraphStyleRange><CharacterStyleRange><Table AppliedTableStyle="ts" HeaderRowCount="0">
+<Row Name="0" MinimumHeight="20"/>
+<Column Name="0" SingleColumnWidth="60"/><Column Name="1" SingleColumnWidth="60"/>
+<Cell Name="0:0" AppliedCellStyle="CellStyle/$ID/[None]"><ParagraphStyleRange><CharacterStyleRange><Content>Region</Content></CharacterStyleRange></ParagraphStyleRange></Cell>
+<Cell Name="1:0" AppliedCellStyle="CellStyle/$ID/[None]" FirstBaselineOffset="LeadingOffset"><ParagraphStyleRange><CharacterStyleRange><Content>Local</Content></CharacterStyleRange></ParagraphStyleRange></Cell>
+</Table></CharacterStyleRange></ParagraphStyleRange></Story></idPkg:Story>"#;
+
+#[test]
+fn cell_first_baseline_comes_from_cell_styles_table_regions_and_cells_and_round_trips() {
+    use designcraft_doc::FirstBaseline;
+    let d = import_idml(&fixture_with_table_styles(FIRST_BASELINE_STYLES, FIRST_BASELINE_STORY)).unwrap();
+    d.check().unwrap();
+    let style = d.styles.cell.iter().find(|c| c.name == "Cap").unwrap();
+    assert_eq!((style.first_baseline, style.first_baseline_min), (Some(FirstBaseline::CapHeight), Some(2.0)));
+    let table = d.stories.values().flat_map(|s| s.tables.values()).next().unwrap();
+    let region = table.cell(0, 0).unwrap();
+    assert_eq!((region.first_baseline, region.first_baseline_min), (FirstBaseline::CapHeight, 2.0), "inherited through BasedOn and the body region");
+    assert_eq!(table.cell(0, 1).unwrap().first_baseline, FirstBaseline::Leading, "a cell's own attribute wins");
+    let back = import_idml(&export_idml(&d)).unwrap();
+    let t2 = back.stories.values().flat_map(|s| s.tables.values()).next().unwrap();
+    assert_eq!(t2.cell(0, 0).unwrap().first_baseline, FirstBaseline::CapHeight);
+    assert_eq!(t2.cell(0, 0).unwrap().first_baseline_min, 2.0);
+    assert_eq!(t2.cell(0, 1).unwrap().first_baseline, FirstBaseline::Leading);
+    let s2 = back.styles.cell.iter().find(|c| c.name == "Cap").unwrap();
+    assert_eq!(s2.first_baseline, Some(FirstBaseline::CapHeight));
+}
+
 /// #1096: a ruler guide inside the gutter of a two-column page, written the way InDesign writes
 /// it (a `<Page>` child after its `MarginPreference`, with `Properties`/`GuideColor`, `PageIndex`
 /// and `GuideZone`), in a document without facing pages. A spread guide sits beside it.
@@ -4326,45 +4392,4 @@ fn ruler_guide_in_a_column_gutter_imports_without_facing_pages() {
         let back = import_idml(&export_idml(&first)).unwrap();
         assert_eq!(guides(&back), guides(&first), "round trip, {view:?}");
     }
-}
-
-/// Cell Options › Text › First Baseline, set by a cell style that a table style applies to its body
-/// region (cells with `[None]` take it from there) and overridden on one cell.
-const FIRST_BASELINE_STYLES: &str = r#"<idPkg:Styles xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging">
-<RootCellStyleGroup>
-  <CellStyle Self="CellStyle/$ID/[None]" Name="$ID/[None]"/>
-  <CellStyle Self="cs-cap" Name="Cap" FirstBaselineOffset="CapHeight" MinimumFirstBaselineOffset="2" VerticalJustification="CenterAlign"/>
-  <CellStyle Self="cs-cap-child" Name="CapChild" FillTint="50"><Properties><BasedOn type="object">cs-cap</BasedOn></Properties></CellStyle>
-</RootCellStyleGroup>
-<RootParagraphStyleGroup/>
-<RootTableStyleGroup>
-  <TableStyle Self="ts" Name="Tbl" BodyRegionCellStyle="cs-cap-child"/>
-</RootTableStyleGroup></idPkg:Styles>"#;
-
-const FIRST_BASELINE_STORY: &str = r#"<idPkg:Story xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging">
-<Story Self="s1"><ParagraphStyleRange><CharacterStyleRange><Table AppliedTableStyle="ts" HeaderRowCount="0">
-<Row Name="0" MinimumHeight="20"/>
-<Column Name="0" SingleColumnWidth="60"/><Column Name="1" SingleColumnWidth="60"/>
-<Cell Name="0:0" AppliedCellStyle="CellStyle/$ID/[None]"><ParagraphStyleRange><CharacterStyleRange><Content>Region</Content></CharacterStyleRange></ParagraphStyleRange></Cell>
-<Cell Name="1:0" AppliedCellStyle="CellStyle/$ID/[None]" FirstBaselineOffset="LeadingOffset"><ParagraphStyleRange><CharacterStyleRange><Content>Local</Content></CharacterStyleRange></ParagraphStyleRange></Cell>
-</Table></CharacterStyleRange></ParagraphStyleRange></Story></idPkg:Story>"#;
-
-#[test]
-fn cell_first_baseline_comes_from_cell_styles_table_regions_and_cells_and_round_trips() {
-    use designcraft_doc::FirstBaseline;
-    let d = import_idml(&fixture_with_table_styles(FIRST_BASELINE_STYLES, FIRST_BASELINE_STORY)).unwrap();
-    d.check().unwrap();
-    let style = d.styles.cell.iter().find(|c| c.name == "Cap").unwrap();
-    assert_eq!((style.first_baseline, style.first_baseline_min), (Some(FirstBaseline::CapHeight), Some(2.0)));
-    let table = d.stories.values().flat_map(|s| s.tables.values()).next().unwrap();
-    let region = table.cell(0, 0).unwrap();
-    assert_eq!((region.first_baseline, region.first_baseline_min), (FirstBaseline::CapHeight, 2.0), "inherited through BasedOn and the body region");
-    assert_eq!(table.cell(0, 1).unwrap().first_baseline, FirstBaseline::Leading, "a cell's own attribute wins");
-    let back = import_idml(&export_idml(&d)).unwrap();
-    let t2 = back.stories.values().flat_map(|s| s.tables.values()).next().unwrap();
-    assert_eq!(t2.cell(0, 0).unwrap().first_baseline, FirstBaseline::CapHeight);
-    assert_eq!(t2.cell(0, 0).unwrap().first_baseline_min, 2.0);
-    assert_eq!(t2.cell(0, 1).unwrap().first_baseline, FirstBaseline::Leading);
-    let s2 = back.styles.cell.iter().find(|c| c.name == "Cap").unwrap();
-    assert_eq!(s2.first_baseline, Some(FirstBaseline::CapHeight));
 }
