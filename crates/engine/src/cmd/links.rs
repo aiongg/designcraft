@@ -494,9 +494,7 @@ fn relink_folder(s: &mut Session, p: &Value) -> Result<Value> {
         // A name that resolves to another file name (a `file:` URL such as `file:%2Ftmp%2Fx.png`,
         // a drive-relative `C:x.png`) could lead outside the folder, so only a name that stays the
         // last component of the resolved path counts.
-        let cand = folder
-            .zip(plain_name)
-            .and_then(|(f, n)| crate::io::folder_path(n, &f).ok().filter(|c| c.file_name().is_some_and(|c| c == n)));
+        let cand = folder.zip(plain_name).and_then(|(f, n)| crate::io::folder_path(n, &f).ok().filter(|c| c.file_name().is_some_and(|c| c == n)));
         if let Some(cand) = cand.filter(|c| crate::io::exists(c)) {
             todo.push((a.id, cand));
         } else {

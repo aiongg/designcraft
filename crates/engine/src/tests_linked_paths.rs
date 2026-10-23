@@ -130,9 +130,8 @@ fn relink_folder_never_leaves_the_chosen_folder() {
     std::fs::write(&outside, png()).unwrap();
     let encoded = format!("file:{}", outside.to_string_lossy().replace('/', "%2F"));
     let mut s = document_with_links(&dir.join("doc.designcraft"), &[&encoded]);
-    let (out, seen) = crate::io::touched(|| {
-        s.execute("links.relinkFolder", &json!({"dir": chosen.to_string_lossy(), "missingOnly": false})).unwrap()
-    });
+    let (out, seen) =
+        crate::io::touched(|| s.execute("links.relinkFolder", &json!({"dir": chosen.to_string_lossy(), "missingOnly": false})).unwrap());
     assert_eq!(out["relinked"], 0, "{out}");
     assert!(!seen.contains(&outside), "{seen:?}");
     let _ = std::fs::remove_dir_all(&dir);
