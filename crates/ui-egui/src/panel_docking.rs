@@ -220,7 +220,7 @@ pub(crate) fn from_dock_only<'a>(
     let mut floating = Vec::new();
     for window in &old.floating {
         if let Some(root) = unplaced_tree(&window.root, 0, &mut placed) {
-            floating.push(Floating { root, rect: window.rect, native: None, minimized: window.minimized });
+            floating.push(Floating { minimized: window.minimized, ..Floating::new(root, window.rect) });
         }
     }
     for panel in hidden {
@@ -780,8 +780,10 @@ fn known(action: &Action<String>) -> bool {
         | Action::SetIconic { panel, .. }
         | Action::ResizeColumn { panel, .. }
         | Action::ResizeGroup { panel, .. }
-        | Action::ResizeIconic { panel, .. } => registered(panel),
-        // Native OS windows are not enabled in DesignCraft; newer actions are rejected.
+        | Action::ResizeIconic { panel, .. }
+        | Action::SetNative { panel, .. }
+        | Action::SetMonitor { panel, .. } => registered(panel),
+        // Actions newer than this list are rejected until DesignCraft checks them.
         _ => false,
     }
 }
@@ -931,6 +933,7 @@ pub(crate) fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
     }
     let style = dock_style(ui, &app.ui.language);
     let mut dock = craft_ui::docking::DockArea::new(area)
+        .monitors(monitors(ui.ctx()))
         .float_bounds(float_bounds(app, ui.ctx()))
         .blocked_rects(&blocked)
         .auto_collapse_iconic(app.ui.dock_auto_collapse);
@@ -964,6 +967,23 @@ pub(crate) fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
     if let Some(panel) = focused.filter(|panel| panel == CANVAS || layout_of(app).contains(panel)) {
         app.ui.docking_focused = Some(panel);
     }
+    // Keys pressed in a floating panel's own OS window run the main window's shortcuts.
+    crate::menus::forwarded_shortcuts(app, ui.ctx(), output.forwarded_events, output.forwarded_modifiers.unwrap_or_default());
+}
+
+/// The displays egui reports, for placing floating panels in their own OS windows.
+fn monitors(ctx: &egui::Context) -> Vec<craft_ui::docking::Monitor> {
+    ctx.input(|i| {
+        i.viewport()
+            .monitors
+            .iter()
+            .map(|m| craft_ui::docking::Monitor {
+                name: m.name.clone(),
+                rect: [m.position.x, m.position.y, m.size.x, m.size.y],
+                scale: m.scale_factor,
+            })
+            .collect()
+    })
 }
 
 /// What the control channel reports: the layout in use (craft-ui's serialized `Layout`),
@@ -1038,7 +1058,6 @@ const DOCK_LABELS: &[(&str, &str)] = &[
     ("dock.closeOthers", "Close Other Panels in Group"),
     ("dock.maximize", "Maximize Frame"),
     ("dock.restoreFrame", "Restore Frame Size"),
-    ("dock.newWindow", "Move Panel to New Window"),
     ("dock.autoCollapse", "Auto-Collapse Iconic Panels"),
 ];
 

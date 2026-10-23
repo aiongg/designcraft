@@ -2606,6 +2606,41 @@ fn handle_input(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, r
     let _ = DVec2::ZERO;
 }
 
+/// The keys a floating panel's own OS window left over once the shortcuts took theirs: the
+/// clipboard and the active tool's keys, as the canvas handles them while no text is edited.
+/// `modifiers` are those held in that window; egui-winit sends ⌘C, ⌘X and ⌘V as `Copy`, `Cut`
+/// and `Paste` without their key press.
+pub(crate) fn forwarded_keys(app: &mut DesignApp, events: Vec<egui::Event>, modifiers: egui::Modifiers) {
+    if !keyboard_pane(app) || modal_open(app) || app.session.wants_text() || app.session.tool_composing() {
+        return;
+    }
+    let vi = app.view_info();
+    for e in events {
+        #[cfg(not(target_arch = "wasm32"))]
+        let chord = if matches!(e, egui::Event::Paste(_)) { crate::menus::paste_chord_command(app, modifiers) } else { None };
+        // The web keeps floating panels in the page, so nothing is forwarded there.
+        #[cfg(target_arch = "wasm32")]
+        let chord: Option<&str> = {
+            let _ = modifiers;
+            None
+        };
+        let (id, params) = match (e, chord) {
+            (egui::Event::Paste(_), Some(id)) => (id, serde_json::Value::Null),
+            (egui::Event::Copy, _) if !app.native_menu => ("edit.copy", serde_json::Value::Null),
+            (egui::Event::Cut, _) if !app.native_menu => ("edit.cut", serde_json::Value::Null),
+            (egui::Event::Paste(t), _) if !app.native_menu => ("edit.paste", json!({"text": t})),
+            (egui::Event::Key { key, pressed: true, modifiers, .. }, _) => {
+                tool_key(app, key, modifiers, vi);
+                continue;
+            }
+            _ => continue,
+        };
+        if crate::menus::enabled(app, id) {
+            crate::menus::activate(app, id, &params);
+        }
+    }
+}
+
 /// A dialog or Quick Apply has the keyboard. The canvas keeps egui's focus behind a modal, and it
 /// runs before the modal draws, so it must not also act on the Esc or Return that closes it.
 fn modal_open(app: &DesignApp) -> bool {
