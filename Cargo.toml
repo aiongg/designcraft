@@ -125,16 +125,16 @@ debug = 0
 # The suite's patched toolkit: bidi, IME and platform fixes on egui 0.37, and winit 0.30 with
 # the IME fixes and opt-in cancelable macOS termination.
 [patch.crates-io]
-ecolor = { git = "https://github.com/aiongg/egui", rev = "0f72e2ea3a059c6c5c45270099672b5472f75e7d" }
-eframe = { git = "https://github.com/aiongg/egui", rev = "0f72e2ea3a059c6c5c45270099672b5472f75e7d" }
-egui = { git = "https://github.com/aiongg/egui", rev = "0f72e2ea3a059c6c5c45270099672b5472f75e7d" }
-egui-wgpu = { git = "https://github.com/aiongg/egui", rev = "0f72e2ea3a059c6c5c45270099672b5472f75e7d" }
-egui-winit = { git = "https://github.com/aiongg/egui", rev = "0f72e2ea3a059c6c5c45270099672b5472f75e7d" }
-egui_glow = { git = "https://github.com/aiongg/egui", rev = "0f72e2ea3a059c6c5c45270099672b5472f75e7d" }
-egui_kittest = { git = "https://github.com/aiongg/egui", rev = "0f72e2ea3a059c6c5c45270099672b5472f75e7d" }
-emath = { git = "https://github.com/aiongg/egui", rev = "0f72e2ea3a059c6c5c45270099672b5472f75e7d" }
-epaint = { git = "https://github.com/aiongg/egui", rev = "0f72e2ea3a059c6c5c45270099672b5472f75e7d" }
-epaint_default_fonts = { git = "https://github.com/aiongg/egui", rev = "0f72e2ea3a059c6c5c45270099672b5472f75e7d" }
+ecolor = { git = "https://github.com/aiongg/egui", rev = "f6dcd0addf3bb39f99ec9d628dcc9d424e41b914" }
+eframe = { git = "https://github.com/aiongg/egui", rev = "f6dcd0addf3bb39f99ec9d628dcc9d424e41b914" }
+egui = { git = "https://github.com/aiongg/egui", rev = "f6dcd0addf3bb39f99ec9d628dcc9d424e41b914" }
+egui-wgpu = { git = "https://github.com/aiongg/egui", rev = "f6dcd0addf3bb39f99ec9d628dcc9d424e41b914" }
+egui-winit = { git = "https://github.com/aiongg/egui", rev = "f6dcd0addf3bb39f99ec9d628dcc9d424e41b914" }
+egui_glow = { git = "https://github.com/aiongg/egui", rev = "f6dcd0addf3bb39f99ec9d628dcc9d424e41b914" }
+egui_kittest = { git = "https://github.com/aiongg/egui", rev = "f6dcd0addf3bb39f99ec9d628dcc9d424e41b914" }
+emath = { git = "https://github.com/aiongg/egui", rev = "f6dcd0addf3bb39f99ec9d628dcc9d424e41b914" }
+epaint = { git = "https://github.com/aiongg/egui", rev = "f6dcd0addf3bb39f99ec9d628dcc9d424e41b914" }
+epaint_default_fonts = { git = "https://github.com/aiongg/egui", rev = "f6dcd0addf3bb39f99ec9d628dcc9d424e41b914" }
 krilla = { git = "https://github.com/aiongg/craft-libs", rev = "b82d32c3e84b04a21d9604ff8cb95536e85af9d4", version = "=0.8.2" }
 winit = { git = "https://github.com/aiongg/winit", rev = "8b35388bd719e8cc86a95971ba0bc026c9a8f058" }
 hayro = { git = "https://github.com/aiongg/craft-libs", rev = "b82d32c3e84b04a21d9604ff8cb95536e85af9d4", version = "=0.7.1" }
