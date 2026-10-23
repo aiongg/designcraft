@@ -410,6 +410,22 @@ fn reload(path: impl AsRef<Path>) -> Result<(Vec<u8>, (u32, u32))> {
     Err(EngineError::Other(format!("{}: files can't be read on the web", path.as_ref().display())))
 }
 
+/// `p` made absolute, with `.` and `..` folded away by name (no file system access).
+fn lexical(p: &Path) -> std::path::PathBuf {
+    let p = std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
+    let mut out = std::path::PathBuf::new();
+    for c in p.components() {
+        match c {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 /// The replacement for `a`: bytes read from `read`, with `link` recorded as the stored link.
 /// Relink passes the file the user chose as both. Update passes the path the stored link resolved
 /// to and the stored link itself, so refreshing a link never rewrites what the document holds.
@@ -492,9 +508,12 @@ fn relink_folder(s: &mut Session, p: &Value) -> Result<Value> {
         };
         let plain_name = name.to_str().filter(|n| !n.contains(['/', '\\']));
         // A name that resolves to another file name (a `file:` URL such as `file:%2Ftmp%2Fx.png`,
-        // a drive-relative `C:x.png`) could lead outside the folder, so only a name that stays the
-        // last component of the resolved path counts.
-        let cand = folder.zip(plain_name).and_then(|(f, n)| crate::io::folder_path(n, &f).ok().filter(|c| c.file_name().is_some_and(|c| c == n)));
+        // a drive-relative `C:x.png`) or a folder the stored-path rules read differently (`a\b`
+        // on Unix) could lead outside the folder, so only the name itself, directly in the folder,
+        // counts.
+        let cand = folder.zip(plain_name).and_then(|(f, n)| {
+            crate::io::folder_path(n, &f).ok().filter(|c| c.file_name().is_some_and(|c| c == n) && c.parent().map(lexical) == Some(lexical(&f)))
+        });
         if let Some(cand) = cand.filter(|c| crate::io::exists(c)) {
             todo.push((a.id, cand));
         } else {

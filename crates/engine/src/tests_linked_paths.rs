@@ -136,3 +136,29 @@ fn relink_folder_never_leaves_the_chosen_folder() {
     assert!(!seen.contains(&outside), "{seen:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[cfg(unix)]
+#[test]
+fn relink_folder_takes_the_chosen_folder_as_one_folder() {
+    // `a\b` is one folder name on Unix; read as a stored path it would be `a/b`.
+    let dir = folder("relink-backslash");
+    let chosen = dir.join("a\\b");
+    std::fs::create_dir_all(&chosen).unwrap();
+    std::fs::create_dir_all(dir.join("a/b")).unwrap();
+    let elsewhere = dir.join("a/b/x.png");
+    std::fs::write(&elsewhere, png()).unwrap();
+    let mut s = document_with_links(&dir.join("doc.designcraft"), &["x.png"]);
+    let (out, seen) =
+        crate::io::touched(|| s.execute("links.relinkFolder", &json!({"dir": chosen.to_string_lossy(), "missingOnly": false})).unwrap());
+    assert_eq!(out["relinked"], 0, "{out}");
+    assert!(!seen.contains(&elsewhere), "{seen:?}");
+
+    // A folder given with `..` is still that folder.
+    let real = dir.join("real");
+    std::fs::create_dir_all(&real).unwrap();
+    std::fs::write(real.join("x.png"), png()).unwrap();
+    let roundabout = real.join("..").join("real");
+    let out = s.execute("links.relinkFolder", &json!({"dir": roundabout.to_string_lossy(), "missingOnly": false})).unwrap();
+    assert_eq!(out["relinked"], 1, "{out}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
