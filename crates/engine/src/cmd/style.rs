@@ -934,13 +934,18 @@ fn edit_para(s: &mut Session, p: &Value) -> Result<Value> {
     let name = str_param(p, "name").ok_or_else(|| bad("style.paragraph.edit", "missing name"))?.to_string();
     let chars: CharAttrs = attrs("style.paragraph.edit", "chars", p, |a: &mut CharAttrs, k, v| a.set_json(k, v))?;
     super::text::validate_char_fill(&s.doc()?.doc, &chars, "style.paragraph.edit")?;
-    let rename = str_param(p, "rename").map(str::to_string);
+    let rename = str_param(p, "rename").filter(|n| *n != name).map(str::to_string);
     let based = p.get("basedOn").cloned();
     s.edit(|d, _| {
         if let Some(Value::String(b)) = &based
             && d.styles.para_based_on_cycles(&name, b)
         {
             return Err(bad("style.paragraph.edit", "based-on would create a cycle"));
+        }
+        if let Some(n) = &rename
+            && (n.trim().is_empty() || n.starts_with('[') || d.styles.para(n).is_some())
+        {
+            return Err(bad("style.paragraph.edit", format!("can't rename to `{n}`")));
         }
         // A rule object changes only the rule fields it names, over the style's resolved rule.
         let (current, _) = d.styles.resolve_para_style(&name);
@@ -2852,6 +2857,9 @@ mod export_tag_tests {
             s.doc().unwrap().doc.styles.export_tag(name, character).map(|t| (t.tag.clone(), t.class.clone()))
         };
         let pair = |t: &str, c: &str| Some((t.to_string(), c.to_string()));
+        // A rename onto another style's name is refused, so neither tagging is lost.
+        assert!(s.execute("style.paragraph.edit", &json!({"name": "Head", "rename": "Body"})).is_err());
+        assert_eq!((tag(&s, "Head", false), tag(&s, "Body", false)), (pair("h2", "head"), pair("p", "body")));
 
         s.execute("style.paragraph.edit", &json!({"name": "Head", "rename": "Title"})).unwrap();
         s.execute("style.character.edit", &json!({"name": "Term", "rename": "Word"})).unwrap();
