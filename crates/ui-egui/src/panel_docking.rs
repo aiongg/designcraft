@@ -31,6 +31,16 @@ pub(crate) fn tab_id(panel: &str) -> egui::Id {
     hit_id(&craft_ui::docking::Hit::Tab(panel.to_owned()))
 }
 
+/// The viewports of the floating windows that may have OS windows of their own. Where egui
+/// embeds viewports every floating window stays in the main window.
+pub(crate) fn native_viewports(app: &DesignApp, ctx: &egui::Context) -> Vec<egui::ViewportId> {
+    if ctx.embed_viewports() {
+        return Vec::new();
+    }
+    let Some(layout) = app.ui.docking.as_ref() else { return Vec::new() };
+    layout.floating.iter().map(|window| craft_ui::docking::DockArea::<String>::window_viewport(area_id(), window.id)).collect()
+}
+
 /// The egui layer of the floating window whose first panel is `panel`.
 #[cfg(test)]
 pub(crate) fn floating_layer(panel: &str) -> egui::LayerId {

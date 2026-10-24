@@ -238,6 +238,11 @@ impl Default for PdfExportSettings {
     }
 }
 
+/// The viewport of New Window's OS window, which shows pane 1.
+pub(crate) fn second_window_viewport() -> egui::ViewportId {
+    egui::ViewportId::from_hash_of("designcraft_second_window")
+}
+
 /// Persisted UI state.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -1691,7 +1696,7 @@ impl DesignApp {
             let fill = t.pasteboard;
             let ctx = ui.ctx().clone();
             ctx.show_viewport_immediate(
-                egui::ViewportId::from_hash_of("designcraft_second_window"),
+                second_window_viewport(),
                 egui::ViewportBuilder::default().with_title(title).with_inner_size([960.0, 720.0]),
                 |ui, _class| {
                     egui::CentralPanel::default().frame(egui::Frame::NONE.fill(fill)).show(ui, |ui| {

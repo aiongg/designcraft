@@ -5,8 +5,14 @@
 //!
 //! Linux and Windows show the glyphs as OS cursors ([`Images`]): the system moves them itself, so
 //! they never trail the pointer. macOS sizes a cursor bitmap in points (a Retina one would show
-//! twice as big, or blurred), so there the canvas paints the glyph at the pointer. The
-//! web build keeps the system cursors.
+//! twice as big, or blurred), so there the canvas paints the glyph at the pointer, except the
+//! Selection tool's arrow: macOS shows its own system arrow for it. The web build keeps the
+//! system cursors.
+//!
+//! A painted glyph needs a live pointer position. macOS sends a window no pointer-left event when
+//! the pointer moves onto another of the app's windows lying over it (a panel floating in its own
+//! OS window), so the window's egui pointer stays where it was last seen; [`pointer_elsewhere`]
+//! tells the canvas to paint nothing there.
 
 use egui::epaint::{Mesh, TessellationOptions, Tessellator, Vertex};
 use egui::{Color32, CustomCursorImage, Pos2, Shape, Stroke, Vec2, pos2, vec2};
@@ -298,6 +304,8 @@ pub fn show(ctx: &egui::Context, images: &mut Images, c: Cursor, hover: Pos2) ->
             ctx.set_cursor_image(images.get(c, ppp));
             system(c)
         }
+        // macOS's own arrow stands in for the Selection tool's.
+        Mode::Painted if c == Cursor::Arrow => system(c),
         Mode::Painted => {
             let layer = egui::LayerId::new(egui::Order::Tooltip, egui::Id::unique("tool-cursor"));
             // Divide by the zoom factor so the glyph keeps its size in physical pixels.
@@ -319,9 +327,59 @@ pub fn show(ctx: &egui::Context, images: &mut Images, c: Cursor, hover: Pos2) ->
     }
 }
 
+/// Whether the pointer this viewport last saw has moved on to another of the app's windows,
+/// `others` (the current viewport among them is skipped): from the frame one of them reports the
+/// pointer until this viewport gets a pointer event again. That covers the pointer moving on from
+/// the other window to the desktop too, where this one still hears nothing. Always false where
+/// egui embeds viewports, so all of them share one window's pointer.
+pub(crate) fn pointer_elsewhere(ctx: &egui::Context, others: &[egui::ViewportId]) -> bool {
+    let own = ctx.viewport_id();
+    let key = egui::Id::unique(("pointer-elsewhere", own));
+    let before = ctx.data(|d| d.get_temp::<bool>(key)).unwrap_or(false);
+    let here = ctx
+        .input(|i| i.events.iter().any(|e| matches!(e, egui::Event::PointerMoved(_) | egui::Event::PointerButton { .. } | egui::Event::PointerGone)));
+    // A pointer that arrived: moving or pressing there. A pointer that only stayed (a hidden
+    // window keeps its last one) does not count, so it never takes the pointer from this window.
+    let arrived = |i: &egui::InputState| {
+        i.pointer.has_pointer() && i.events.iter().any(|e| matches!(e, egui::Event::PointerMoved(_) | egui::Event::PointerButton { .. }))
+    };
+    let separate = !ctx.embed_viewports() && others.iter().any(|&v| v != own);
+    let there = separate && others.iter().any(|&v| v != own && ctx.input_for(v, arrived));
+    let now = separate && elsewhere(before, here, there);
+    if now != before {
+        ctx.data_mut(|d| d.insert_temp(key, now));
+    }
+    now
+}
+
+/// [`pointer_elsewhere`] for one frame: whether the pointer belonged to another window `before`,
+/// whether this window got a pointer event (`here`) and whether another window reports the
+/// pointer arriving (`there`). Both in one frame mean the pointer just crossed into the other
+/// window: this window's last events come from before the crossing.
+fn elsewhere(before: bool, here: bool, there: bool) -> bool {
+    there || (before && !here)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_pointer_belongs_elsewhere_from_another_windows_report_until_this_one_hears_it_again() {
+        // Main window, then a floating panel's window over it, then the desktop, then back.
+        let mut state = false;
+        let mut frame = |here, there| {
+            state = elsewhere(state, here, there);
+            state
+        };
+        assert!(!frame(true, false), "over the main window");
+        assert!(frame(true, true), "crossing into the floating window");
+        assert!(frame(false, true), "moving in the floating window");
+        assert!(frame(false, false), "on the desktop: the main window still heard nothing");
+        assert!(frame(false, false), "the next frame too");
+        assert!(!frame(true, false), "back over the main window");
+        assert!(!frame(false, false), "and resting there");
+    }
 
     /// Every cursor with a glyph.
     const GLYPHS: [Cursor; 9] = [

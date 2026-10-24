@@ -583,9 +583,12 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
         return;
     }
     let sel_rect = draw_selection(app, &painter, &xf, &doc, &layout);
+    // Where the pointer moved on to another of the app's windows, this window's last pointer
+    // position is stale: no hover feedback or tool cursor there.
+    let elsewhere = pointer_elsewhere(app, ui.ctx());
     if !preview {
         // Content grabbers: the selected frame's and the hovered one's (Selection tool).
-        let hover = ui.ctx().pointer_hover_pos().filter(|p| screen.contains(*p)).map(|p| xf.to_canvas(p));
+        let hover = ui.ctx().pointer_hover_pos().filter(|p| screen.contains(*p) && !elsewhere).map(|p| xf.to_canvas(p));
         let vi = app.view_info();
         for c in app.session.content_grabbers(hover, vi) {
             let c = xf.to_screen(c);
@@ -607,7 +610,7 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
         crate::taskbar::show(app, &ui.ctx().clone(), r, screen);
     }
     // Cursor.
-    if let Some(p) = resp.hover_pos().filter(|p| screen.contains(*p)) {
+    if let Some(p) = resp.hover_pos().filter(|p| screen.contains(*p) && !elsewhere) {
         let wants_text = app.session.wants_text();
         let space = navigation_space(app, ui.ctx());
         let zoom = spring_zoom_mode(app, ui.ctx(), space);
@@ -641,6 +644,16 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
         ui.ctx().set_cursor_icon(icon);
         draw_cursor_badge(&painter, p, c, &t);
     }
+}
+
+/// Whether the pointer this canvas's window last saw is in another of the app's windows: a
+/// floating panel's OS window, or the other window of New Window.
+fn pointer_elsewhere(app: &DesignApp, ctx: &egui::Context) -> bool {
+    let mut others = crate::panel_docking::native_viewports(app, ctx);
+    if app.second_window && !ctx.embed_viewports() {
+        others.extend([egui::ViewportId::ROOT, crate::second_window_viewport()]);
+    }
+    crate::cursors::pointer_elsewhere(ctx, &others)
 }
 
 /// The loaded text cursor's badge beside the system cursor: lines of text, a closed chain
@@ -2065,7 +2078,7 @@ fn draw_rulers(app: &DesignApp, ui: &egui::Ui, full: Rect, rect: Rect, xf: &Xf, 
         k += 1;
     }
     // Pointer position markers.
-    if let Some(p) = ui.ctx().pointer_hover_pos().filter(|p| rect.contains(*p)) {
+    if let Some(p) = ui.ctx().pointer_hover_pos().filter(|p| rect.contains(*p) && !pointer_elsewhere(app, ui.ctx())) {
         let m = Stroke::new(1.0, t.text_dim);
         dashed(&painter, pos2(p.x, top.min.y), pos2(p.x, top.max.y), m, 1.5, 1.5);
         dashed(&painter, pos2(left.min.x, p.y), pos2(left.max.x, p.y), m, 1.5, 1.5);
@@ -5437,16 +5450,20 @@ mod tests {
             let out = &h.output().platform_output;
             (out.cursor_icon, out.cursor_image.clone())
         };
-        let (pen, direct, text) = (shown("pen"), shown("directSelection"), shown("type"));
+        let (pen, direct, text, selection) = (shown("pen"), shown("directSelection"), shown("type"), shown("selection"));
         let ppp = h.ctx.pixels_per_point();
         let images = &mut h.state_mut().cursors;
         match crate::cursors::MODE {
             crate::cursors::Mode::Os => {
                 assert_eq!(pen.1, images.get(Cursor::Pen, ppp), "Pen");
                 assert_eq!(direct.1, images.get(Cursor::ArrowHollow, ppp), "Direct Selection");
+                assert_eq!(selection.1, images.get(Cursor::Arrow, ppp), "Selection");
                 assert_eq!(text, (egui::CursorIcon::Text, None), "the I-beam stays a system cursor");
             }
-            crate::cursors::Mode::Painted => assert_eq!((pen.0, direct.0), (egui::CursorIcon::None, egui::CursorIcon::None)),
+            crate::cursors::Mode::Painted => {
+                assert_eq!((pen.0, direct.0), (egui::CursorIcon::None, egui::CursorIcon::None));
+                assert_eq!(selection, (egui::CursorIcon::Default, None), "macOS's own arrow for Selection");
+            }
             crate::cursors::Mode::System => assert_eq!(pen, (egui::CursorIcon::Crosshair, None)),
         }
     }
