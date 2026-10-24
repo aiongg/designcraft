@@ -5,9 +5,8 @@
 //!
 //! Linux and Windows show the glyphs as OS cursors ([`Images`]): the system moves them itself, so
 //! they never trail the pointer. macOS sizes a cursor bitmap in points (a Retina one would show
-//! twice as big, or blurred), so there the canvas paints the glyph at the pointer, except the
-//! Selection tool's arrow: macOS shows its own system arrow for it. The web build keeps the
-//! system cursors.
+//! twice as big, or blurred), so there the canvas paints the glyph at the pointer. The
+//! web build keeps the system cursors.
 //!
 //! A painted glyph needs a live pointer position. macOS sends a window no pointer-left event when
 //! the pointer moves onto another of the app's windows lying over it (a panel floating in its own
@@ -304,8 +303,6 @@ pub fn show(ctx: &egui::Context, images: &mut Images, c: Cursor, hover: Pos2) ->
             ctx.set_cursor_image(images.get(c, ppp));
             system(c)
         }
-        // macOS's own arrow stands in for the Selection tool's.
-        Mode::Painted if c == Cursor::Arrow => system(c),
         Mode::Painted => {
             let layer = egui::LayerId::new(egui::Order::Tooltip, egui::Id::unique("tool-cursor"));
             // Divide by the zoom factor so the glyph keeps its size in physical pixels.
@@ -344,12 +341,22 @@ pub(crate) fn pointer_elsewhere(ctx: &egui::Context, others: &[egui::ViewportId]
         i.pointer.has_pointer() && i.events.iter().any(|e| matches!(e, egui::Event::PointerMoved(_) | egui::Event::PointerButton { .. }))
     };
     let separate = !ctx.embed_viewports() && others.iter().any(|&v| v != own);
-    let there = separate && others.iter().any(|&v| v != own && ctx.input_for(v, arrived));
+    // Where this window has pointer events of its own too, another window's report counts only
+    // if this window's pointer lies inside that window: one just outside it (its edge, where
+    // both may hear the pointer) keeps belonging here, frame after frame.
+    let at = ctx.input(|i| i.viewport().inner_rect.zip(i.pointer.latest_pos()).map(|(r, p)| r.min + p.to_vec2()));
+    let there = separate && others.iter().any(|&v| v != own && ctx.input_for(v, |i| arrived(i) && (!here || covers(i.viewport().inner_rect, at))));
     let now = separate && elsewhere(before, here, there);
     if now != before {
         ctx.data_mut(|d| d.insert_temp(key, now));
     }
     now
+}
+
+/// Whether a window at `rect` (desktop points) lies over the desktop point `at`; unknown when
+/// either is, which counts as covering.
+fn covers(rect: Option<egui::Rect>, at: Option<egui::Pos2>) -> bool {
+    rect.zip(at).is_none_or(|(r, p)| r.contains(p))
 }
 
 /// [`pointer_elsewhere`] for one frame: whether the pointer belonged to another window `before`,
@@ -379,6 +386,14 @@ mod tests {
         assert!(frame(false, false), "the next frame too");
         assert!(!frame(true, false), "back over the main window");
         assert!(!frame(false, false), "and resting there");
+    }
+
+    #[test]
+    fn a_pointer_just_outside_another_window_stays_this_windows() {
+        let float = Some(egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(200.0, 300.0)));
+        assert!(covers(float, Some(egui::pos2(150.0, 150.0))), "over the floating window");
+        assert!(!covers(float, Some(egui::pos2(98.0, 150.0))), "beside its left edge");
+        assert!(covers(None, Some(egui::pos2(98.0, 150.0))) && covers(float, None), "unknown places count as covered");
     }
 
     /// Every cursor with a glyph.

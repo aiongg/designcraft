@@ -5461,8 +5461,7 @@ mod tests {
                 assert_eq!(text, (egui::CursorIcon::Text, None), "the I-beam stays a system cursor");
             }
             crate::cursors::Mode::Painted => {
-                assert_eq!((pen.0, direct.0), (egui::CursorIcon::None, egui::CursorIcon::None));
-                assert_eq!(selection, (egui::CursorIcon::Default, None), "macOS's own arrow for Selection");
+                assert_eq!((pen.0, direct.0, selection.0), (egui::CursorIcon::None, egui::CursorIcon::None, egui::CursorIcon::None));
             }
             crate::cursors::Mode::System => assert_eq!(pen, (egui::CursorIcon::Crosshair, None)),
         }
