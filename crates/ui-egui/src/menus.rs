@@ -43,7 +43,12 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("app.saveSwatches", "Save Swatches for Exchange…", None, "{path?} — write the colour swatches as .ase"),
     ("app.exportPng", "Export Page as PNG…", Some("Cmd+E"), "{}"),
     ("app.exportIdml", "Export IDML…", None, "{path?} — InDesign Markup (IDML) package"),
-    ("app.exportEpub", "Export EPUB…", None, "{path?} — reflowable EPUB 3 (with the first page as its cover)"),
+    (
+        "app.exportEpub",
+        "Export EPUB…",
+        None,
+        "{path?} — reflowable EPUB 3 (with the first page as its cover); without a path, EPUB Export Options (Split Document) and then the save dialog",
+    ),
     (
         "app.exportInteractivePdf",
         "Export PDF (Interactive)…",
@@ -1117,10 +1122,11 @@ fn run_ui_inner(app: &mut DesignApp, id: &str, p: &Value) -> Option<Result<Value
         }
         "app.exportPng" => export_png(app, p),
         "app.exportIdml" => export_idml(app, p),
+        // From the menu, EPUB Export Options first; with a path, straight to the file.
+        "app.exportEpub" if p.get("path").is_some() => export_epub(app, p),
         "app.exportEpub" => {
-            let mut q = if p.is_object() { p.clone() } else { json!({}) };
-            q["cover"] = json!(true);
-            export_bytes(app, &q, "epub", "file.exportEpub")
+            crate::dialogs::open_epub_export(app);
+            Ok(Value::Null)
         }
         "app.exportInteractivePdf" => {
             let mut q = if p.is_object() { p.clone() } else { json!({}) };
@@ -2110,6 +2116,16 @@ fn export_idml(app: &mut DesignApp, p: &Value) -> Result<Value, String> {
 
 /// Export EPUB / Text: ask for a path (default extension `ext`), run `cmd` without one and write
 /// what it returns (`base64` or `text`) with the platform writer.
+/// File › Export EPUB…: export through `file.exportEpub` (the first page as its cover) to `path`,
+/// else to a file the user picks.
+pub(crate) fn export_epub(app: &mut DesignApp, p: &Value) -> Result<Value, String> {
+    let mut q = if p.is_object() { p.clone() } else { json!({}) };
+    if let Some(o) = q.as_object_mut() {
+        o.entry("cover").or_insert(json!(true));
+    }
+    export_bytes(app, &q, "epub", "file.exportEpub")
+}
+
 fn export_bytes(app: &mut DesignApp, p: &Value, ext: &str, cmd: &str) -> Result<Value, String> {
     let st = app.session.active().ok_or("no document")?;
     let path = match p.get("path").and_then(Value::as_str) {
@@ -2120,7 +2136,11 @@ fn export_bytes(app: &mut DesignApp, p: &Value, ext: &str, cmd: &str) -> Result<
         }
     };
     let Some(path) = path else { return Ok(Value::Null) };
-    let mut params = json!({});
+    // The caller's options go to the engine command; the path is ours.
+    let mut params = match p {
+        Value::Object(o) => Value::Object(o.iter().filter(|(k, _)| k.as_str() != "path").map(|(k, v)| (k.clone(), v.clone())).collect()),
+        _ => json!({}),
+    };
     if cmd == "file.exportText" {
         let txt = path.to_ascii_lowercase().ends_with(".txt");
         params["format"] = json!(if txt { "txt" } else { "rtf" });

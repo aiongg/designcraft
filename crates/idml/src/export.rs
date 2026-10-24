@@ -778,6 +778,15 @@ impl<'a> Ex<'a> {
                 designcraft_doc::BlendSpace::Rgb => "RGB",
             },
         ));
+        // Split Document: the style is a reference, a built-in one by its `$ID/` name; an empty
+        // one splits on the styles' export tags.
+        let (break_doc, split_style) = match &s.epub_split {
+            designcraft_doc::EpubSplit::Off => (false, names::style_name_out(PARA_BUILTINS, st::BASIC_PARAGRAPH)),
+            designcraft_doc::EpubSplit::ExportTags => (true, String::new()),
+            designcraft_doc::EpubSplit::Style(n) if PARA_BUILTINS.iter().any(|(o, _)| o == n) => (true, names::style_name_out(PARA_BUILTINS, n)),
+            designcraft_doc::EpubSplit::Style(n) => (true, names::style_self("ParagraphStyle", PARA_BUILTINS, n)),
+        };
+        root.push(El::new("EPubExportPreference").attr("BreakDocument", bool_s(break_doc)).attr("ParagraphStyleName", split_style));
         let a = &s.advanced_type;
         root.push(
             El::new("TextPreference")
@@ -848,6 +857,9 @@ impl<'a> Ex<'a> {
             let pa = with_list_tab(pa, || (styles.resolve_para_style(&ps.name).0, parent_props));
             self.para_attrs(&mut el, &mut props, &pa, parent);
             self.char_attrs(&mut el, &mut props, &ca);
+            if styles.export_tag(&ps.name, false).is_some_and(|t| t.split) {
+                el.set("SplitDocument", "true");
+            }
             pg.insert(&ps.name, with_props(el, props));
         }
         let mut rp = El::new("RootParagraphStyleGroup").attr("Self", self.fresh());

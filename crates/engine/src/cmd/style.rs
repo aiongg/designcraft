@@ -249,7 +249,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Export Tagging",
             [],
             None,
-            "{style, character?: bool, tag?: p|h1…h6|blockquote|pre|li|… (span|em|strong|code|sup|sub… for characters; \"\" = automatic), class?} → the tagging",
+            "{style, character?: bool, tag?: p|h1…h6|blockquote|pre|li|… (span|em|strong|code|sup|sub… for characters; \"\" = automatic), class?, split?: bool (paragraphs: Split Document, EPUB only)} → the tagging",
             has_doc,
             |s, p| {
                 let name = str_param(p, "style").ok_or_else(|| bad("style.exportTag", "`style` required"))?.to_string();
@@ -260,6 +260,10 @@ pub fn specs() -> Vec<CommandSpec> {
                 }
                 let key = export_tag_key(!character, &name);
                 let (tag, class) = (str_param(p, "tag").map(str::to_string), str_param(p, "class").map(str::to_string));
+                let split = p.get("split").and_then(Value::as_bool);
+                if character && split == Some(true) {
+                    return Err(bad("style.exportTag", "`split` is for paragraph styles"));
+                }
                 s.edit(|d, _| {
                     let st = d.styles_mut();
                     let e = st.export_tags.entry(key.clone()).or_default();
@@ -269,8 +273,11 @@ pub fn specs() -> Vec<CommandSpec> {
                     if let Some(c) = class.clone() {
                         e.class = c;
                     }
+                    if let Some(v) = split {
+                        e.split = v;
+                    }
                     let out = serde_json::to_value(&*e).unwrap_or_default();
-                    if e.tag.is_empty() && e.class.is_empty() {
+                    if *e == designcraft_doc::ExportTag::default() {
                         st.export_tags.remove(&key);
                     }
                     Ok(out)
@@ -1038,6 +1045,9 @@ fn redirect_style_refs(d: &mut designcraft_doc::Document, para: bool, from: &str
             for r in formats.filter(|r| r.as_deref() == Some(from)) {
                 *r = Some(to.to_string());
             }
+        }
+        if let designcraft_doc::EpubSplit::Style(n) = &mut d.settings.epub_split {
+            rename(n);
         }
     } else {
         let from_parent = parent_of(st.character.iter().find(|x| x.name == from).and_then(|x| x.based_on.as_ref()));
@@ -2834,6 +2844,13 @@ mod export_tag_tests {
         s.execute("style.exportTag", &json!({"style": "Chapter Title", "tag": "h1", "class": "chapter"})).unwrap();
         s.execute("style.exportTag", &json!({"style": "Key Term", "character": true, "tag": "strong"})).unwrap();
         assert!(s.execute("style.exportTag", &json!({"style": "Nope"})).is_err());
+        // Split Document is for paragraph styles; it alone keeps the tagging.
+        assert!(s.execute("style.exportTag", &json!({"style": "Key Term", "character": true, "split": true})).is_err());
+        s.execute("style.paragraph.create", &json!({"name": "Part"})).unwrap();
+        assert_eq!(s.execute("style.exportTag", &json!({"style": "Part", "split": true})).unwrap()["split"], true);
+        assert!(s.doc().unwrap().doc.styles.export_tag("Part", false).is_some_and(|t| t.split));
+        s.execute("style.exportTag", &json!({"style": "Part", "split": false})).unwrap();
+        assert!(s.doc().unwrap().doc.styles.export_tag("Part", false).is_none(), "an untouched tagging goes");
         let r = s.execute("frame.create", &json!({"rect": [72, 72, 400, 300], "content": "text", "text": "Origins\nA word"})).unwrap();
         let sid = r["story"].as_u64().unwrap();
         s.execute("text.select", &json!({"story": sid, "anchor": 0, "focus": 0})).unwrap();
@@ -3075,6 +3092,7 @@ mod delete_tests {
             d.footnote_options.para_style = "Table Body".into();
             d.endnote_options.para_style = "Table Body".into();
             d.endnote_options.heading_style = "Table Body".into();
+            d.settings.epub_split = designcraft_doc::EpubSplit::Style("Table Body".into());
             d.toc = Some(Toc {
                 story,
                 title: "Contents".into(),
@@ -3093,6 +3111,7 @@ mod delete_tests {
         assert_eq!((sub.based_on.as_deref(), sub.next_style.as_deref()), (Some("Body"), Some("Body")));
         assert_eq!(d.styles.default_paragraph, "Body");
         assert_eq!(d.endnote_options.heading_style, "Body");
+        assert_eq!(d.settings.epub_split, designcraft_doc::EpubSplit::Style("Body".into()), "EPUB Split Document follows the replacement");
         let after = s.execute("preflight.run", &json!({})).unwrap();
         assert!(!after.to_string().contains("Table Body"), "{after}");
     }
