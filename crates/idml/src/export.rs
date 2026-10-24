@@ -2414,6 +2414,7 @@ impl<'a> Ex<'a> {
                                     object_point,
                                     ref_point,
                                     keep_within_column,
+                                    spine_relative,
                                 } => El::new("AnchoredObjectSetting")
                                     .attr("AnchoredPosition", "Anchored")
                                     .attr("AnchorPoint", names::anchor_out(*object_point))
@@ -2424,7 +2425,8 @@ impl<'a> Ex<'a> {
                                     // IDML measures a left-aligned object's X offset leftwards.
                                     .attr("AnchorXoffset", num(if *ref_point % 3 == 0 { 0.0 - *x_offset } else { *x_offset }))
                                     .attr("AnchorYoffset", num(*y_offset))
-                                    .attr("PinPosition", bool_s(*keep_within_column)),
+                                    .attr("PinPosition", bool_s(*keep_within_column))
+                                    .attr("SpineRelative", bool_s(*spine_relative)),
                             };
                             e.push(setting);
                             out.push(Node::El(e));

@@ -583,6 +583,9 @@ pub struct FrameSpec {
     pub grid: Option<(f64, f64)>,
     /// The frame is on a left page (for towards/away-from-spine alignment).
     pub left_page: bool,
+    /// The frame is on a right page of a facing spread (spine-relative anchored objects mirror
+    /// there; a single page has no spine).
+    pub right_page: bool,
     /// The page and its margins in the frame's inner space (custom anchored objects).
     pub page_rect: Option<(Rect, Rect)>,
 }
@@ -686,22 +689,23 @@ pub fn frame_specs(doc: &Document, sid: StoryId) -> Vec<FrameSpec> {
                 r.is_finite() && r.x0 < a.x1 && r.x1 > a.x0 && r.y0 < a.y1 && r.y1 > a.y0
             });
         }
-        let (page_name, page, left_page) = match (spread_ref, spread) {
+        let (page_name, page, side) = match (spread_ref, spread) {
             (Some(designcraft_doc::SpreadRef::Doc(si)), Some(sp)) => {
                 let c = item.bounds().center();
                 let pi = sp.page_at_x(c.x).unwrap_or(0);
                 let abs = doc.first_page_of_spread(si) + pi;
-                (Some(doc.page_name(abs)), Some(abs), sp.pages.get(pi).is_some_and(|p| p.side == designcraft_doc::PageSide::Left))
+                (Some(doc.page_name(abs)), Some(abs), sp.pages.get(pi).map(|p| p.side))
             }
             (Some(designcraft_doc::SpreadRef::Parent(_)), Some(sp)) => {
                 let prefix = sp.parent.as_ref().map(|p| p.prefix.clone()).unwrap_or_else(|| "A".into());
                 // The side of the parent page under the frame, so a folio there aligns to the spine of its own page.
                 let under = sp.page_at_x(item.bounds().center().x).and_then(|pi| sp.pages.get(pi));
-                let left = under.is_some_and(|p| p.side == designcraft_doc::PageSide::Left);
-                (Some(prefix), None, left)
+                (Some(prefix), None, under.map(|p| p.side))
             }
-            _ => (None, None, false),
+            _ => (None, None, None),
         };
+        let left_page = side == Some(designcraft_doc::PageSide::Left);
+        let right_page = side == Some(designcraft_doc::PageSide::Right);
         let section_marker = page.map(|abs| section_marker(doc, abs));
         // The page under the frame and its margins, in inner space (bounding boxes).
         let page_rect = match (spread_ref, spread) {
@@ -773,6 +777,7 @@ pub fn frame_specs(doc: &Document, sid: StoryId) -> Vec<FrameSpec> {
             page,
             grid,
             left_page,
+            right_page,
             page_rect,
         });
     }
@@ -2004,6 +2009,7 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                         object_point,
                         ref_point,
                         keep_within_column,
+                        spine_relative,
                     } => {
                         use designcraft_doc::anchored::AnchorRelative as R;
                         let col = ft.columns.get(l.column as usize).copied().unwrap_or(f.area);
@@ -2015,15 +2021,21 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
                             R::PageEdge => Some(f.page_rect.map_or(f.area, |p| p.0)),
                         };
                         let frac = |i: u8| ([0.0, 0.5, 1.0][(i % 3) as usize], [0.0, 0.5, 1.0][(i / 3).min(2) as usize]);
-                        let (rfx, rfy) = frac(*ref_point);
-                        let (ofx, ofy) = frac(*object_point);
+                        let (mut rfx, rfy) = frac(*ref_point);
+                        let (mut ofx, ofy) = frac(*object_point);
+                        let mut dx = *x_offset;
+                        // The settings describe a left-hand page; a right-hand page mirrors them
+                        // across the spine.
+                        if *spine_relative && f.right_page {
+                            (rfx, ofx, dx) = (1.0 - rfx, 1.0 - ofx, -dx);
+                        }
                         let rx = area(*x_relative).map_or(o.x, |a| a.x0 + a.width() * rfx);
                         let ry = area(*y_relative).map_or(l.baseline, |a| a.y0 + a.height() * rfy);
                         let mut y = ry + y_offset - h * ofy;
                         if *keep_within_column {
                             y = y.clamp(col.y0, (col.y1 - h).max(col.y0));
                         }
-                        Point::new(rx + x_offset - w * ofx, y)
+                        Point::new(rx + dx - w * ofx, y)
                     }
                 };
             }
@@ -4649,6 +4661,7 @@ mod column_allocation_safety_tests {
             page: None,
             grid: None,
             left_page: false,
+            right_page: false,
             page_rect: None,
             outline: None,
         }

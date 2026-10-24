@@ -2449,6 +2449,7 @@ impl<'r> Importer<'r> {
                                         object_point: names::anchor_in(s("AnchorPoint")),
                                         ref_point: row * 3 + col,
                                         keep_within_column: s("PinPosition") == "true",
+                                        spine_relative: s("SpineRelative") == "true",
                                     }
                                 }
                                 _ => designcraft_doc::AnchorPosition::Inline { y_offset: get("AnchorYoffset") },

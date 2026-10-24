@@ -2752,6 +2752,7 @@ fn custom_anchors_do_not_change_bottom_baseline_fitting() {
         object_point: 0,
         ref_point: 0,
         keep_within_column: false,
+        spine_relative: false,
     };
     d.story_mut(sid).unwrap().insert_object(0, designcraft_doc::AnchoredObject::new(it, pos));
     let cs = compose_story(&d, sid, &ComposeOptions::default());
@@ -6740,6 +6741,7 @@ fn anchor_box(d: &mut Document, sid: StoryId, at: usize, x: f64, y: f64, y_rel: 
         object_point: 0,
         ref_point: 0,
         keep_within_column: false,
+        spine_relative: false,
     };
     d.story_mut(sid).unwrap().insert_object(at, designcraft_doc::AnchoredObject::new(it, position));
 }
@@ -6808,6 +6810,7 @@ fn anchored_object_wraps_with_its_contour_and_side() {
         object_point: 0,
         ref_point: 0,
         keep_within_column: false,
+        spine_relative: false,
     };
     d.story_mut(a).unwrap().insert_object(0, designcraft_doc::AnchoredObject::new(it, position));
     let cs = compose_story(&d, b, &ComposeOptions::default());
@@ -6819,6 +6822,70 @@ fn anchored_object_wraps_with_its_contour_and_side() {
     let top = pairs.first().unwrap().0.x1;
     let mid = pairs.iter().map(|(l, _)| l.x1).fold(f64::INFINITY, f64::min);
     assert!(top > mid + 5.0, "top {top}, middle {mid}");
+}
+
+/// Relative to Spine: a marginal note set up for a left-hand page (its right edge 12 pt left of
+/// the column) mirrors on the right-hand page (its left edge 12 pt right of the column), so the
+/// notes of a story that runs across a spread all sit in the outside margin. Placed as on a
+/// left-hand page, the right page's note sat in the inside margin and reached across the spine.
+#[test]
+fn spine_relative_anchored_notes_stay_in_the_outside_margin_on_both_pages() {
+    use designcraft_doc::anchored::AnchorRelative as R;
+    let compose_spread = |spine_relative: bool| {
+        let mut d = Document::new(&NewDocument { pages: 3, ..Default::default() });
+        let lid = d.default_layer();
+        let sp = &d.spreads[1];
+        let (l, r) = (sp.pages[0].clone(), sp.pages[1].clone());
+        assert_eq!((l.side, r.side), (designcraft_doc::PageSide::Left, designcraft_doc::PageSide::Right));
+        // Body frames leave a 120 pt outside margin for the notes.
+        let left_rect = Rect::new(l.x + 120.0, 36.0, l.x + l.width - 36.0, 120.0);
+        let right_rect = Rect::new(r.x + 36.0, 36.0, r.x + r.width - 120.0, 600.0);
+        let text = [LOREM; 3].join(" ");
+        let (lf, sid) = d.add_text_frame(SpreadRef::Doc(1), left_rect, lid, &text, ParaFormat::default()).unwrap();
+        let (rf, _) = d.add_text_frame(SpreadRef::Doc(1), right_rect, lid, "", ParaFormat::default()).unwrap();
+        d.thread(lf, rf).unwrap();
+        let plain = compose_story(&d, sid, &ComposeOptions::default());
+        let second_line = |fid| plain.frame(fid).unwrap().lines[1].range.start;
+        let (at_left, at_right) = (second_line(lf), second_line(rf));
+        // Top-right corner of the note 12 pt left of the column's top-left, on the anchor's baseline.
+        let position = designcraft_doc::AnchorPosition::Custom {
+            x_relative: R::ColumnEdge,
+            y_relative: R::Anchor,
+            x_offset: -12.0,
+            y_offset: 0.0,
+            object_point: 2,
+            ref_point: 0,
+            keep_within_column: false,
+            spine_relative,
+        };
+        for at in [at_right, at_left] {
+            let note = designcraft_doc::Item::new(
+                ItemId(d.alloc()),
+                lid,
+                designcraft_doc::Shape::Rectangle,
+                designcraft_geom::shapes::rectangle(Rect::new(0.0, 0.0, 72.0, 40.0)),
+            );
+            d.story_mut(sid).unwrap().insert_object(at, designcraft_doc::AnchoredObject::new(note, position.clone()));
+        }
+        let cs = compose_story(&d, sid, &ComposeOptions::default());
+        // Per page: the note's left and right edges, the column, and the page's left and right edges.
+        let placed = |fid, page: &designcraft_doc::Page| {
+            let ft = cs.frame(fid).unwrap();
+            assert_eq!(ft.objects.len(), 1);
+            let o = &ft.objects[0];
+            ((o.origin.x, o.origin.x + o.size.0), ft.columns[0], (page.x, page.x + page.width))
+        };
+        (placed(lf, &l), placed(rf, &r))
+    };
+    let near = |a: f64, b: f64| (a - b).abs() < 1e-6;
+
+    let (((lx0, lx1), lcol, (lp0, _)), ((rx0, rx1), rcol, (_, rp1))) = compose_spread(true);
+    assert!(near(lx1, lcol.x0 - 12.0) && lx0 >= lp0, "left page: note {lx0}..{lx1}, column {lcol:?}");
+    assert!(near(rx0, rcol.x1 + 12.0) && rx1 <= rp1, "right page: note {rx0}..{rx1}, column {rcol:?}");
+
+    // Without Relative to Spine both pages take the settings as written.
+    let (_, ((rx0, rx1), rcol, _)) = compose_spread(false);
+    assert!(near(rx1, rcol.x0 - 12.0), "right page as written: note {rx0}..{rx1}, column {rcol:?}");
 }
 
 const OBJECT_LEN: usize = designcraft_doc::OBJECT_MARK.len_utf8();

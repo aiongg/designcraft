@@ -121,7 +121,7 @@ impl CellLineExtent {
 }
 
 /// Compose a cell story at width `w` (content space, top-left at the origin).
-fn compose_cell(doc: &Document, cell: &Cell, w: f64, opts: &ComposeOptions, left_page: bool) -> CellLayout {
+fn compose_cell(doc: &Document, cell: &Cell, w: f64, opts: &ComposeOptions, (left_page, right_page): (bool, bool)) -> CellLayout {
     let spec = FrameSpec {
         id: ItemId(0),
         area: Rect::new(0.0, 0.0, w.max(1.0), 1.0e6),
@@ -134,6 +134,7 @@ fn compose_cell(doc: &Document, cell: &Cell, w: f64, opts: &ComposeOptions, left
         page: opts.page,
         grid: None,
         left_page,
+        right_page,
         page_rect: None,
     };
     let cs = crate::compose(doc, &cell.text, std::slice::from_ref(&spec), opts);
@@ -200,7 +201,7 @@ pub(crate) fn place_table(
     let (nr, nc) = (table.nrows(), table.ncols());
     let owners = table.owners();
     let is_owner = |r: usize, c: usize| owners[r * nc + c] == (r, c);
-    let left_page = frames[cur.fi].left_page;
+    let side = (frames[cur.fi].left_page, frames[cur.fi].right_page);
     // Compose every owner cell.
     let mut layouts: Vec<Option<CellLayout>> = Vec::with_capacity(nr * nc);
     for r in 0..nr {
@@ -212,7 +213,7 @@ pub(crate) fn place_table(
             let cell = &table.cells[r * nc + c];
             let cs = (cell.col_span.max(1) as usize).min(nc - c);
             let w = colx[c + cs] - colx[c] - cell.insets[1] - cell.insets[3];
-            layouts.push(Some(compose_cell(doc, cell, w, opts, left_page)));
+            layouts.push(Some(compose_cell(doc, cell, w, opts, side)));
         }
     }
     // Row heights.
@@ -813,7 +814,7 @@ mod height_tests {
     }
 
     fn measure(cell: &Cell, width: f64) -> CellLayout {
-        compose_cell(&Document::new(&NewDocument::default()), cell, width, &ComposeOptions::default(), false)
+        compose_cell(&Document::new(&NewDocument::default()), cell, width, &ComposeOptions::default(), (false, false))
     }
 
     fn compose_table(table: Table, height: f64) -> ComposedStory {
@@ -1061,6 +1062,7 @@ mod height_tests {
                 object_point: 0,
                 ref_point: 0,
                 keep_within_column: false,
+                spine_relative: false,
             }),
         );
         assert!((measure(&cell, 92.0).content_h - original).abs() < 1e-6);

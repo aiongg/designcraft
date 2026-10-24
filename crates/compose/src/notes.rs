@@ -169,6 +169,7 @@ impl Notes {
             page: f.page,
             grid: None,
             left_page: f.left_page,
+            right_page: f.right_page,
             page_rect: None,
         };
         let nopts = ComposeOptions {
