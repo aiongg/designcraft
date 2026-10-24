@@ -49,6 +49,12 @@ are recorded separately in ASSETS.md.
 DesignCraft retains placement, layer-name policy, document state and the application render
 cache. Render output is premultiplied RGBA8. Page boxes use the same crop, rotation and
 UserUnit transform as raster output, including fractional placed-PDF dimensions.
+Layer choices are validated for every selected PDF before any document/undo state changes;
+a selection containing an unsupported or layerless PDF is refused rather than partially edited.
+Stale persisted/relinked choices that cannot be honored suppress the graphic on canvas rather
+than reveal hidden source content; resetting to file defaults remains available. All-content
+cropping keeps the whole page when real optional-content state cannot be rewritten, while
+layerless files and empty/null optional-content properties retain measured bounds.
 Layered-PDF export stops on failed layer rewriting, missing pages or reported incomplete
 content rather than saving an unchanged or incomplete placed page. Shared diagnostics only
 report known backend warnings; they do not certify all PDF fidelity.
