@@ -37,8 +37,7 @@ pub(crate) fn native_viewports(app: &DesignApp, ctx: &egui::Context) -> Vec<egui
     if ctx.embed_viewports() {
         return Vec::new();
     }
-    let Some(layout) = app.ui.docking.as_ref() else { return Vec::new() };
-    layout.floating.iter().map(|window| craft_ui::docking::DockArea::<String>::window_viewport(area_id(), window.id)).collect()
+    layout_of(app).floating.iter().map(|window| craft_ui::docking::DockArea::<String>::window_viewport(area_id(), window.id)).collect()
 }
 
 /// The egui layer of the floating window whose first panel is `panel`.
@@ -180,7 +179,10 @@ pub(crate) fn default_layout(ui: &crate::UiState) -> Layout<String> {
         if at.iter().all(|v| v.is_finite())
             && let Some(id) = placed.take(id)
         {
-            floating.push(Floating::single(vec![id], 0, [at[0], at[1], 280.0, 360.0]));
+            // The layout is rebuilt every frame, so each window keeps an id of its panel's (a
+            // native window lives as long as its id).
+            let window = default_window_id(&id);
+            floating.push(Floating { id: window, ..Floating::single(vec![id], 0, [at[0], at[1], 280.0, 360.0]) });
         }
     }
     let mut columns = Vec::new();
@@ -202,6 +204,15 @@ pub(crate) fn default_layout(ui: &crate::UiState) -> Layout<String> {
     }
     columns.extend(icon_column(ui.icon_groups.as_deref(), &mut placed));
     with_canvas(columns, floating)
+}
+
+/// The window id of a default layout's floating `panel`: the same every time, with the top bit
+/// set, where craft-ui's fresh ids never reach.
+fn default_window_id(panel: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    ("designcraft-default-float", panel).hash(&mut h);
+    h.finish() | 1 << 63
 }
 
 /// Is `layout` from before the canvas joined the panel layout? Those layouts held only the

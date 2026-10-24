@@ -1186,3 +1186,15 @@ fn a_split_inside_a_floating_window_resizes_and_is_saved() {
     let loaded = crate::UiState::from_preferences_json(&saved).unwrap();
     assert_eq!(loaded.docking, h.state().ui.docking);
 }
+
+/// The default layout is rebuilt every frame: its floating windows keep their ids, so their
+/// native windows aren't opened again each frame.
+#[test]
+fn default_layout_floats_keep_their_window_ids() {
+    let mut app = app();
+    app.ui.floating = vec![("swatches".to_string(), [10.0, 20.0])];
+    let ids = |app: &DesignApp| default_layout(&app.ui).floating.iter().map(|w| w.id).collect::<Vec<_>>();
+    let first = ids(&app);
+    assert_eq!(first.len(), 1, "Swatches floats");
+    assert_eq!(ids(&app), first);
+}
