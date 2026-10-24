@@ -13,8 +13,30 @@ pub fn specs() -> Vec<CommandSpec> {
         "{path?, pages?: \"1-3,5\" | [1,3] (1-based positions; default all), flatten?: high|medium|low|ppi (Transparency Flattener: spreads with transparency are rasterised), spreads?: bool, fullScreen?: bool, bookmarksPanel?: bool, pageLayout?: single|continuous|twoUp|twoUpCover|twoUpContinuous, view?: fitPage|fitWidth|actual, advanceSeconds?: number (interactive PDF), bleed?: bool (document bleed), marks?: bool | {crop?, bleed?, pageInfo?, weight?, offset?}, standard?: \"none\"|\"x4\"|\"a2b\", compressImages?: bool, tagged?: bool (structure tree: stories as paragraphs, figures with alt text), media?: bool (interactive: embed placed video and sound), title?, author?, created?: int (creation date in Unix seconds; default now, for reproducible files)} → {path, bytes, pages, warnings} (no path: {base64, …})",
         has_doc, export_pdf),
         cmd!(noundo "file.exportEpub", "Export EPUB (Reflowable)…", ["File"], None,
-        "{path?, title?, author?, language?: \"en\", identifier?: str (dc:identifier; a stable urn:uuid by default), coverImage?: path (a PNG or JPEG as the cover), tocTitle?: str (the table of contents' title; from the language by default), cover?: bool (the first page as the cover image), embedFonts?: bool (package the stylesheet's fonts whose licence allows it, whole files), fixedLayout?: bool (pre-paginated: each page as an image with its text)} → {path, bytes, warnings} (no path: {base64, bytes, warnings}); warnings name images without alt text, exported as decorative, and fonts that could not be embedded",
+        "{path?, title?, author?, language?: \"en\", identifier?: str (dc:identifier; a stable urn:uuid by default), coverImage?: path (a PNG or JPEG as the cover), tocTitle?: str (the table of contents' title; from the language by default), cover?: bool (the first page as the cover image), embedFonts?: bool (package the stylesheet's fonts whose licence allows it, whole files), split?: \"off\"|\"exportTags\"|{style: name} (Split Document for this export, not stored; the document's `document.epubSplit` by default), fixedLayout?: bool (pre-paginated: each page as an image with its text)} → {path, bytes, warnings} (no path: {base64, bytes, warnings}); warnings name images without alt text, exported as decorative, and fonts that could not be embedded",
         has_doc, export_epub),
+        cmd!(
+            "document.epubSplit",
+            "EPUB Split Document",
+            [],
+            None,
+            "{split?: \"off\"|\"exportTags\"|{style: name}} — EPUB Export Options › Split Document, stored with the document: one content file (off, the default), a file before each paragraph whose style has Export Tagging › Split Document on (exportTags), or before each paragraph of one style → {split}",
+            has_doc,
+            |s, p| {
+                const ID: &str = "document.epubSplit";
+                let cur = s.doc()?.doc.settings.epub_split.clone();
+                let Some(v) = p.get("split") else { return Ok(json!({"split": cur})) };
+                let split = epub_split_param(ID, &s.doc()?.doc, v)?;
+                if split != cur {
+                    let stored = split.clone();
+                    s.edit(move |d, _| {
+                        d.settings.epub_split = stored;
+                        Ok(Value::Null)
+                    })?;
+                }
+                Ok(json!({"split": split}))
+            }
+        ),
         cmd!(noundo "file.exportFixedEpub", "Export EPUB (Fixed Layout)…", ["File"], None,
         "{path?, title?, author?, language?} — pre-paginated EPUB → {path, bytes} (no path: {base64, bytes})",
         has_doc, |s, p| {
@@ -242,8 +264,22 @@ fn embedded_fonts(d: &designcraft_doc::Document, warnings: &mut Vec<String>) -> 
     out
 }
 
+/// A Split Document setting (`"off"`, `"exportTags"` or `{"style": name}`), naming a paragraph
+/// style the document has.
+pub(crate) fn epub_split_param(id: &str, doc: &designcraft_doc::Document, v: &Value) -> Result<designcraft_doc::EpubSplit> {
+    let split: designcraft_doc::EpubSplit =
+        serde_json::from_value(v.clone()).map_err(|_| bad(id, "`split`: \"off\", \"exportTags\" or {\"style\": name}"))?;
+    if let designcraft_doc::EpubSplit::Style(name) = &split
+        && doc.styles.para(name).is_none()
+    {
+        return Err(bad(id, format!("no paragraph style `{name}`")));
+    }
+    Ok(split)
+}
+
 fn export_epub(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.doc()?;
+    let split = p.get("split").map(|v| epub_split_param("file.exportEpub", &st.doc, v)).transpose()?;
     // Object Export Options › Rasterize: those objects go in as images.
     let (raster, _) = rasterize_where(&st.doc, &s.cache, 144.0, false, |it| it.export_options.rasterize && !threaded(&st.doc, it));
     let epub_doc: &designcraft_doc::Document = raster.as_ref().unwrap_or(&st.doc);
@@ -270,6 +306,7 @@ fn export_epub(s: &mut Session, p: &Value) -> Result<Value> {
         identifier: p.get("identifier").and_then(Value::as_str).map(str::to_string),
         cover,
         toc_title: p.get("tocTitle").and_then(Value::as_str).map(str::to_string),
+        split,
         generic_families: generic_families(&st.doc),
         fonts: if p.get("embedFonts").and_then(Value::as_bool).unwrap_or(false) && !fixed {
             embedded_fonts(&st.doc, &mut warnings)
@@ -846,6 +883,40 @@ mod text_tests {
         let mut s = String::new();
         std::io::Read::read_to_string(&mut z.by_name(name).unwrap(), &mut s).unwrap();
         s
+    }
+
+    /// Split Document is stored with the document as one undo step, follows a renamed style, and
+    /// an export can override it without storing its own.
+    #[test]
+    fn epub_split_document_setting() {
+        let mut s = Session::new();
+        s.execute("file.new", &json!({})).unwrap();
+        let r = s.execute("frame.create", &json!({"rect": [72, 72, 400, 300], "content": "text", "text": "One\nText\nTwo\nMore"})).unwrap();
+        let sid = r["story"].as_u64().unwrap();
+        s.execute("style.paragraph.create", &json!({"name": "Chapter"})).unwrap();
+        for at in [0, 9] {
+            s.execute("text.select", &json!({"story": sid, "anchor": at, "focus": at})).unwrap();
+            s.execute("style.paragraph.apply", &json!({"name": "Chapter"})).unwrap();
+        }
+        let files = |s: &mut Session, p: serde_json::Value| {
+            let mut z = unzip(s.execute("file.exportEpub", &p).unwrap()["base64"].as_str().unwrap());
+            (1..).take_while(|n| z.by_name(&if *n == 1 { "OEBPS/content.xhtml".into() } else { format!("OEBPS/content{n}.xhtml") }).is_ok()).count()
+        };
+        assert_eq!(s.execute("document.epubSplit", &json!({})).unwrap()["split"], "off");
+        assert_eq!(files(&mut s, json!({})), 1, "one content file by default");
+        assert!(s.execute("document.epubSplit", &json!({"split": {"style": "Nope"}})).is_err());
+        assert!(s.execute("document.epubSplit", &json!({"split": "h1"})).is_err());
+        assert!(s.execute("file.exportEpub", &json!({"split": {"style": "Nope"}})).is_err());
+        assert_eq!(s.execute("document.epubSplit", &json!({"split": {"style": "Chapter"}})).unwrap()["split"], json!({"style": "Chapter"}));
+        assert_eq!(files(&mut s, json!({})), 2);
+        assert_eq!(files(&mut s, json!({"split": "off"})), 1);
+        assert_eq!(s.doc().unwrap().doc.settings.epub_split, designcraft_doc::EpubSplit::Style("Chapter".into()), "the override isn't stored");
+        s.execute("style.paragraph.edit", &json!({"name": "Chapter", "rename": "Part"})).unwrap();
+        assert_eq!(s.execute("document.epubSplit", &json!({})).unwrap()["split"], json!({"style": "Part"}));
+        assert_eq!(files(&mut s, json!({})), 2);
+        s.execute("edit.undo", &json!({})).unwrap();
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(s.execute("document.epubSplit", &json!({})).unwrap()["split"], "off");
     }
 
     #[test]

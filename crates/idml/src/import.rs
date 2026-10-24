@@ -682,6 +682,9 @@ impl<'r> Importer<'r> {
         if let Some(e) = top.iter().find(|e| e.local() == "FootnoteOption") {
             self.footnote_option(e);
         }
+        if let Some(e) = top.iter().find(|e| e.local() == "EPubExportPreference") {
+            self.epub_split(e);
+        }
         for e in top.iter().filter(|e| e.local() == "Layer") {
             let id = LayerId(self.alloc());
             let color = match e.prop_el("LayerColor") {
@@ -1187,6 +1190,14 @@ impl<'r> Importer<'r> {
                 Some(slot) => *slot = s,
                 None => self.styles.paragraph.push(s),
             }
+            // Split Document (EPUB only): on the style, and on its EPUB export tag map. Files write
+            // `false` on every style, so either place saying `true` turns it on.
+            let split = e.get("SplitDocument") == Some("true")
+                || e.elements()
+                    .any(|m| m.local() == "StyleExportTagMap" && m.get("ExportType") == Some("EPUB") && m.get("SplitDocument") == Some("true"));
+            if split {
+                self.styles.export_tags.entry(format!("p:{name}")).or_default().split = true;
+            }
         }
         for (_, e) in &chars {
             let name = names::style_name_in(CHAR_BUILTINS, e.get("Name").unwrap_or(""));
@@ -1459,6 +1470,21 @@ impl<'r> Importer<'r> {
             Some(f) => f.definition = def,
             None => self.xref_formats.push(designcraft_doc::XrefFormat { name, definition: def }),
         }
+    }
+
+    /// Preferences › `EPubExportPreference`: Split Document (after styles: it can name one). An
+    /// empty style name splits on the styles' export tags; a style the file lacks splits nothing.
+    fn epub_split(&mut self, e: &El) {
+        if e.boolean("BreakDocument") != Some(true) {
+            return;
+        }
+        let name = e.get("ParagraphStyleName").unwrap_or("$ID/NormalParagraphStyle");
+        self.settings.epub_split = if name.trim().is_empty() {
+            designcraft_doc::EpubSplit::ExportTags
+        } else {
+            let style = self.para_style_ref(name);
+            if self.styles.para(&style).is_some() { designcraft_doc::EpubSplit::Style(style) } else { designcraft_doc::EpubSplit::Off }
+        };
     }
 
     /// Preferences › `FootnoteOption` (after styles: it names the footnote text and marker styles).
