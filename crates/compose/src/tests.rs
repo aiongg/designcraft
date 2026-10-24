@@ -1358,6 +1358,61 @@ fn optical_margin_hangs_punctuation() {
     assert!(lines.iter().all(|l| l.end_x <= l.x1 + 12.0));
 }
 
+#[test]
+fn optical_margin_hangs_the_edges_of_lines_with_tabs() {
+    // Both line breakers let the edge glyphs of a line hang, tab or not, so layout hangs them
+    // too: a line that fits only because its period hangs is not squeezed into the measure or
+    // set past it. The left hang leaves tab stops where they are.
+    let stop = designcraft_doc::TabStop { position: 40.0, align: TabAlign::Left, leader: String::new(), align_on: String::new() };
+    let rest = "right here. More words follow it on the next line.";
+    let cases = [
+        ("tab", format!("“A”\tsits {rest}"), Align::LeftJustified),
+        ("no tab", format!("“A” sits {rest}"), Align::LeftJustified),
+        ("right indent tab", format!("“A” sits{}{rest}", story::RIGHT_INDENT_TAB), Align::Left),
+    ];
+    for (name, text, align) in &cases {
+        let ch = |g: &PlacedGlyph| text.get(g.byte..).and_then(|s| s.chars().next()).unwrap_or(' ');
+        let edge_glyphs = |l: &Line| -> Vec<PlacedGlyph> { l.glyphs.iter().filter(|g| g.visible && !ch(g).is_whitespace()).cloned().collect() };
+        for composer in [Composer::Paragraph, Composer::SingleLine] {
+            let mut ending = 0;
+            for w in 100..=240 {
+                let para = ParaAttrs {
+                    align: Some(*align),
+                    optical_margin: Some(true),
+                    hyphenate: Some(false),
+                    composer: Some(composer),
+                    tabs: Some(vec![stop.clone()]),
+                    ..Default::default()
+                };
+                let (d, sid, _) = doc_with(text, Rect::new(0.0, 0.0, f64::from(w), 1000.0), para);
+                let cs = compose_story(&d, sid, &ComposeOptions::default());
+                let lines = all_lines(&cs);
+                for (i, l) in lines.iter().enumerate() {
+                    let Some(last) = edge_glyphs(l).last().cloned() else { continue };
+                    let hang = breaker::hang(ch(&last)).1 * last.adv;
+                    let end = last.x + last.adv;
+                    assert!(end <= l.x1 + hang + 0.01, "{name}, {composer:?}, width {w}: line {i} ends at {end}, past {} and its hang {hang}", l.x1);
+                }
+                let glyphs = edge_glyphs(lines[0]);
+                let (x0, x1) = (lines[0].x0, lines[0].x1);
+                let first = &glyphs[0];
+                assert!((first.x + first.adv - x0).abs() < 0.01, "{name}, {composer:?}, width {w}: the opening quote is at {}", first.x);
+                if *name == "tab" {
+                    let s = glyphs.iter().find(|g| ch(g) == 's').unwrap();
+                    assert!((s.x - (x0 + 40.0)).abs() < 0.01, "{composer:?}, width {w}: the text after the tab starts at {}", s.x);
+                }
+                // Line 0 ends with the period of "here.": the period hangs past the measure.
+                let last = glyphs.last().unwrap();
+                if text.get(last.byte..).is_some_and(|s| s.starts_with(". More")) {
+                    ending += 1;
+                    assert!((last.x - x1).abs() < 0.01, "{name}, {composer:?}, width {w}: the period starts at {}, not at {x1}", last.x);
+                }
+            }
+            assert!(ending > 3, "{name}, {composer:?}: line 0 ends with the period at {ending} widths");
+        }
+    }
+}
+
 // ---------- golden paragraph corpus ----------
 
 /// Original prose (written for this corpus) with a realistic mix of short and long words.
