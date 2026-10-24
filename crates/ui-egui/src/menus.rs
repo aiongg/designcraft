@@ -3401,6 +3401,12 @@ const NOT_SEARCHED: &[&str] = &[
     "app.openRecent",
     "app.swatchOptionsDialog",
     "app.colorGroupOptionsDialog",
+    // Without a value these clear the flattener preset, go to Normal screen mode or 100% zoom.
+    "app.flattener",
+    "view.screenMode",
+    "view.zoom",
+    // Where to pin the Contextual Task Bar.
+    "window.taskBarPin",
 ];
 
 /// The commands Quick Apply and the application bar's search find: (id, label, default shortcut).
@@ -5279,6 +5285,11 @@ mod tests {
 
     #[test]
     fn searched_ui_commands_run_without_parameters_and_keep_preferences() {
+        // Without a value these reset a setting or need a place the test host always has.
+        let searched: Vec<&str> = quick_commands().map(|c| c.0).collect();
+        for id in ["app.flattener", "view.screenMode", "view.zoom", "window.taskBarPin"] {
+            assert!(!searched.contains(&id), "{id} is searched");
+        }
         // A placed PDF: a graphic with layers.
         let mut scratch = designcraft_engine::Session::new();
         scratch.execute("file.new", &json!({})).unwrap();
