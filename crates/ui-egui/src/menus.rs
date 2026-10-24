@@ -3349,13 +3349,17 @@ pub fn quick_apply_items(session: &designcraft_engine::Session, query: &str, cjk
     out
 }
 
+/// UI commands that only run with a parameter search can't supply, and that have no dialog to
+/// ask for it: the application bar's workspace menu lists each saved workspace to delete.
+const NOT_SEARCHED: &[&str] = &["window.deleteWorkspace"];
+
 /// The commands Quick Apply and the application bar's search find: (id, label, default shortcut).
 fn quick_commands() -> impl Iterator<Item = (&'static str, &'static str, Option<&'static str>)> {
     designcraft_engine::command_specs()
         .iter()
         .filter(|c| !c.menu.is_empty() || c.shortcut.is_some())
         .map(|c| (c.id, c.label, c.shortcut))
-        .chain(UI_COMMANDS.iter().map(|c| (c.0, c.1, c.2)))
+        .chain(UI_COMMANDS.iter().filter(|c| !NOT_SEARCHED.contains(&c.0)).map(|c| (c.0, c.1, c.2)))
 }
 
 /// Whether any of `texts` contains the lowercased query (an empty query matches everything).
@@ -5221,6 +5225,22 @@ mod tests {
         assert_eq!(items[0].kind, "Paragraph Style");
         assert!(quick_apply_items(&s, "", false).iter().all(|i| i.kind.is_empty()));
         assert!(quick_apply_items(&s, "preferences", false).iter().any(|i| i.id == "app.preferences"));
+    }
+
+    #[test]
+    fn searched_workspace_commands_run_as_listed() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        run_ui(&mut app, "window.newWorkspace", &json!({"name": "Mine"})).unwrap().unwrap();
+        app.ui.dialog = None;
+        let quick = quick_apply_items(&app.session, "workspace", false);
+        let search = command_search(&app, "workspace");
+        assert!(quick.iter().any(|i| i.id == "window.newWorkspace") && search.iter().any(|i| i.id == "window.newWorkspace"));
+        // Deleting needs a workspace name: the application bar's workspace menu lists them.
+        assert!(!quick.iter().chain(&search).any(|i| i.id == "window.deleteWorkspace"));
+        for it in &quick {
+            app.run(&it.id, it.params.clone()).unwrap_or_else(|e| panic!("{}: {e}", it.id));
+        }
+        assert_eq!(app.ui.custom_workspaces.len(), 1);
     }
 
     #[test]
