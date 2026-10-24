@@ -9986,6 +9986,12 @@ mod tests {
         assert!(opf.contains("properties=\"cover-image\""), "the first page is the cover: {opf}");
         assert!(z.by_name("OEBPS/content2.xhtml").is_ok(), "the split override reaches the export");
         assert_eq!(app.session.active().unwrap().doc.settings.epub_split, designcraft_doc::EpubSplit::Off, "an override is not stored");
+        crate::menus::export_epub(&mut app, &json!({"path": "book.epub", "cover": false})).unwrap();
+        let bytes = written.lock().unwrap().clone();
+        let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        let mut opf = String::new();
+        z.by_name("OEBPS/content.opf").unwrap().read_to_string(&mut opf).unwrap();
+        assert!(!opf.contains("cover-image"), "a caller's cover: false stays: {opf}");
     }
 
     #[test]

@@ -4641,7 +4641,7 @@ fn split_document_round_trips() {
   <RootParagraphStyleGroup Self="rp">
     <ParagraphStyle Self="ParagraphStyle/$ID/[No paragraph style]" Name="$ID/[No paragraph style]" PointSize="12" SplitDocument="false"/>
     <ParagraphStyle Self="ParagraphStyle/Part" Name="Part" SplitDocument="true"/>
-    <ParagraphStyle Self="ParagraphStyle/Chapter" Name="Chapter">
+    <ParagraphStyle Self="ParagraphStyle/Chapter" Name="Chapter" SplitDocument="false">
       <StyleExportTagMap Self="uaStyleExportTagMapnEPUB" ExportType="EPUB" ExportTag="h1" ExportClass="" ExportAttributes="" SplitDocument="true" EmitCss="true"/>
     </ParagraphStyle>
     <ParagraphStyle Self="ParagraphStyle/Body" Name="Body" SplitDocument="false"/>

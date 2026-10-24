@@ -2120,7 +2120,9 @@ fn export_idml(app: &mut DesignApp, p: &Value) -> Result<Value, String> {
 /// else to a file the user picks.
 pub(crate) fn export_epub(app: &mut DesignApp, p: &Value) -> Result<Value, String> {
     let mut q = if p.is_object() { p.clone() } else { json!({}) };
-    q["cover"] = json!(true);
+    if let Some(o) = q.as_object_mut() {
+        o.entry("cover").or_insert(json!(true));
+    }
     export_bytes(app, &q, "epub", "file.exportEpub")
 }
 

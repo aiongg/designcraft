@@ -1190,11 +1190,12 @@ impl<'r> Importer<'r> {
                 Some(slot) => *slot = s,
                 None => self.styles.paragraph.push(s),
             }
-            // Split Document (EPUB only): on the style, and repeated on its EPUB export tag map.
-            let split = e.get("SplitDocument").or_else(|| {
-                e.elements().find(|m| m.local() == "StyleExportTagMap" && m.get("ExportType") == Some("EPUB")).and_then(|m| m.get("SplitDocument"))
-            });
-            if split == Some("true") {
+            // Split Document (EPUB only): on the style, and on its EPUB export tag map. Files write
+            // `false` on every style, so either place saying `true` turns it on.
+            let split = e.get("SplitDocument") == Some("true")
+                || e.elements()
+                    .any(|m| m.local() == "StyleExportTagMap" && m.get("ExportType") == Some("EPUB") && m.get("SplitDocument") == Some("true"));
+            if split {
                 self.styles.export_tags.entry(format!("p:{name}")).or_default().split = true;
             }
         }
