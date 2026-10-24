@@ -130,6 +130,11 @@ impl Cache {
             use std::hash::{Hash, Hasher};
             let mut h = std::collections::hash_map::DefaultHasher::new();
             (id, p.spread, p.xf.as_coeffs().map(f64::to_bits)).hash(&mut h);
+            // The placed spread's pages give the frame its page, side and page rect.
+            for pg in doc.spread(p.spread).map_or(&[][..], |sp| &sp.pages[..]) {
+                let m = &pg.margins;
+                (pg.side as u8, [pg.x, pg.width, pg.height, m.top, m.bottom, m.inside, m.outside].map(f64::to_bits)).hash(&mut h);
+            }
             sig.push(h.finish() as usize);
         }
         let key = (sid, on, !neighbours.is_empty());

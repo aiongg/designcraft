@@ -7533,4 +7533,9 @@ fn anchored_text_frames_compose_against_the_grid_where_they_are_placed() {
     assert!(near(anchor, 71.0), "anchor baseline {anchor}");
     assert!(on_grid(lines[0]) && near(lines[0], anchor - 5.0) && near(lines[1], lines[0] + 10.0), "note baselines {lines:?}, anchor {anchor}");
     assert_eq!(baselines(&d, &compose_story(&d, nsid, &ComposeOptions::default())).1, lines);
+
+    // The host's page turns into a left-hand page: the note is composed again for that side.
+    let before = cache.get(&d, nsid, None);
+    Arc::make_mut(&mut d.spreads[1]).pages[1].side = designcraft_doc::PageSide::Left;
+    assert!(!Arc::ptr_eq(&before, &cache.get(&d, nsid, None)));
 }
