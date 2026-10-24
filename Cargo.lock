@@ -961,7 +961,7 @@ dependencies = [
 [[package]]
 name = "craft-atomic"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs?rev=9afd10142c0a0017b914b87d1774754441d891c2#9afd10142c0a0017b914b87d1774754441d891c2"
+source = "git+https://github.com/aiongg/craft-libs?rev=168be06594f1b4aa8896fdfc0ba143a43c06f0a9#168be06594f1b4aa8896fdfc0ba143a43c06f0a9"
 dependencies = [
  "rustix 1.1.5",
 ]
@@ -969,7 +969,7 @@ dependencies = [
 [[package]]
 name = "craft-cms"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs?rev=9afd10142c0a0017b914b87d1774754441d891c2#9afd10142c0a0017b914b87d1774754441d891c2"
+source = "git+https://github.com/aiongg/craft-libs?rev=168be06594f1b4aa8896fdfc0ba143a43c06f0a9#168be06594f1b4aa8896fdfc0ba143a43c06f0a9"
 dependencies = [
  "rayon",
 ]
@@ -977,12 +977,12 @@ dependencies = [
 [[package]]
 name = "craft-docpath"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs?rev=9afd10142c0a0017b914b87d1774754441d891c2#9afd10142c0a0017b914b87d1774754441d891c2"
+source = "git+https://github.com/aiongg/craft-libs?rev=168be06594f1b4aa8896fdfc0ba143a43c06f0a9#168be06594f1b4aa8896fdfc0ba143a43c06f0a9"
 
 [[package]]
 name = "craft-fonts-build"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs?rev=9afd10142c0a0017b914b87d1774754441d891c2#9afd10142c0a0017b914b87d1774754441d891c2"
+source = "git+https://github.com/aiongg/craft-libs?rev=168be06594f1b4aa8896fdfc0ba143a43c06f0a9#168be06594f1b4aa8896fdfc0ba143a43c06f0a9"
 dependencies = [
  "skera",
  "skrifa 0.48.0",
@@ -991,7 +991,7 @@ dependencies = [
 [[package]]
 name = "craft-i18n"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs?rev=9afd10142c0a0017b914b87d1774754441d891c2#9afd10142c0a0017b914b87d1774754441d891c2"
+source = "git+https://github.com/aiongg/craft-libs?rev=168be06594f1b4aa8896fdfc0ba143a43c06f0a9#168be06594f1b4aa8896fdfc0ba143a43c06f0a9"
 dependencies = [
  "fixed_decimal",
  "icu_decimal",
@@ -1013,7 +1013,7 @@ dependencies = [
 [[package]]
 name = "craft-keymap"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs?rev=9afd10142c0a0017b914b87d1774754441d891c2#9afd10142c0a0017b914b87d1774754441d891c2"
+source = "git+https://github.com/aiongg/craft-libs?rev=168be06594f1b4aa8896fdfc0ba143a43c06f0a9#168be06594f1b4aa8896fdfc0ba143a43c06f0a9"
 dependencies = [
  "craft-i18n",
  "craft-ui",
@@ -1025,7 +1025,7 @@ dependencies = [
 [[package]]
 name = "craft-pdf"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs?rev=9afd10142c0a0017b914b87d1774754441d891c2#9afd10142c0a0017b914b87d1774754441d891c2"
+source = "git+https://github.com/aiongg/craft-libs?rev=168be06594f1b4aa8896fdfc0ba143a43c06f0a9#168be06594f1b4aa8896fdfc0ba143a43c06f0a9"
 dependencies = [
  "bytemuck",
  "hayro",
@@ -1038,7 +1038,7 @@ dependencies = [
 [[package]]
 name = "craft-prepress"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs?rev=9afd10142c0a0017b914b87d1774754441d891c2#9afd10142c0a0017b914b87d1774754441d891c2"
+source = "git+https://github.com/aiongg/craft-libs?rev=168be06594f1b4aa8896fdfc0ba143a43c06f0a9#168be06594f1b4aa8896fdfc0ba143a43c06f0a9"
 dependencies = [
  "craft-cms",
  "craft-pdf",
@@ -1051,7 +1051,7 @@ dependencies = [
 [[package]]
 name = "craft-print"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs?rev=9afd10142c0a0017b914b87d1774754441d891c2#9afd10142c0a0017b914b87d1774754441d891c2"
+source = "git+https://github.com/aiongg/craft-libs?rev=168be06594f1b4aa8896fdfc0ba143a43c06f0a9#168be06594f1b4aa8896fdfc0ba143a43c06f0a9"
 dependencies = [
  "craft-winprint-gdi",
  "miniz_oxide 0.8.9",
@@ -1064,7 +1064,7 @@ dependencies = [
 [[package]]
 name = "craft-ui"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs?rev=9afd10142c0a0017b914b87d1774754441d891c2#9afd10142c0a0017b914b87d1774754441d891c2"
+source = "git+https://github.com/aiongg/craft-libs?rev=168be06594f1b4aa8896fdfc0ba143a43c06f0a9#168be06594f1b4aa8896fdfc0ba143a43c06f0a9"
 dependencies = [
  "craft-fonts-build",
  "craft-i18n",
@@ -2567,7 +2567,7 @@ dependencies = [
 [[package]]
 name = "hayro"
 version = "0.7.1"
-source = "git+https://github.com/aiongg/craft-libs?rev=9afd10142c0a0017b914b87d1774754441d891c2#9afd10142c0a0017b914b87d1774754441d891c2"
+source = "git+https://github.com/aiongg/craft-libs?rev=168be06594f1b4aa8896fdfc0ba143a43c06f0a9#168be06594f1b4aa8896fdfc0ba143a43c06f0a9"
 dependencies = [
  "bytemuck",
  "hayro-interpret",
@@ -2597,7 +2597,7 @@ dependencies = [
 [[package]]
 name = "hayro-interpret"
 version = "0.7.0"
-source = "git+https://github.com/aiongg/craft-libs?rev=9afd10142c0a0017b914b87d1774754441d891c2#9afd10142c0a0017b914b87d1774754441d891c2"
+source = "git+https://github.com/aiongg/craft-libs?rev=168be06594f1b4aa8896fdfc0ba143a43c06f0a9#168be06594f1b4aa8896fdfc0ba143a43c06f0a9"
 dependencies = [
  "bitflags 2.13.2",
  "hayro-cmap",
@@ -2615,7 +2615,7 @@ dependencies = [
 [[package]]
 name = "hayro-jbig2"
 version = "0.3.0"
-source = "git+https://github.com/aiongg/craft-libs?rev=9afd10142c0a0017b914b87d1774754441d891c2#9afd10142c0a0017b914b87d1774754441d891c2"
+source = "git+https://github.com/aiongg/craft-libs?rev=168be06594f1b4aa8896fdfc0ba143a43c06f0a9#168be06594f1b4aa8896fdfc0ba143a43c06f0a9"
 dependencies = [
  "fearless_simd",
  "hayro-ccitt",
@@ -2639,7 +2639,7 @@ checksum = "885c5ef0654933139a9b9546fc2c69e18d37f38aa2520f079092b1be18f1fcaa"
 [[package]]
 name = "hayro-syntax"
 version = "0.7.2"
-source = "git+https://github.com/aiongg/craft-libs?rev=9afd10142c0a0017b914b87d1774754441d891c2#9afd10142c0a0017b914b87d1774754441d891c2"
+source = "git+https://github.com/aiongg/craft-libs?rev=168be06594f1b4aa8896fdfc0ba143a43c06f0a9#168be06594f1b4aa8896fdfc0ba143a43c06f0a9"
 dependencies = [
  "flate2",
  "hayro-ccitt",
@@ -3234,7 +3234,7 @@ dependencies = [
 [[package]]
 name = "krilla"
 version = "0.8.2"
-source = "git+https://github.com/aiongg/craft-libs?rev=9afd10142c0a0017b914b87d1774754441d891c2#9afd10142c0a0017b914b87d1774754441d891c2"
+source = "git+https://github.com/aiongg/craft-libs?rev=168be06594f1b4aa8896fdfc0ba143a43c06f0a9#168be06594f1b4aa8896fdfc0ba143a43c06f0a9"
 dependencies = [
  "base64 0.22.1",
  "bumpalo",
