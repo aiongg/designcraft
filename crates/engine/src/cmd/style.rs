@@ -258,7 +258,7 @@ pub fn specs() -> Vec<CommandSpec> {
                 if !exists {
                     return Err(bad("style.exportTag", format!("no style `{name}`")));
                 }
-                let key = format!("{}:{name}", if character { "c" } else { "p" });
+                let key = export_tag_key(!character, &name);
                 let (tag, class) = (str_param(p, "tag").map(str::to_string), str_param(p, "class").map(str::to_string));
                 s.edit(|d, _| {
                     let st = d.styles_mut();
@@ -964,22 +964,31 @@ fn edit_para(s: &mut Session, p: &Value) -> Result<Value> {
     })
 }
 
-/// Rename a paragraph or character style everywhere it's used.
+/// Rename a paragraph or character style everywhere it's used; its Export Tagging follows.
 fn rename_style(d: &mut designcraft_doc::Document, para: bool, from: &str, to: &str) {
+    let st = d.styles_mut();
     if para {
-        for s in &mut d.styles_mut().paragraph {
+        for s in &mut st.paragraph {
             if s.name == from {
                 s.name = to.to_string();
             }
         }
     } else {
-        for s in &mut d.styles_mut().character {
+        for s in &mut st.character {
             if s.name == from {
                 s.name = to.to_string();
             }
         }
     }
+    if let Some(tag) = st.export_tags.remove(&export_tag_key(para, from)) {
+        st.export_tags.insert(export_tag_key(para, to), tag);
+    }
     redirect_style_refs(d, para, from, to);
+}
+
+/// The `Styles::export_tags` key of a paragraph (`para`) or character style.
+fn export_tag_key(para: bool, name: &str) -> String {
+    format!("{}:{name}", if para { "p" } else { "c" })
 }
 
 /// Point every reference to style `from` at `to`, except the style's own registry entry (its
@@ -1165,8 +1174,10 @@ fn delete_style(s: &mut Session, p: &Value, para: bool) -> Result<Value> {
         for b in based.into_iter().filter(|b| b.as_deref() == Some(name.as_str())) {
             *b = parent.clone();
         }
+        // The replacement keeps its own Export Tagging.
+        st.export_tags.remove(&export_tag_key(para, &name));
         // Every other use: styles, stories, table cells, nested and GREP styles, notes, defaults.
-        rename_style(d, para, &name, &repl);
+        redirect_style_refs(d, para, &name, &repl);
         ok()
     })
 }
@@ -2825,6 +2836,49 @@ mod export_tag_tests {
         let text = String::from_utf8_lossy(&pdf);
         assert!(text.contains("/S/H1") && text.contains("/S/P"), "structure elements");
         assert!(designcraft_render::pdf_page_count(&pdf) == Some(1));
+    }
+
+    #[test]
+    fn export_tagging_follows_a_renamed_style_and_goes_with_a_deleted_one() {
+        let mut s = Session::new();
+        s.execute("file.new", &json!({})).unwrap();
+        s.execute("style.paragraph.create", &json!({"name": "Head"})).unwrap();
+        s.execute("style.paragraph.create", &json!({"name": "Body"})).unwrap();
+        s.execute("style.character.create", &json!({"name": "Term"})).unwrap();
+        s.execute("style.exportTag", &json!({"style": "Head", "tag": "h2", "class": "head"})).unwrap();
+        s.execute("style.exportTag", &json!({"style": "Body", "tag": "p", "class": "body"})).unwrap();
+        s.execute("style.exportTag", &json!({"style": "Term", "character": true, "tag": "em", "class": "term"})).unwrap();
+        let tag = |s: &Session, name: &str, character: bool| {
+            s.doc().unwrap().doc.styles.export_tag(name, character).map(|t| (t.tag.clone(), t.class.clone()))
+        };
+        let pair = |t: &str, c: &str| Some((t.to_string(), c.to_string()));
+
+        s.execute("style.paragraph.edit", &json!({"name": "Head", "rename": "Title"})).unwrap();
+        s.execute("style.character.edit", &json!({"name": "Term", "rename": "Word"})).unwrap();
+        assert_eq!(tag(&s, "Title", false), pair("h2", "head"));
+        assert_eq!(tag(&s, "Head", false), None);
+        assert_eq!(tag(&s, "Word", true), pair("em", "term"));
+        assert_eq!(tag(&s, "Term", true), None);
+        // Moving a style into a group renames it to Group/Name.
+        s.execute("style.group", &json!({"kind": "paragraph", "names": ["Title"], "group": "Heads"})).unwrap();
+        assert_eq!(tag(&s, "Heads/Title", false), pair("h2", "head"));
+        assert_eq!(tag(&s, "Title", false), None);
+
+        for _ in 0..3 {
+            s.execute("edit.undo", &json!({})).unwrap();
+        }
+        assert_eq!(tag(&s, "Head", false), pair("h2", "head"));
+        assert_eq!(tag(&s, "Title", false), None);
+        assert_eq!(tag(&s, "Term", true), pair("em", "term"));
+        assert_eq!(tag(&s, "Word", true), None);
+
+        // Deleting drops the deleted style's tagging; the replacement keeps its own.
+        s.execute("style.paragraph.delete", &json!({"name": "Head", "replaceWith": "Body"})).unwrap();
+        assert_eq!(tag(&s, "Head", false), None);
+        assert_eq!(tag(&s, "Body", false), pair("p", "body"));
+        s.execute("style.character.delete", &json!({"name": "Term"})).unwrap();
+        assert_eq!(tag(&s, "Term", true), None);
+        assert!(s.doc().unwrap().doc.styles.export_tags.keys().all(|k| k == "p:Body"));
     }
 }
 
