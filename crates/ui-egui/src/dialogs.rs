@@ -3981,6 +3981,26 @@ fn paragraph_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
                         }
                         ui.end_row();
                     }
+                    // The CJK Grid Settings section edits the same `p.gridAlign` field.
+                    use designcraft_doc::GridAlign;
+                    const GRID_ALIGN: [(GridAlign, &str); 3] =
+                        [(GridAlign::None, "None"), (GridAlign::AllLines, "All Lines"), (GridAlign::FirstLineOnly, "First Line Only")];
+                    crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Align to Grid:"));
+                    let g: GridAlign = serde_json::from_value(cur(d, "p.gridAlign", &pv["gridAlign"])).unwrap_or_default();
+                    let shown = GRID_ALIGN.iter().find(|o| o.0 == g).map_or("", |o| o.1);
+                    egui::ComboBox::from_id_salt("psgridalign")
+                        .selected_text(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, shown)))
+                        .width(240.0)
+                        .show_ui(ui, |ui| {
+                            for (v, label) in GRID_ALIGN {
+                                if ui.selectable_label(v == g, crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, label))).clicked()
+                                    && let Ok(v) = serde_json::to_value(v)
+                                {
+                                    d.fields.insert("p.gridAlign".into(), v);
+                                }
+                            }
+                        });
+                    ui.end_row();
                 });
                 ui.add_space(6.0);
                 let mut ignore = cur(d, "p.ignoreOpticalMargin", &pv["ignoreOpticalMargin"]).as_bool().unwrap_or(false);
@@ -9690,6 +9710,31 @@ mod tests {
         confirm(&mut app).expect("OK saves the style edit");
         let st = app.session.active().unwrap();
         assert_eq!(st.doc.styles.para(&name).unwrap().para.align, Some(designcraft_doc::Align::Center));
+    }
+
+    #[test]
+    fn paragraph_style_options_align_to_grid_shows_and_sets_the_style_grid_alignment() {
+        use designcraft_doc::GridAlign;
+        use egui_kittest::kittest::Queryable;
+        let mut app = test_app();
+        app.session.execute("style.paragraph.create", &json!({"name": "Grid Body", "para": {"gridAlign": "firstLineOnly"}})).unwrap();
+        app.ui.dialog = Some(Dialog::new("paragraphStyleOptions", json!({"name": "Grid Body", "section": "indents"})));
+        let mut h = crate::test_window::open(app, egui::vec2(1400.0, 900.0));
+        let grid = |h: &egui_kittest::Harness<'static, crate::test_window::Window>| {
+            h.state().app.session.active().unwrap().doc.styles.para("Grid Body").unwrap().para.grid_align
+        };
+        h.run_steps(4);
+        h.get_by_value("First Line Only");
+        confirm(&mut h.state_mut().app).unwrap();
+        assert_eq!(grid(&h), Some(GridAlign::FirstLineOnly), "OK without edits keeps the style's alignment");
+        h.state_mut().app.ui.dialog = Some(Dialog::new("paragraphStyleOptions", json!({"name": "Grid Body", "section": "indents"})));
+        h.run_steps(4);
+        h.get_by_value("First Line Only").click();
+        h.run_steps(3);
+        h.get_by_label("All Lines").click();
+        h.run_steps(3);
+        confirm(&mut h.state_mut().app).unwrap();
+        assert_eq!(grid(&h), Some(GridAlign::AllLines));
     }
 
     #[test]
