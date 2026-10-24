@@ -913,6 +913,7 @@ pub const MENUS: &[(&str, &[&str])] = &[
             "ui:window.panel|Conditional Text|{\"panel\": \"conditions\"}",
             "ui:window.panel|Glyphs|{\"panel\": \"glyphs\"}",
             "ui:window.panel|Paragraph|{\"panel\": \"paragraph\"}",
+            "ui:window.panel|Story|{\"panel\": \"story\"}",
             "ui:window.panel|Table|{\"panel\": \"table\"}",
             "ui:app.tabsPanel",
             "ui:window.panel|Typography|{\"panel\": \"typography\"}",
@@ -966,7 +967,8 @@ pub const CLASSIC_GROUPS: &[&[&str]] = &[
 ];
 
 /// The Typography preset's available panels in the order observed in InDesign's workspace.
-/// CC Libraries and the separate Story panel have no corresponding DesignCraft panel.
+/// CC Libraries has no corresponding DesignCraft panel, and where the Story panel sits in it is
+/// not recorded, so these groups leave it out.
 pub const TYPOGRAPHY_GROUPS: &[&[&str]] = &[
     &["pages", "layers", "swatches"],
     &["glyphs", "textWrap"],

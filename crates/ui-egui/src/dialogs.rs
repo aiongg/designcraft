@@ -3982,6 +3982,11 @@ fn paragraph_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
                         ui.end_row();
                     }
                 });
+                ui.add_space(6.0);
+                let mut ignore = cur(d, "p.ignoreOpticalMargin", &pv["ignoreOpticalMargin"]).as_bool().unwrap_or(false);
+                if ui.checkbox(&mut ignore, crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Ignore Optical Margin"))).changed() {
+                    d.fields.insert("p.ignoreOpticalMargin".into(), json!(ignore));
+                }
             }
             "tabs" => style_tabs(&app.ui.language, ui, d, &pv, &doc),
             "rules" => paragraph_rules(app, ui, d, "p.", &pv),
@@ -7788,6 +7793,35 @@ mod tests {
         assert_eq!(para["spanColumns"], json!({"kind": "split", "columns": 3}));
         let props: designcraft_doc::ParaProps = serde_json::from_value(para).unwrap();
         assert_eq!(props.number_label(3), "III)\t");
+    }
+
+    #[test]
+    fn paragraph_style_options_ignore_optical_margin_is_set_on_ok() {
+        use egui_kittest::{Harness, kittest::Queryable};
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({})).unwrap();
+        app.run("style.paragraph.create", json!({"name": "Flush"})).unwrap();
+        app.ui.dialog = Some(Dialog::new("paragraphStyleOptions", json!({"name": "Flush", "section": "indents"})));
+        let mut h = Harness::builder().with_size(egui::vec2(1000.0, 800.0)).build_ui_state(
+            |ui, app: &mut DesignApp| {
+                let key = egui::Id::new("ignore_optical_margin_fonts");
+                if ui.data(|d| d.get_temp::<bool>(key)).is_none() {
+                    crate::theme::install_fonts(ui.ctx(), "");
+                    ui.data_mut(|d| d.insert_temp(key, true));
+                    return;
+                }
+                show(app, ui.ctx());
+            },
+            app,
+        );
+        h.run_steps(3);
+        h.get_by_label("Ignore Optical Margin").click();
+        h.run_steps(3);
+        h.get_by_label("  OK  ").click();
+        h.run_steps(3);
+        let app = h.state();
+        assert!(app.ui.dialog.is_none());
+        assert_eq!(app.session.doc().unwrap().doc.styles.para("Flush").unwrap().para.ignore_optical_margin, Some(true));
     }
 
     #[test]
