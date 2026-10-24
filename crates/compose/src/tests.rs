@@ -1413,6 +1413,56 @@ fn optical_margin_hangs_the_edges_of_lines_with_tabs() {
     }
 }
 
+/// How far the opening quote of a one-line paragraph at `text_size` hangs into the left margin,
+/// with the story's Optical Margin Alignment `story` (on, size) and the paragraph's attributes.
+fn quote_hang(text_size: f64, story: Option<f64>, para: ParaAttrs) -> f64 {
+    let text = "“Quoted” words.";
+    let first_x = |story: Option<f64>, para: ParaAttrs| {
+        let (mut d, sid, _) = doc_with(text, Rect::new(0.0, 0.0, 400.0, 200.0), para);
+        let st = d.story_mut(sid).unwrap();
+        st.format_chars(0..text.len(), |f| f.over.size = Some(text_size));
+        if let Some(size) = story {
+            st.optical_margin = designcraft_doc::OpticalMargin { on: true, size };
+        }
+        let cs = compose_story(&d, sid, &ComposeOptions::default());
+        let lines = all_lines(&cs);
+        assert_eq!(lines.len(), 1);
+        lines[0].glyphs[0].x
+    };
+    first_x(None, ParaAttrs::default()) - first_x(story, para)
+}
+
+#[test]
+fn story_optical_margin_hang_scales_with_its_size() {
+    let at12 = quote_hang(12.0, Some(12.0), ParaAttrs::default());
+    let at24 = quote_hang(12.0, Some(24.0), ParaAttrs::default());
+    assert!(at12 > 1.0, "{at12}");
+    assert!((at24 - 2.0 * at12).abs() < 0.01, "{at12} {at24}");
+    // The size is the type size the hang is set for: 24 pt text at 24 hangs like 12 at 12, twice as far.
+    let big = quote_hang(24.0, Some(24.0), ParaAttrs::default());
+    assert!((big - 2.0 * at12).abs() < 0.01, "{at12} {big}");
+}
+
+#[test]
+fn ignore_optical_margin_paragraph_does_not_hang() {
+    let ignored = ParaAttrs { ignore_optical_margin: Some(true), optical_margin: Some(true), ..Default::default() };
+    assert_eq!(quote_hang(12.0, Some(12.0), ignored.clone()), 0.0);
+    assert_eq!(quote_hang(12.0, None, ignored), 0.0);
+}
+
+#[test]
+fn paragraph_optical_margin_hangs_at_the_text_size() {
+    // Documents saved before the story setting existed: the paragraph's switch hangs each
+    // character by its own size, not the story's default 12 pt.
+    let own = ParaAttrs { optical_margin: Some(true), ..Default::default() };
+    let at24 = quote_hang(24.0, None, own.clone());
+    assert!((at24 - quote_hang(24.0, Some(24.0), ParaAttrs::default())).abs() < 0.01);
+    assert!((at24 - 2.0 * quote_hang(12.0, None, own)).abs() < 0.01);
+    // The story setting, when on, sets the size.
+    let story = quote_hang(24.0, Some(12.0), ParaAttrs { optical_margin: Some(true), ..Default::default() });
+    assert!((story - at24 / 2.0).abs() < 0.01, "{story} {at24}");
+}
+
 // ---------- golden paragraph corpus ----------
 
 /// Original prose (written for this corpus) with a realistic mix of short and long words.
@@ -6752,7 +6802,7 @@ fn roman_word_break_breaks_inside_words_without_hyphens() {
 fn grid_doc(text: &str, para: ParaAttrs, edit: impl FnOnce(&mut Document, StoryId)) -> (Vec<Line>, (f64, f64)) {
     let (mut d, sid, fid) = doc_with(text, Rect::new(0.0, 0.0, 300.0, 400.0), para);
     if let Some(tf) = d.item_mut(fid).and_then(|i| i.text_frame_mut()) {
-        tf.options.baseline_grid = Some(designcraft_doc::FrameBaselineGrid { start: 0.0, increment: 12.0 });
+        tf.options.baseline_grid = Some(designcraft_doc::FrameBaselineGrid::new(0.0, 12.0));
     }
     edit(&mut d, sid);
     // Vertical frames have no baseline grid.
@@ -7460,6 +7510,37 @@ fn baseline_grid_relative_to_the_top_margin_starts_at_each_pages_margin() {
     let lines = page_baselines(&d, p1);
     assert!((lines[0] - 52.0).abs() < 1e-6, "{lines:?}");
     assert_eq!(lines.len(), 41);
+}
+
+/// A frame's custom grid (start 10, increment 13) measured from the page top, the top margin
+/// (36), the frame top (100) or the top inset (6 below it).
+#[test]
+fn frame_baseline_grid_relative_to_page_margin_frame_or_inset() {
+    use designcraft_doc::{FrameBaselineGrid, FrameGridRelative as R};
+    let first_baseline = |relative_to: Option<R>| {
+        let mut d = Document::new(&NewDocument { margins: designcraft_doc::Margins::uniform(36.0), ..Default::default() });
+        let lid = d.default_layer();
+        let para = ParaFormat { para: ParaAttrs { grid_align: Some(GridAlign::AllLines), ..Default::default() }, ..Default::default() };
+        let (fid, sid) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(36.0, 100.0, 336.0, 400.0), lid, "Grid", para).unwrap();
+        let st = d.story_mut(sid).unwrap();
+        st.paras[0].chars =
+            designcraft_doc::CharAttrs { size: Some(11.0), leading: Some(designcraft_doc::Leading::Points(13.0)), ..Default::default() };
+        let tf = d.item_mut(fid).unwrap().text_frame_mut().unwrap();
+        tf.options.inset = [6.0, 0.0, 0.0, 0.0];
+        tf.options.baseline_grid = relative_to.map(|r| FrameBaselineGrid { relative_to: r, ..FrameBaselineGrid::new(10.0, 13.0) });
+        // A document grid that matches none of the frame grids.
+        d.settings.baseline_grid.start = 0.0;
+        d.settings.baseline_grid.increment = 0.0;
+        compose_story(&d, sid, &ComposeOptions::default()).frames[0].lines[0].baseline
+    };
+    // Without a grid the first baseline sits an ascent below the top inset.
+    let natural = first_baseline(None);
+    assert!(natural > 106.0 && natural < 120.0, "{natural}");
+    for (r, origin) in [(R::TopOfPage, 10.0), (R::TopMargin, 46.0), (R::TopOfFrame, 110.0), (R::TopInset, 116.0)] {
+        let want = (0..).map(|n| origin + 13.0 * f64::from(n)).find(|y| *y >= natural - 1e-9).unwrap();
+        let got = first_baseline(Some(r));
+        assert!((got - want).abs() < 1e-6, "{r:?}: first baseline {got}, want {want} (natural {natural})");
+    }
 }
 
 /// A group's transform moves a frame from the left page of a spread to the right one: the grid

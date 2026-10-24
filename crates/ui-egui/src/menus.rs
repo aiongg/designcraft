@@ -251,6 +251,8 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("view.nextSpread", "Next Spread", Some("Alt+PageDown"), "{} — centre the spread after the one in view"),
     ("view.previousSpread", "Previous Spread", Some("Alt+PageUp"), "{} — centre the spread before the one in view"),
     ("view.goToPage", "Go to Page…", Some("Cmd+J"), "{page: number (position) | \"name\" (section page name, or \"+n\" for a position)}"),
+    ("view.goBack", "Go Back", Some("Cmd+PageUp"), "{} — show the page viewed before this one in the window"),
+    ("view.goForward", "Go Forward", Some("Cmd+PageDown"), "{} — show the page viewed after this one (after Go Back)"),
     (
         "window.panel",
         "Show Panel",
@@ -441,6 +443,8 @@ pub const MENUS: &[(&str, &[&str])] = &[
             "ui:view.nextSpread",
             "ui:view.previousSpread",
             "ui:view.goToPage",
+            "ui:view.goBack",
+            "ui:view.goForward",
             "-",
             "cmd:layout.section",
             "cmd:toc.generate",
@@ -498,7 +502,11 @@ pub const MENUS: &[(&str, &[&str])] = &[
             "-",
             ">Notes",
             "cmd:note.new",
+            "cmd:note.convertFromText",
             "ui:window.panel|Notes|{\"panel\": \"notes\"}",
+            "-",
+            "cmd:note.previous",
+            "cmd:note.next",
             "<",
             ">Track Changes",
             "cmd:changes.track",
@@ -521,6 +529,7 @@ pub const MENUS: &[(&str, &[&str])] = &[
             ">Text Variables",
             "cmd:variables.define",
             "cmd:variables.insert",
+            "cmd:variables.convertToText",
             "<",
             "-",
             ">Bulleted & Numbered Lists",
@@ -913,6 +922,7 @@ pub const MENUS: &[(&str, &[&str])] = &[
             "ui:window.panel|Conditional Text|{\"panel\": \"conditions\"}",
             "ui:window.panel|Glyphs|{\"panel\": \"glyphs\"}",
             "ui:window.panel|Paragraph|{\"panel\": \"paragraph\"}",
+            "ui:window.panel|Story|{\"panel\": \"story\"}",
             "ui:window.panel|Table|{\"panel\": \"table\"}",
             "ui:app.tabsPanel",
             "ui:window.panel|Typography|{\"panel\": \"typography\"}",
@@ -966,7 +976,8 @@ pub const CLASSIC_GROUPS: &[&[&str]] = &[
 ];
 
 /// The Typography preset's available panels in the order observed in InDesign's workspace.
-/// CC Libraries and the separate Story panel have no corresponding DesignCraft panel.
+/// CC Libraries has no corresponding DesignCraft panel, and where the Story panel sits in it is
+/// not recorded, so these groups leave it out.
 pub const TYPOGRAPHY_GROUPS: &[&[&str]] = &[
     &["pages", "layers", "swatches"],
     &["glyphs", "textWrap"],
@@ -1664,6 +1675,10 @@ fn run_ui_inner(app: &mut DesignApp, id: &str, p: &Value) -> Option<Result<Value
             }
             Ok(Value::Null)
         }
+        "view.goBack" | "view.goForward" => {
+            crate::canvas::go_through_history(app, if id == "view.goBack" { -1 } else { 1 });
+            Ok(Value::Null)
+        }
         "view.nextSpread" | "view.previousSpread" => {
             crate::canvas::step_spread(app, if id == "view.nextSpread" { 1 } else { -1 });
             Ok(Value::Null)
@@ -2007,13 +2022,28 @@ fn set_screen_mode(app: &mut DesignApp, mode: ScreenMode) {
         app.ui.presentation_return = app.ui.screen_mode;
         // Presentation fits the spread to the screen; leaving it puts the user's view back.
         app.ui.presentation_view = app.view_key().zip(app.view().copied());
+        app.ui.presentation_page = crate::canvas::page_in_view(app);
+        app.ui.presentation_history = app.page_history().cloned();
     }
     if mode != ScreenMode::Presentation
         && presenting
         && let Some((k, v)) = app.ui.presentation_view.take()
-        && let Some(view) = app.views.get_mut(&k)
+        && app.views.contains_key(&k)
     {
-        *view = v;
+        // Go Back sees the presentation as one jump to the last spread presented, and putting the
+        // view back as a jump from there: the spreads in between would otherwise have replaced the
+        // place the view was at with the presentation's.
+        let shown = app.ui.presentation_page.take().zip(crate::canvas::page_in_view(app)).filter(|_| app.view_key() == Some(k));
+        let h = app.page_history.entry(k).or_default();
+        *h = app.ui.presentation_history.take().unwrap_or_default();
+        if let Some(((from, at), (to, offset))) = shown {
+            h.leave(from, at);
+            h.visit(to, offset);
+            h.visit(from, at);
+        }
+        if let Some(view) = app.views.get_mut(&k) {
+            *view = v;
+        }
     }
     app.ui.screen_mode = mode;
 }
@@ -2505,6 +2535,9 @@ pub fn menu_enabled(app: &DesignApp, id: &str) -> bool {
     }
     if id == "guide.selectAll" && (!app.ui.guides || app.ui.guides_locked) {
         return false;
+    }
+    if id == "view.goBack" || id == "view.goForward" {
+        return crate::canvas::can_go_through_history(app, if id == "view.goBack" { -1 } else { 1 });
     }
     if ui_label(id).is_some() {
         return app.session.active().is_some() || id.starts_with("app.") || id.starts_with("window.") || id.starts_with("help.");
@@ -4235,6 +4268,272 @@ mod tests {
         let centre = (v.origin.x + r.width() as f64 / 2.0 / v.zoom, v.origin.y + r.height() as f64 / 2.0 / v.zoom);
         assert!((centre.0 - slot.bounds.center().x).abs() < 1e-6 && (centre.1 - slot.bounds.center().y).abs() < 1e-6);
         assert_eq!(v.zoom, zoom);
+    }
+
+    #[test]
+    fn go_back_and_go_forward_retrace_the_pages_viewed() {
+        let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.session.execute("file.new", &json!({"pages": 7, "facingPages": true})).unwrap();
+        let ctx = egui::Context::default();
+        let frame = |app: &mut crate::DesignApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))),
+                events,
+                ..Default::default()
+            };
+            let mut out = ctx.run_ui(input, |ui| {
+                app.logic(&ui.ctx().clone());
+                app.ui(ui);
+            });
+            out.textures_delta.clear();
+        };
+        let key = |k: egui::Key, modifiers: egui::Modifiers| {
+            vec![
+                egui::Event::Key { key: k, physical_key: None, pressed: true, repeat: false, modifiers },
+                egui::Event::Key { key: k, physical_key: None, pressed: false, repeat: false, modifiers },
+            ]
+        };
+        let page = |app: &crate::DesignApp| crate::canvas::current_page(app).unwrap();
+        let can = |app: &crate::DesignApp| (menu_enabled(app, "view.goBack"), menu_enabled(app, "view.goForward"));
+        frame(&mut app, vec![]);
+        frame(&mut app, vec![]);
+        // In the Layout menu after Go to Page.
+        let layout = MENUS.iter().find(|m| m.0 == "Layout").unwrap().1;
+        let at = |id: &str| layout.iter().position(|e| *e == format!("ui:{id}")).unwrap();
+        assert_eq!(at("view.goBack"), at("view.goToPage") + 1);
+        assert_eq!(at("view.goForward"), at("view.goBack") + 1);
+        assert_eq!(can(&app), (false, false), "one page viewed: nowhere to go");
+        let cmd = egui::Modifiers { command: true, ctrl: true, ..Default::default() };
+        let cmd_shift = egui::Modifiers { shift: true, ..cmd };
+        let shift = egui::Modifiers::SHIFT;
+        // Pages viewed: 1, 5, 7.
+        app.run("view.goToPage", json!({"page": 5})).unwrap();
+        frame(&mut app, vec![]);
+        frame(&mut app, key(egui::Key::PageDown, cmd_shift));
+        assert_eq!(page(&app), 6);
+        frame(&mut app, vec![]);
+        assert_eq!(can(&app), (true, false));
+        frame(&mut app, key(egui::Key::PageUp, cmd));
+        assert_eq!(page(&app), 4, "Go Back");
+        frame(&mut app, key(egui::Key::PageUp, cmd));
+        assert_eq!(page(&app), 0, "Go Back again");
+        frame(&mut app, vec![]);
+        assert_eq!(can(&app), (false, true), "back at the first page viewed");
+        frame(&mut app, key(egui::Key::PageDown, cmd));
+        assert_eq!(page(&app), 4, "Go Forward");
+        frame(&mut app, key(egui::Key::PageDown, cmd));
+        assert_eq!(page(&app), 6, "Go Forward again");
+        frame(&mut app, vec![]);
+        assert_eq!(can(&app), (true, false));
+        // After going back, viewing another page drops the pages ahead.
+        frame(&mut app, key(egui::Key::PageUp, cmd));
+        assert_eq!(page(&app), 4);
+        frame(&mut app, key(egui::Key::PageDown, shift));
+        assert_eq!(page(&app), 5, "Next Page");
+        frame(&mut app, vec![]);
+        assert_eq!(can(&app), (true, false), "nothing ahead after a new page");
+        frame(&mut app, key(egui::Key::PageDown, cmd));
+        assert_eq!(page(&app), 5, "Go Forward does nothing");
+        frame(&mut app, key(egui::Key::PageUp, cmd));
+        assert_eq!(page(&app), 4, "Go Back returns to the page before Next Page");
+    }
+
+    #[test]
+    fn go_back_waits_for_the_view_to_be_fitted() {
+        let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.session.execute("file.new", &json!({"pages": 7, "facingPages": true})).unwrap();
+        let ctx = egui::Context::default();
+        let frame = |app: &mut crate::DesignApp| {
+            let input =
+                egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))), ..Default::default() };
+            let mut out = ctx.run_ui(input, |ui| {
+                app.logic(&ui.ctx().clone());
+                app.ui(ui);
+            });
+            out.textures_delta.clear();
+        };
+        frame(&mut app);
+        frame(&mut app);
+        app.run("view.goToPage", json!({"page": 5})).unwrap();
+        frame(&mut app);
+        assert!(menu_enabled(&app, "view.goBack"));
+        // Leaving parent pages through the Pages panel: the canvas refits on the next frame.
+        app.view_mut().unwrap().fitted = false;
+        assert!(!menu_enabled(&app, "view.goBack"), "the refit would replace where Go Back went");
+        crate::canvas::go_through_history(&mut app, -1);
+        frame(&mut app);
+        assert!(menu_enabled(&app, "view.goBack"), "the unfitted Go Back used no history entry");
+    }
+
+    #[test]
+    fn next_spread_at_the_last_spread_is_no_jump() {
+        let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.session.execute("file.new", &json!({"pages": 7, "facingPages": true})).unwrap();
+        let ctx = egui::Context::default();
+        let frame = |app: &mut crate::DesignApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))),
+                events,
+                ..Default::default()
+            };
+            let mut out = ctx.run_ui(input, |ui| {
+                app.logic(&ui.ctx().clone());
+                app.ui(ui);
+            });
+            out.textures_delta.clear();
+        };
+        let key = |k: egui::Key, modifiers: egui::Modifiers| {
+            vec![
+                egui::Event::Key { key: k, physical_key: None, pressed: true, repeat: false, modifiers },
+                egui::Event::Key { key: k, physical_key: None, pressed: false, repeat: false, modifiers },
+            ]
+        };
+        let page = |app: &crate::DesignApp| crate::canvas::current_page(app).unwrap();
+        let cmd = egui::Modifiers { command: true, ctrl: true, ..Default::default() };
+        let alt = egui::Modifiers::ALT;
+        frame(&mut app, vec![]);
+        frame(&mut app, vec![]);
+        // Pages 1 | 2-3 | 4-5 | 6-7: page 6 is the left page of the last spread.
+        app.run("view.goToPage", json!({"page": 6})).unwrap();
+        frame(&mut app, vec![]);
+        assert_eq!(page(&app), 5);
+        // Next Spread has no spread to go to; centring the last one moves the view to its fold.
+        frame(&mut app, key(egui::Key::PageDown, alt));
+        frame(&mut app, key(egui::Key::PageDown, alt));
+        assert_ne!(page(&app), 5, "the view moved to the right page");
+        frame(&mut app, key(egui::Key::PageUp, cmd));
+        assert_eq!(page(&app), 0, "Go Back returns to the page before Go to Page");
+        assert!(!menu_enabled(&app, "view.goBack"));
+    }
+
+    #[test]
+    fn go_back_returns_to_the_view_a_jump_left_and_scrolling_adds_no_entry() {
+        let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.session.execute("file.new", &json!({"pages": 7, "facingPages": true})).unwrap();
+        let ctx = egui::Context::default();
+        let frame = |app: &mut crate::DesignApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))),
+                events,
+                ..Default::default()
+            };
+            let mut out = ctx.run_ui(input, |ui| {
+                app.logic(&ui.ctx().clone());
+                app.ui(ui);
+            });
+            out.textures_delta.clear();
+        };
+        let key = |k: egui::Key, modifiers: egui::Modifiers| {
+            vec![
+                egui::Event::Key { key: k, physical_key: None, pressed: true, repeat: false, modifiers },
+                egui::Event::Key { key: k, physical_key: None, pressed: false, repeat: false, modifiers },
+            ]
+        };
+        let spread = |app: &crate::DesignApp| {
+            let st = app.session.active().unwrap();
+            crate::canvas::current_slot(app, &designcraft_tools::layout::CanvasLayout::new(&st.doc, false)).unwrap()
+        };
+        let cmd = egui::Modifiers { command: true, ctrl: true, ..Default::default() };
+        let alt = egui::Modifiers::ALT;
+        frame(&mut app, vec![]);
+        frame(&mut app, vec![]);
+        // Pages 1 | 2-3 | 4-5 | 6-7. Spread 2-3 fitted: the view centre is on the fold.
+        frame(&mut app, key(egui::Key::PageDown, alt));
+        app.run("view.fitSpread", json!({})).unwrap();
+        frame(&mut app, vec![]);
+        let before = *app.view().unwrap();
+        frame(&mut app, key(egui::Key::PageDown, alt));
+        assert_eq!(spread(&app), 2, "Next Spread");
+        frame(&mut app, key(egui::Key::PageUp, cmd));
+        let v = *app.view().unwrap();
+        assert!((v.origin - before.origin).hypot() < 1e-6, "Go Back shows the spread as it was: {:?} vs {:?}", v.origin, before.origin);
+        assert_eq!(v.zoom, before.zoom);
+        // Zoomed in after the jump: Go Back keeps the magnification in use, as InDesign's does, and
+        // centres the same place.
+        let centre = |app: &crate::DesignApp| {
+            let (v, r) = (app.view().unwrap(), app.canvas_rect.unwrap());
+            designcraft_geom::Point::new(v.origin.x + r.width() as f64 / 2.0 / v.zoom, v.origin.y + r.height() as f64 / 2.0 / v.zoom)
+        };
+        let place = centre(&app);
+        frame(&mut app, key(egui::Key::PageDown, alt));
+        app.run("view.zoomIn", json!({})).unwrap();
+        let zoomed = app.view().unwrap().zoom;
+        assert!(zoomed > before.zoom);
+        frame(&mut app, key(egui::Key::PageUp, cmd));
+        assert_eq!(app.view().unwrap().zoom, zoomed, "the zoom in use is kept");
+        assert!((centre(&app) - place).hypot() < 1e-6, "the same place: {:?} vs {place:?}", centre(&app));
+        // Scrolling down two spreads is not a jump: Go Forward keeps its page, and Go Back skips
+        // from where the scroll ended straight to the page before the first jump.
+        let slots = designcraft_tools::layout::CanvasLayout::new(&app.session.active().unwrap().doc, false).slots;
+        app.view_mut().unwrap().origin.y += slots[3].bounds.center().y - slots[1].bounds.center().y;
+        frame(&mut app, vec![]);
+        assert_eq!(spread(&app), 3);
+        assert!(menu_enabled(&app, "view.goForward"), "scrolling kept the page ahead");
+        frame(&mut app, key(egui::Key::PageUp, cmd));
+        assert_eq!(spread(&app), 0, "Go Back");
+        assert!(!menu_enabled(&app, "view.goBack"), "the scroll added no entry");
+        frame(&mut app, key(egui::Key::PageDown, cmd));
+        assert_eq!(spread(&app), 3, "Go Forward returns to where the scroll ended");
+        frame(&mut app, key(egui::Key::PageDown, cmd));
+        assert_eq!(spread(&app), 2);
+    }
+
+    #[test]
+    fn go_back_after_presentation_returns_to_the_last_spread_presented() {
+        let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.session.execute("file.new", &json!({"pages": 7, "facingPages": true})).unwrap();
+        let ctx = egui::Context::default();
+        let frame = |app: &mut crate::DesignApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))),
+                events,
+                ..Default::default()
+            };
+            let mut out = ctx.run_ui(input, |ui| {
+                app.logic(&ui.ctx().clone());
+                app.ui(ui);
+            });
+            out.textures_delta.clear();
+        };
+        let key = |k: egui::Key, modifiers: egui::Modifiers| {
+            vec![
+                egui::Event::Key { key: k, physical_key: None, pressed: true, repeat: false, modifiers },
+                egui::Event::Key { key: k, physical_key: None, pressed: false, repeat: false, modifiers },
+            ]
+        };
+        let spread = |app: &crate::DesignApp| {
+            let st = app.session.active().unwrap();
+            crate::canvas::current_slot(app, &designcraft_tools::layout::CanvasLayout::new(&st.doc, false)).unwrap()
+        };
+        let cmd = egui::Modifiers { command: true, ctrl: true, ..Default::default() };
+        frame(&mut app, vec![]);
+        frame(&mut app, vec![]);
+        // Scrolled off the page's centre, so the place Go Back returns to is not just the page.
+        let view = app.view_mut().unwrap();
+        view.origin.x += 40.0;
+        view.origin.y += 60.0;
+        frame(&mut app, vec![]);
+        assert_eq!(spread(&app), 0);
+        let before = *app.view().unwrap();
+        // Presentation goes on to spreads 1 and 2; leaving it puts spread 0 back as it was.
+        app.run("view.screenMode", json!({"mode": "presentation"})).unwrap();
+        frame(&mut app, vec![]);
+        frame(&mut app, key(egui::Key::ArrowRight, egui::Modifiers::NONE));
+        frame(&mut app, key(egui::Key::ArrowRight, egui::Modifiers::NONE));
+        assert_eq!(spread(&app), 2);
+        app.run("view.screenMode", json!({"mode": "normal"})).unwrap();
+        frame(&mut app, vec![]);
+        assert_eq!(spread(&app), 0);
+        assert!(!menu_enabled(&app, "view.goForward"));
+        frame(&mut app, key(egui::Key::PageUp, cmd));
+        assert_eq!(spread(&app), 2, "Go Back shows the last spread presented");
+        frame(&mut app, key(egui::Key::PageUp, cmd));
+        assert_eq!(spread(&app), 0, "Go Back again, the view Presentation was entered from");
+        let v = *app.view().unwrap();
+        assert!((v.origin - before.origin).hypot() < 1e-6, "where it was: {:?} vs {:?}", v.origin, before.origin);
+        assert!(!menu_enabled(&app, "view.goBack"), "the presentation is one jump: spread 1 isn't kept");
+        frame(&mut app, key(egui::Key::PageDown, cmd));
+        assert_eq!(spread(&app), 2, "Go Forward");
     }
 
     #[test]

@@ -450,11 +450,12 @@ fn char_css(doc: &Document, c: &CharProps, base_size: f64, generics: &BTreeMap<S
         }
         _ => {}
     }
-    if c.underline {
-        out.push_str("text-decoration: underline; ");
-    }
-    if c.strikethrough {
-        out.push_str("text-decoration: line-through; ");
+    // One declaration: a later `text-decoration` would replace the earlier one.
+    match (c.underline, c.strikethrough) {
+        (true, true) => out.push_str("text-decoration: underline line-through; "),
+        (true, false) => out.push_str("text-decoration: underline; "),
+        (false, true) => out.push_str("text-decoration: line-through; "),
+        (false, false) => {}
     }
     if let Some(h) = hex(doc, &c.fill, c.fill_tint) {
         let _ = write!(out, "color: {h}; ");
@@ -2230,5 +2231,22 @@ mod tests {
         );
         let last = "<li id=\"en-1\"><a href=\"#enref-1\">1</a> End note</li>";
         assert_eq!(link_across_chapters(last, "content2.xhtml", &files), "<li id=\"en-1\"><a href=\"content.xhtml#enref-1\">1</a> End note</li>");
+    }
+
+    #[test]
+    fn char_css_joins_underline_and_strikethrough_in_one_declaration() {
+        let d = Document::new(&NewDocument::default());
+        let css = |u: bool, s: bool| {
+            let c = CharProps { underline: u, strikethrough: s, ..CharProps::default() };
+            let mut out = String::new();
+            char_css(&d, &c, 12.0, &BTreeMap::new(), &mut out);
+            out
+        };
+        let both = css(true, true);
+        assert_eq!(both.matches("text-decoration:").count(), 1, "{both}");
+        assert!(both.contains("text-decoration: underline line-through;"), "{both}");
+        assert!(css(true, false).contains("text-decoration: underline;"));
+        assert!(css(false, true).contains("text-decoration: line-through;"));
+        assert!(!css(false, false).contains("text-decoration"));
     }
 }

@@ -731,9 +731,23 @@ pub(crate) fn frame_specs_placed(doc: &Document, sid: StoryId, placed: &[(ItemId
         let under = spread.and_then(|sp| sp.page_at_x(center_x).and_then(|pi| sp.pages.get(pi)));
         let page_rect = under.map(|pg| (inv.transform_rect_bbox(pg.bounds()), inv.transform_rect_bbox(pg.margin_rect())));
         let g = &doc.settings.baseline_grid;
-        let (start, inc) = tf.options.baseline_grid.map_or((under.map_or(g.start, |pg| g.origin(pg)), g.increment), |f| (f.start, f.increment));
         // Grid lines are at spread y = start + n·inc (page tops are y = 0); map into inner space (translation only).
         let ty = xf.translation().y;
+        let (start, inc) = match tf.options.baseline_grid {
+            None => (under.map_or(g.start, |pg| g.origin(pg)), g.increment),
+            Some(f) => {
+                use designcraft_doc::FrameGridRelative as R;
+                // The frame's own edges are in inner space; `ty` takes them to spread y as it takes
+                // the grid back, so a frame-relative grid keeps its place in a turned frame.
+                let from = match f.relative_to {
+                    R::TopOfPage => 0.0,
+                    R::TopMargin => under.map_or(0.0, |pg| pg.margins.top),
+                    R::TopOfFrame => ty + item.inner_bounds().y0,
+                    R::TopInset => ty + item.text_area().y0,
+                };
+                (from + f.start, f.increment)
+            }
+        };
         let grid = (inc > 0.0 && inc.is_finite() && start.is_finite()).then_some((start - ty, inc));
         // Type on a path: one line as long as the path (from the start offset).
         let (area, opts) = match &tf.options.path {
@@ -1049,9 +1063,9 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
         };
         if !story.endnotes.is_empty() {
             // Endnote reference numbers continue through the document.
-            let first = doc.endnote_start(story.id) + story.text[..prange.start].matches(designcraft_doc::ENDNOTE_REF).count() as u32;
+            let first = doc.endnote_start(story.id).saturating_add(story.text[..prange.start].matches(designcraft_doc::ENDNOTE_REF).count() as u32);
             for (k, (i, _)) in story.text[prange.clone()].match_indices(designcraft_doc::ENDNOTE_REF).enumerate() {
-                sub.notes.insert(prange.start + i, doc.endnote_options.label(first + k as u32));
+                sub.notes.insert(prange.start + i, doc.endnote_options.label(first.saturating_add(k as u32)));
             }
         }
         if !story.objects.is_empty() {
@@ -1122,7 +1136,7 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
             let cols_here = &cols[cur.fi];
             let col = span_rect(cols_here, cols_here[cur.col.min(cols_here.len() - 1)], pp.span_columns);
             let col = SplitCfg::of(&pp).map_or(col, |c| c.sub_rect(col, 0));
-            let spacing = spacing_for(&pp, base_chars.size);
+            let spacing = spacing_for(&pp, base_chars.size, story);
             let mut lines: Vec<(std::ops::Range<usize>, String)> = Vec::new();
             for _ in 0..3 {
                 // The same drop cap, spacing, hyphenation and breaker as the layout below.
@@ -1278,7 +1292,7 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
             hyphenation_points(&story.text, &glyphs, &pp, &hyph_exceptions, &foreign_ranges(doc, story, prange.clone(), &base_chars));
         suppress_hyphens(&mut hyph_after, &glyphs, no_hyph.get(pi).map_or(&[], Vec::as_slice));
         let base_size = base_chars.size;
-        let spacing = spacing_for(&pp, base_size);
+        let spacing = spacing_for(&pp, base_size, story);
         // An empty paragraph takes its height from its paragraph mark's character format.
         let mark_chars = if glyphs.is_empty() {
             std::borrow::Cow::Owned(doc.styles.resolve_char(&base_chars, story.char_format_of(prange.start)))
@@ -2289,8 +2303,22 @@ pub fn column_rule_rects(columns: &[Rect], lines: &[Line], opts: &TextFrameOptio
     out
 }
 
+/// Optical margin alignment for a paragraph of `story`: (on, the size the hang is set for).
+/// Ignore Optical Margin turns it off; the story's setting, when on, applies to every other
+/// paragraph; otherwise the paragraph's own switch hangs at each glyph's own size.
+fn optical_for(pp: &ParaProps, story: &Story) -> (bool, Option<f64>) {
+    if pp.ignore_optical_margin {
+        return (false, None);
+    }
+    match story.optical_margin.hang_size() {
+        Some(size) => (true, Some(size)),
+        None => (pp.optical_margin, None),
+    }
+}
+
 /// Breaker parameters from the paragraph's settings.
-fn spacing_for(pp: &ParaProps, base_size: f64) -> Spacing {
+fn spacing_for(pp: &ParaProps, base_size: f64, story: &Story) -> Spacing {
+    let (optical, optical_size) = optical_for(pp, story);
     Spacing {
         justify: pp.align.is_justified(),
         word_min: pp.word_space_min,
@@ -2308,7 +2336,8 @@ fn spacing_for(pp: &ParaProps, base_size: f64) -> Spacing {
         // The zone is the Single-line Composer's (unjustified text only), as in InDesign: the
         // Paragraph Composer weighs every break of the paragraph instead.
         hyph_zone: if pp.align.is_justified() || !pp.composer.single_line() { 0.0 } else { pp.hyph_zone },
-        optical: pp.optical_margin,
+        optical,
+        optical_size,
         korean_char_breaks: pp.korean_char_breaks,
         kinsoku_priority: match pp.kinsoku_type.as_str() {
             "KinsokuPushInFirst" => 1,
@@ -3397,8 +3426,8 @@ fn layout_line(
     let at_edge = |g: &&Glyph| is_tab(g) || (g.adv > 0.0 && !g.is_space());
     let first = line.iter().find(at_edge);
     let lastg = line.iter().rev().find(at_edge);
-    let hl = if sp.optical { first.map_or(0.0, |g| breaker::hang(g.ch).0 * g.adv) } else { 0.0 };
-    let optical_right = if sp.optical { lastg.map_or(0.0, |g| breaker::hang(g.ch).1 * g.adv) } else { 0.0 };
+    let hl = first.map_or(0.0, |g| breaker::hang_left(g, sp));
+    let optical_right = lastg.map_or(0.0, |g| breaker::hang_right(g, sp));
     let cjk_right = lastg.map_or(0.0, |g| g.cjk_hang);
     let regular_hang = pp.kinsoku_hang == designcraft_doc::cjk::KinsokuHang::Regular;
     // Tabs: compute widths left to right. Tab stops stay where they are when the line hangs, so

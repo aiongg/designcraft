@@ -1528,6 +1528,7 @@ impl<'a> Ex<'a> {
         }
         n!(keep_with_next, "KeepWithNext");
         b!(keep_lines_together, "KeepLinesTogether");
+        b!(ignore_optical_margin, "IgnoreEdgeAlignment");
         b!(keep_all_lines, "KeepAllLinesTogether");
         n!(keep_first, "KeepFirstLines");
         n!(keep_last, "KeepLastLines");
@@ -1949,6 +1950,15 @@ impl<'a> Ex<'a> {
                     El::new("BaselineFrameGridOption")
                         .attr("UseCustomBaselineFrameGrid", "true")
                         .attr("StartingOffsetForBaselineFrameGrid", num(g.start))
+                        .attr(
+                            "BaselineFrameGridRelativeOption",
+                            match g.relative_to {
+                                designcraft_doc::FrameGridRelative::TopOfPage => "TopOfPageOfBaselineFrameGridRelativeOption",
+                                designcraft_doc::FrameGridRelative::TopMargin => "TopOfMarginOfBaselineFrameGridRelativeOption",
+                                designcraft_doc::FrameGridRelative::TopOfFrame => "TopOfFrameOfBaselineFrameGridRelativeOption",
+                                designcraft_doc::FrameGridRelative::TopInset => "TopOfInsetOfBaselineFrameGridRelativeOption",
+                            },
+                        )
                         .attr("BaselineFrameGridIncrement", num(g.increment)),
                 );
             }
@@ -2217,8 +2227,11 @@ impl<'a> Ex<'a> {
             .attr("StoryTitle", "$ID/");
         el.push(
             El::new("StoryPreference")
-                .attr("OpticalMarginAlignment", "false")
-                .attr("OpticalMarginSize", "12")
+                .attr("OpticalMarginAlignment", bool_s(s.optical_margin.on))
+                .attr(
+                    "OpticalMarginSize",
+                    num(designcraft_doc::OpticalMargin::clamp_size(s.optical_margin.size).unwrap_or(designcraft_doc::OpticalMargin::DEFAULT_SIZE)),
+                )
                 .attr("FrameType", "TextFrameType")
                 .attr("StoryOrientation", if s.vertical { "Vertical" } else { "Horizontal" })
                 .attr(
