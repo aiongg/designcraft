@@ -1027,6 +1027,9 @@ fn redirect_style_refs(d: &mut designcraft_doc::Document, para: bool, from: &str
                 *r = Some(to.to_string());
             }
         }
+        if let designcraft_doc::EpubSplit::Style(n) = &mut d.settings.epub_split {
+            rename(n);
+        }
     } else {
         let from_parent = parent_of(st.character.iter().find(|x| x.name == from).and_then(|x| x.based_on.as_ref()));
         for s in &mut st.character {
@@ -2821,7 +2824,7 @@ mod export_tag_tests {
         assert!(s.execute("style.exportTag", &json!({"style": "Key Term", "character": true, "split": true})).is_err());
         s.execute("style.paragraph.create", &json!({"name": "Part"})).unwrap();
         assert_eq!(s.execute("style.exportTag", &json!({"style": "Part", "split": true})).unwrap()["split"], true);
-        assert!(s.doc().unwrap().doc.styles.any_epub_split());
+        assert!(s.doc().unwrap().doc.styles.export_tag("Part", false).is_some_and(|t| t.split));
         s.execute("style.exportTag", &json!({"style": "Part", "split": false})).unwrap();
         assert!(s.doc().unwrap().doc.styles.export_tag("Part", false).is_none(), "an untouched tagging goes");
         let r = s.execute("frame.create", &json!({"rect": [72, 72, 400, 300], "content": "text", "text": "Origins\nA word"})).unwrap();
@@ -2995,6 +2998,7 @@ mod delete_tests {
             d.footnote_options.para_style = "Table Body".into();
             d.endnote_options.para_style = "Table Body".into();
             d.endnote_options.heading_style = "Table Body".into();
+            d.settings.epub_split = designcraft_doc::EpubSplit::Style("Table Body".into());
             d.toc = Some(Toc {
                 story,
                 title: "Contents".into(),
@@ -3013,6 +3017,7 @@ mod delete_tests {
         assert_eq!((sub.based_on.as_deref(), sub.next_style.as_deref()), (Some("Body"), Some("Body")));
         assert_eq!(d.styles.default_paragraph, "Body");
         assert_eq!(d.endnote_options.heading_style, "Body");
+        assert_eq!(d.settings.epub_split, designcraft_doc::EpubSplit::Style("Body".into()), "EPUB Split Document follows the replacement");
         let after = s.execute("preflight.run", &json!({})).unwrap();
         assert!(!after.to_string().contains("Table Body"), "{after}");
     }

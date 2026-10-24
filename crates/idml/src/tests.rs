@@ -4653,3 +4653,35 @@ fn split_document_round_trips() {
     let back = import_idml(&export_idml(&d)).unwrap();
     assert!(split(&back, "Part") && split(&back, "Chapter") && !split(&back, "Body"));
 }
+
+/// EPUB Export Options › Split Document: off, one style (built in or not) or the styles' export
+/// tags, read from the file's `EPubExportPreference` and written back.
+#[test]
+fn epub_split_document_round_trips() {
+    use designcraft_doc::EpubSplit;
+    let styles =
+        STYLES.replace("</RootParagraphStyleGroup>", r#"<ParagraphStyle Self="ParagraphStyle/Chapter" Name="Chapter"/></RootParagraphStyleGroup>"#);
+    assert!(styles.contains("ParagraphStyle/Chapter"), "the fixture has a paragraph style group");
+    for (attrs, want) in [
+        (r#"BreakDocument="false" ParagraphStyleName="ParagraphStyle/Chapter""#, EpubSplit::Off),
+        (r#"BreakDocument="true" ParagraphStyleName="ParagraphStyle/Chapter""#, EpubSplit::Style("Chapter".into())),
+        (r#"BreakDocument="true" ParagraphStyleName="ParagraphStyle/Text%3aBody""#, EpubSplit::Style("Text/Body".into())),
+        (r#"BreakDocument="true" ParagraphStyleName="$ID/NormalParagraphStyle""#, EpubSplit::Style(designcraft_doc::BASIC_PARAGRAPH.into())),
+        (r#"BreakDocument="true" ParagraphStyleName="""#, EpubSplit::ExportTags),
+        (r#"BreakDocument="true" ParagraphStyleName="ParagraphStyle/Missing""#, EpubSplit::Off),
+    ] {
+        let prefs = PREFS.replace("</idPkg:Preferences>", &format!("<EPubExportPreference {attrs}/></idPkg:Preferences>"));
+        let file = zip_files(&[
+            ("designmap.xml", DESIGNMAP),
+            ("Resources/Graphic.xml", GRAPHIC),
+            ("Resources/Styles.xml", &styles),
+            ("Resources/Preferences.xml", &prefs),
+            ("MasterSpreads/MasterSpread_m1.xml", MASTER),
+            ("Spreads/Spread_sp1.xml", SPREAD),
+            ("Stories/Story_s1.xml", STORY),
+        ]);
+        let d = import_idml_with(&file, &|_| None).unwrap();
+        assert_eq!(d.settings.epub_split, want, "{attrs}");
+        assert_eq!(import_idml(&export_idml(&d)).unwrap().settings.epub_split, want, "{attrs}");
+    }
+}

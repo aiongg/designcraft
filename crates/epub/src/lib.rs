@@ -15,8 +15,8 @@ use std::io::Write;
 
 use designcraft_doc::geom::{Affine, Rect};
 use designcraft_doc::{
-    Align, AnchorPosition, AnchoredObject, CharAttrs, CharProps, Content, Document, ENDNOTE_REF, FOOTNOTE_REF, Item, ItemId, OBJECT_MARK, ParaProps,
-    SpreadRef, Story, StoryId, Styles, Table, story,
+    Align, AnchorPosition, AnchoredObject, CharAttrs, CharProps, Content, Document, ENDNOTE_REF, EpubSplit, FOOTNOTE_REF, Item, ItemId, OBJECT_MARK,
+    ParaProps, SpreadRef, Story, StoryId, Styles, Table, story,
 };
 
 #[derive(Clone, Debug)]
@@ -38,6 +38,8 @@ pub struct EpubOptions {
     pub modified: Option<i64>,
     /// Title of the navigation (table of contents); from `language` when absent.
     pub toc_title: Option<String>,
+    /// Split Document: where content files start; the document's setting when absent.
+    pub split: Option<EpubSplit>,
 }
 
 /// A font file packaged with an EPUB: the face of `family` in `style` (`Bold Italic`…).
@@ -288,6 +290,7 @@ impl Default for EpubOptions {
             fonts: Vec::new(),
             modified: None,
             toc_title: None,
+            split: None,
         }
     }
 }
@@ -669,6 +672,8 @@ struct StoryWriter<'a, 'f> {
     /// Prefix of the `id`s the current story's headings get (`{prefix}-p{paragraph index}`, the
     /// targets of the table of contents); only top-level paragraphs get one.
     heading_ids: Option<String>,
+    /// Where EPUB content files start (see [`starts_chapter`]).
+    split: EpubSplit,
 }
 
 impl<'a, 'f> StoryWriter<'a, 'f> {
@@ -687,6 +692,7 @@ impl<'a, 'f> StoryWriter<'a, 'f> {
             images: BTreeMap::new(),
             no_alt: Vec::new(),
             heading_ids: None,
+            split: doc.settings.epub_split.clone(),
         }
     }
 
@@ -725,6 +731,12 @@ impl<'a, 'f> StoryWriter<'a, 'f> {
                 let (tag, class) = export_mapping(&doc.styles, &pf.style, false, &self.pc);
                 let props = doc.styles.resolve_para(pf).0;
                 let rtl = props.direction == designcraft_doc::TextDirection::RightToLeft;
+                // Chapter files start only at top-level paragraphs, after any open list or
+                // preformatted block is closed, so each file stays balanced.
+                if depth == 0 && self.heading_ids.is_some() && starts_chapter(&self.split, &doc.styles, &pf.style) {
+                    close_blocks(&mut list, &mut pre, out);
+                    out.push_str(CHAPTER_MARK);
+                }
                 let continues_pre = tag == "pre" && pre.as_ref() == Some(&(class.clone(), rtl));
                 if !continues_pre && pre.take().is_some() {
                     out.push_str("</pre>\n");
@@ -740,11 +752,6 @@ impl<'a, 'f> StoryWriter<'a, 'f> {
                         let _ = writeln!(out, "<{l}>");
                     }
                     list = list_tag;
-                }
-                // Chapter files start only at top-level paragraphs, outside any open list or
-                // preformatted block.
-                if depth == 0 && self.heading_ids.is_some() && starts_chapter(&doc.styles, &pf.style, tag) {
-                    out.push_str(CHAPTER_MARK);
                 }
                 if continues_pre {
                     out.push('\n');
@@ -1050,11 +1057,15 @@ pub fn story_html(doc: &Document, sid: StoryId) -> String {
     StoryWriter::new(doc, true, None).story(sid, None)
 }
 
-/// Whether an EPUB chapter file starts before a paragraph of `style` exported as `tag`: before
-/// each paragraph of a style with Split Document on, or, when no style has it on, before each
-/// `h1`.
-fn starts_chapter(st: &Styles, style: &str, tag: &str) -> bool {
-    if st.any_epub_split() { st.export_tag(style, false).is_some_and(|e| e.split) } else { heading_level(tag) == Some(1) }
+/// Whether an EPUB chapter file starts before a paragraph of `style` (Split Document): never
+/// when it's off, before each paragraph of the one style it names, or before each paragraph of
+/// a style whose Export Tagging has Split Document on.
+fn starts_chapter(split: &EpubSplit, st: &Styles, style: &str) -> bool {
+    match split {
+        EpubSplit::Off => false,
+        EpubSplit::Style(name) => name == style,
+        EpubSplit::ExportTags => st.export_tag(style, false).is_some_and(|e| e.split),
+    }
 }
 
 /// Where the EPUB body splits into chapter files (see [`starts_chapter`]).
@@ -1313,9 +1324,12 @@ struct Body<'a> {
 
 /// The content in reading order as HTML sections and figures; `img_src` names each image
 /// (a package path, or a data URI for single-file HTML).
-fn body_html<'a>(doc: &'a Document, epub: bool, img_src: &dyn Fn(&str, &str, &[u8]) -> String) -> Body<'a> {
+fn body_html<'a>(doc: &'a Document, epub: bool, split: Option<&EpubSplit>, img_src: &dyn Fn(&str, &str, &[u8]) -> String) -> Body<'a> {
     let order = reading_order(doc);
     let mut writer = StoryWriter::new(doc, epub, Some(img_src));
+    if let Some(split) = split {
+        writer.split = split.clone();
+    }
     let mut body = String::new();
     let mut toc = toc_entries(doc, &order);
     for (k, b) in order.iter().enumerate() {
@@ -1362,7 +1376,7 @@ fn body_html<'a>(doc: &'a Document, epub: bool, img_src: &dyn Fn(&str, &str, &[u
 /// Placed and anchored images (not video or sound) without alt text, by asset name: they are exported as
 /// decorative (`alt=""`), which an export can report.
 pub fn images_without_alt(doc: &Document) -> Vec<String> {
-    body_html(doc, true, &|name, _, _| name.to_string()).no_alt
+    body_html(doc, true, None, &|name, _, _| name.to_string()).no_alt
 }
 
 /// Options for [`export_html`].
@@ -1380,7 +1394,7 @@ pub fn export_html(doc: &Document, opts: &HtmlOptions) -> String {
     let title = opts.title.clone().unwrap_or_else(|| doc.title.clone());
     let language = opts.language.as_deref().unwrap_or("en");
     let lang = language_tag(language);
-    let body = body_html(doc, false, &|_, mime, data| format!("data:{mime};base64,{}", base64(data))).html;
+    let body = body_html(doc, false, None, &|_, mime, data| format!("data:{mime};base64,{}", base64(data))).html;
     format!(
         "<!DOCTYPE html>\n<html lang=\"{lang}\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<meta name=\"generator\" content=\"DesignCraft\">\n<title>{}</title>\n<style>\nbody {{ max-width: 40em; margin: 2em auto; padding: 0 1em; }}\nfigure {{ margin: 1em 0; }} figure img {{ max-width: 100%; height: auto; }}\n{}</style>\n</head>\n<body>\n{body}</body>\n</html>\n",
         xml_text(&title),
@@ -1405,9 +1419,9 @@ pub fn export_epub(doc: &Document, opts: &EpubOptions) -> Result<Vec<u8>, EpubEr
     let title = opts.title.clone().unwrap_or_else(|| doc.title.clone());
     let id = identifier(doc, opts, &title);
     let modified = modified(doc, opts);
-    let Body { html: body, images, toc, .. } = body_html(doc, true, &|name, _, _| name.to_string());
+    let Body { html: body, images, toc, .. } = body_html(doc, true, opts.split.as_ref(), &|name, _, _| name.to_string());
     let lang = language_tag(&opts.language);
-    // One file per chapter (see `starts_chapter`), so e-readers needn't load the whole book.
+    // One file per chapter (see `starts_chapter`); one file in all when Split Document is off.
     let chapters: Vec<String> = split_chapters(&body)
         .into_iter()
         .map(|part| {
@@ -1771,10 +1785,11 @@ mod tests {
         );
     }
 
-    /// #768: the book is split into one file per chapter, before each h1, with well-formed
-    /// sections; the spine and manifest list the files in order.
+    /// Split Document off (the default) gives one content file, h1s and all. Single Paragraph
+    /// Style starts a file before each paragraph of that style, with well-formed sections; the
+    /// spine and manifest list the files in order.
     #[test]
-    fn chapters_are_split_at_h1() {
+    fn chapters_split_before_a_single_paragraph_style() {
         let mut d = Document::new(&NewDocument { pages: 3, ..Default::default() });
         let lid = d.default_layer();
         d.styles_mut().paragraph.push(designcraft_doc::ParagraphStyle {
@@ -1797,6 +1812,15 @@ mod tests {
         let st = d.story_mut(sid).unwrap();
         st.paras[0].style = "Chapter".into();
         st.paras[2].style = "Chapter".into();
+        let one_file = |d: &Document, opts: &EpubOptions| {
+            let mut z = zip::ZipArchive::new(std::io::Cursor::new(export_epub(d, opts).unwrap())).unwrap();
+            let mut c = String::new();
+            z.by_name("OEBPS/content.xhtml").unwrap().read_to_string(&mut c).unwrap();
+            z.by_name("OEBPS/content2.xhtml").is_err() && c.contains("Title page") && c.contains("Second text") && !c.contains(CHAPTER_MARK)
+        };
+        assert!(one_file(&d, &EpubOptions::default()), "off by default");
+        d.settings.epub_split = EpubSplit::Style("Chapter".into());
+        assert!(one_file(&d, &EpubOptions { split: Some(EpubSplit::Off), ..Default::default() }), "the export's own setting wins");
         let mut z = zip::ZipArchive::new(std::io::Cursor::new(export_epub(&d, &EpubOptions::default()).unwrap())).unwrap();
         let mut read = |path: &str| {
             let mut s = String::new();
@@ -1822,11 +1846,13 @@ mod tests {
         assert!(!html.contains(CHAPTER_MARK) && html.contains("Second text"));
     }
 
-    /// A style with Split Document on starts each chapter file, and then h1 alone no longer does;
-    /// navigation and endnote links point at the files their targets ended up in.
+    /// Based on export tags, a style with Split Document on starts each chapter file and an h1
+    /// without it doesn't; navigation and endnote links point at the files their targets ended
+    /// up in.
     #[test]
     fn chapters_split_before_split_document_styles() {
         let mut d = Document::new(&NewDocument::default());
+        d.settings.epub_split = EpubSplit::ExportTags;
         let lid = d.default_layer();
         for (name, tag, split) in [("Part", "p", true), ("Chapter", "h1", false)] {
             d.styles_mut().paragraph.push(designcraft_doc::ParagraphStyle {
@@ -1900,6 +1926,7 @@ mod tests {
         // After "First": an endnote and a footnote.
         st.insert_endnote(9, "End note", ParaFormat::default());
         st.insert_note(9, "Foot note", ParaFormat::default());
+        d.settings.epub_split = EpubSplit::Style("Chapter".into());
         let mut z = zip::ZipArchive::new(std::io::Cursor::new(export_epub(&d, &EpubOptions::default()).unwrap())).unwrap();
         let mut read = |path: &str| {
             let mut s = String::new();
@@ -1910,6 +1937,61 @@ mod tests {
         assert!(first.contains("id=\"enref-1\" href=\"content2.xhtml#en-1\""), "{first}");
         assert!(first.contains("href=\"#fn-1\"") && first.contains("href=\"#fnref-1\""), "a footnote stays in its chapter: {first}");
         assert!(last.contains("Second text") && last.contains("<a href=\"content.xhtml#enref-1\">"), "{last}");
+    }
+
+    /// A split before a list item or a preformatted line closes the open list or block first and
+    /// reopens it in the new file, so every file is balanced.
+    #[test]
+    fn chapter_files_split_inside_lists_and_pre_stay_balanced() {
+        let mut d = Document::new(&NewDocument::default());
+        d.settings.epub_split = EpubSplit::ExportTags;
+        let lid = d.default_layer();
+        for (name, tag) in [("Item", "li"), ("Code", "pre")] {
+            d.styles_mut().paragraph.push(designcraft_doc::ParagraphStyle {
+                name: name.into(),
+                based_on: None,
+                next_style: None,
+                para: Default::default(),
+                chars: CharAttrs::default(),
+                shortcut: String::new(),
+            });
+            d.styles_mut().export_tags.insert(format!("p:{name}"), designcraft_doc::ExportTag { tag: tag.into(), split: true, ..Default::default() });
+        }
+        let (_, sid) = d
+            .add_text_frame(
+                SpreadRef::Doc(0),
+                Rect::new(36.0, 36.0, 300.0, 300.0),
+                lid,
+                "Intro
+one
+two
+x = 1
+y = 2
+End",
+                ParaFormat::default(),
+            )
+            .unwrap();
+        let st = d.story_mut(sid).unwrap();
+        for (i, style) in [(1, "Item"), (2, "Item"), (3, "Code"), (4, "Code")] {
+            st.paras[i].style = style.into();
+        }
+        let mut z = zip::ZipArchive::new(std::io::Cursor::new(export_epub(&d, &EpubOptions::default()).unwrap())).unwrap();
+        let mut read = |path: &str| {
+            let mut s = String::new();
+            z.by_name(path).unwrap().read_to_string(&mut s).unwrap();
+            s
+        };
+        let files: Vec<String> =
+            ["content", "content2", "content3", "content4", "content5"].iter().map(|f| read(&format!("OEBPS/{f}.xhtml"))).collect();
+        for (c, text) in files.iter().zip(["Intro", "one", "two", "x = 1", "y = 2"]) {
+            assert!(c.contains(text), "{text}: {c}");
+            for (open, close) in [("<ul", "</ul>"), ("<pre", "</pre>"), ("<section", "</section>")] {
+                assert_eq!(c.matches(open).count(), c.matches(close).count(), "{open}: {c}");
+            }
+        }
+        assert!(files[1].contains("<ul") && files[2].contains("<ul") && files[3].contains("<pre") && files[4].contains("<pre"));
+        assert!(files[4].contains("End"));
+        assert!(z.by_name("OEBPS/content6.xhtml").is_err());
     }
 
     #[test]
