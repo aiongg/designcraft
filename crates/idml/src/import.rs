@@ -1187,6 +1187,13 @@ impl<'r> Importer<'r> {
                 Some(slot) => *slot = s,
                 None => self.styles.paragraph.push(s),
             }
+            // Split Document (EPUB only): on the style, and repeated on its EPUB export tag map.
+            let split = e.get("SplitDocument").or_else(|| {
+                e.elements().find(|m| m.local() == "StyleExportTagMap" && m.get("ExportType") == Some("EPUB")).and_then(|m| m.get("SplitDocument"))
+            });
+            if split == Some("true") {
+                self.styles.export_tags.entry(format!("p:{name}")).or_default().split = true;
+            }
         }
         for (_, e) in &chars {
             let name = names::style_name_in(CHAR_BUILTINS, e.get("Name").unwrap_or(""));

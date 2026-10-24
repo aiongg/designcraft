@@ -4631,3 +4631,25 @@ fn style_names_with_a_literal_colon_survive_a_round_trip() {
         assert_eq!(names::style_name_in(names::PARA_BUILTINS, &names::style_name_out(names::PARA_BUILTINS, n)), n);
     }
 }
+
+/// Split Document (EPUB only) comes from the style, or from its EPUB export tag map, and is
+/// written back on the style.
+#[test]
+fn split_document_round_trips() {
+    let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<idPkg:Styles xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="16.0">
+  <RootParagraphStyleGroup Self="rp">
+    <ParagraphStyle Self="ParagraphStyle/$ID/[No paragraph style]" Name="$ID/[No paragraph style]" PointSize="12" SplitDocument="false"/>
+    <ParagraphStyle Self="ParagraphStyle/Part" Name="Part" SplitDocument="true"/>
+    <ParagraphStyle Self="ParagraphStyle/Chapter" Name="Chapter">
+      <StyleExportTagMap Self="uaStyleExportTagMapnEPUB" ExportType="EPUB" ExportTag="h1" ExportClass="" ExportAttributes="" SplitDocument="true" EmitCss="true"/>
+    </ParagraphStyle>
+    <ParagraphStyle Self="ParagraphStyle/Body" Name="Body" SplitDocument="false"/>
+  </RootParagraphStyleGroup>
+</idPkg:Styles>"#;
+    let d = import_idml_with(&fixture_with_styles(xml), &|_| None).unwrap();
+    let split = |d: &designcraft_doc::Document, name: &str| d.styles.export_tag(name, false).is_some_and(|t| t.split);
+    assert!(split(&d, "Part") && split(&d, "Chapter") && !split(&d, "Body"));
+    let back = import_idml(&export_idml(&d)).unwrap();
+    assert!(split(&back, "Part") && split(&back, "Chapter") && !split(&back, "Body"));
+}

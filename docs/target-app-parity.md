@@ -399,7 +399,7 @@ It is evidence of breadth: each item exists. It is not a claim of InDesign-level
 - Directional Feather (`object.directionalFeather {widths: [top, left, bottom, right]}`): each side fades over its own width.
 - View ▸ Flattener Preview (`view.flattenerPreview`): objects involving transparency highlighted in red; knockout groups export as images (PDF output has no knockout groups).
 - Live captions (`object.caption {live: true}`, Object ▸ Captions ▸ Generate Live Caption): the caption text is re-filled from the source object's metadata after every edit (same undo step).
-- Style Export Tagging (`style.exportTag`, Paragraph Style Options ▸ Export Tagging): paragraph and character styles choose their HTML element and class in EPUB/HTML.
+- Style Export Tagging (`style.exportTag`, Paragraph Style Options ▸ Export Tagging): paragraph and character styles choose their HTML element and class in EPUB/HTML. Split Document (EPUB only) starts an EPUB chapter file before each paragraph of the style; when no style has it on, the EPUB splits before each top-level h1. IDML import and export keep it, as does Load Styles.
 - Tagged Text: export (`file.exportText {format: "tagged"}`) and place (detected by its header; ASCII, UTF-8 or UTF-16) with paragraph and character styles, font, typeface and size, and `<0x…>` characters.
 - Tagged PDF: one structure element per paragraph (H1–H6 and BlockQuote from Export Tagging, else P) in reading order, frame fills, strokes, rules and tables as artifacts, figures with alt text.
 - EPUB: cover image from the first page (`file.exportEpub {cover}`), and Fixed Layout export (`file.exportFixedEpub`, File ▸ Export EPUB (Fixed Layout)…): pre-paginated pages as 144 ppi images with their text kept for search and read-aloud.

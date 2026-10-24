@@ -741,9 +741,9 @@ impl<'a, 'f> StoryWriter<'a, 'f> {
                     }
                     list = list_tag;
                 }
-                // An EPUB chapter file starts before each top-level h1, outside any open list or
+                // Chapter files start only at top-level paragraphs, outside any open list or
                 // preformatted block.
-                if depth == 0 && self.heading_ids.is_some() && heading_level(tag) == Some(1) {
+                if depth == 0 && self.heading_ids.is_some() && starts_chapter(&doc.styles, &pf.style, tag) {
                     out.push_str(CHAPTER_MARK);
                 }
                 if continues_pre {
@@ -1050,7 +1050,14 @@ pub fn story_html(doc: &Document, sid: StoryId) -> String {
     StoryWriter::new(doc, true, None).story(sid, None)
 }
 
-/// Where the EPUB body splits into chapter files: before each `h1`.
+/// Whether an EPUB chapter file starts before a paragraph of `style` exported as `tag`: before
+/// each paragraph of a style with Split Document on, or, when no style has it on, before each
+/// `h1`.
+fn starts_chapter(st: &Styles, style: &str, tag: &str) -> bool {
+    if st.any_epub_split() { st.export_tag(style, false).is_some_and(|e| e.split) } else { heading_level(tag) == Some(1) }
+}
+
+/// Where the EPUB body splits into chapter files (see [`starts_chapter`]).
 const CHAPTER_MARK: &str = "<!--dc:chapter-->";
 
 /// The body split at its [`CHAPTER_MARK`]s into chapter bodies, each with its sections closed
@@ -1400,7 +1407,7 @@ pub fn export_epub(doc: &Document, opts: &EpubOptions) -> Result<Vec<u8>, EpubEr
     let modified = modified(doc, opts);
     let Body { html: body, images, toc, .. } = body_html(doc, true, &|name, _, _| name.to_string());
     let lang = language_tag(&opts.language);
-    // One file per chapter (split before each h1), so e-readers needn't load the whole book.
+    // One file per chapter (see `starts_chapter`), so e-readers needn't load the whole book.
     let chapters: Vec<String> = split_chapters(&body)
         .into_iter()
         .map(|part| {
@@ -1653,7 +1660,9 @@ mod tests {
                 chars: CharAttrs::default(),
                 shortcut: String::new(),
             });
-            d.styles_mut().export_tags.insert(format!("p:{name}"), designcraft_doc::ExportTag { tag: tag.into(), class: String::new() });
+            d.styles_mut()
+                .export_tags
+                .insert(format!("p:{name}"), designcraft_doc::ExportTag { tag: tag.into(), class: String::new(), ..Default::default() });
         }
         let text = "Intro\nfirst\nsecond\none\ntwo\nx = 1\ny = 2\nEnd\n• typed";
         let (_, sid) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(36.0, 36.0, 300.0, 300.0), lid, text, ParaFormat::default()).unwrap();
@@ -1696,7 +1705,9 @@ mod tests {
                 chars: CharAttrs::default(),
                 shortcut: String::new(),
             });
-            d.styles_mut().export_tags.insert(format!("p:{name}"), designcraft_doc::ExportTag { tag: tag.into(), class: String::new() });
+            d.styles_mut()
+                .export_tags
+                .insert(format!("p:{name}"), designcraft_doc::ExportTag { tag: tag.into(), class: String::new(), ..Default::default() });
         }
         let text = "One\nBody\nOne point one\nMore\nTwo\nText";
         let (_, sid) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(36.0, 36.0, 300.0, 300.0), lid, text, ParaFormat::default()).unwrap();
@@ -1774,7 +1785,9 @@ mod tests {
             chars: CharAttrs::default(),
             shortcut: String::new(),
         });
-        d.styles_mut().export_tags.insert("p:Chapter".into(), designcraft_doc::ExportTag { tag: "h1".into(), class: String::new() });
+        d.styles_mut()
+            .export_tags
+            .insert("p:Chapter".into(), designcraft_doc::ExportTag { tag: "h1".into(), class: String::new(), ..Default::default() });
         // A title page without a heading, then a story that opens with a chapter and has a
         // second one in the middle.
         d.add_text_frame(SpreadRef::Doc(0), Rect::new(36.0, 36.0, 300.0, 100.0), lid, "Title page", ParaFormat::default()).unwrap();
@@ -1809,6 +1822,59 @@ mod tests {
         assert!(!html.contains(CHAPTER_MARK) && html.contains("Second text"));
     }
 
+    /// A style with Split Document on starts each chapter file, and then h1 alone no longer does;
+    /// navigation and endnote links point at the files their targets ended up in.
+    #[test]
+    fn chapters_split_before_split_document_styles() {
+        let mut d = Document::new(&NewDocument::default());
+        let lid = d.default_layer();
+        for (name, tag, split) in [("Part", "p", true), ("Chapter", "h1", false)] {
+            d.styles_mut().paragraph.push(designcraft_doc::ParagraphStyle {
+                name: name.into(),
+                based_on: None,
+                next_style: None,
+                para: Default::default(),
+                chars: CharAttrs::default(),
+                shortcut: String::new(),
+            });
+            d.styles_mut().export_tags.insert(format!("p:{name}"), designcraft_doc::ExportTag { tag: tag.into(), split, ..Default::default() });
+        }
+        d.add_text_frame(SpreadRef::Doc(0), Rect::new(36.0, 36.0, 300.0, 100.0), lid, "Title page", ParaFormat::default()).unwrap();
+        let (_, sid) = d
+            .add_text_frame(
+                SpreadRef::Doc(0),
+                Rect::new(36.0, 200.0, 300.0, 600.0),
+                lid,
+                "Part One\nChapter A\ntext a\nPart Two\nChapter B\ntext b",
+                ParaFormat::default(),
+            )
+            .unwrap();
+        let st = d.story_mut(sid).unwrap();
+        for (i, style) in [(0, "Part"), (1, "Chapter"), (3, "Part"), (4, "Chapter")] {
+            st.paras[i].style = style.into();
+        }
+        // After "text a".
+        st.insert_endnote(25, "End note", ParaFormat::default());
+        let mut z = zip::ZipArchive::new(std::io::Cursor::new(export_epub(&d, &EpubOptions::default()).unwrap())).unwrap();
+        let mut read = |path: &str| {
+            let mut s = String::new();
+            z.by_name(path).unwrap().read_to_string(&mut s).unwrap();
+            s
+        };
+        let (c1, c2, c3) = (read("OEBPS/content.xhtml"), read("OEBPS/content2.xhtml"), read("OEBPS/content3.xhtml"));
+        assert!(c1.contains("Title page") && !c1.contains("Part One"), "{c1}");
+        assert!(c2.contains("Part One") && c2.contains("<h1 id=\"s1-p1\"") && !c2.contains("Part Two"), "the h1 stays with its part: {c2}");
+        assert!(c3.contains("Part Two") && c3.contains("<h1 id=\"s1-p4\"") && c3.contains("End note"), "{c3}");
+        for c in [&c1, &c2, &c3] {
+            assert_eq!(c.matches("<section").count(), c.matches("</section>").count(), "{c}");
+        }
+        let nav = read("OEBPS/nav.xhtml");
+        assert!(nav.contains("href=\"content2.xhtml#s1-p1\"") && nav.contains("href=\"content3.xhtml#s1-p4\""), "{nav}");
+        assert!(c2.contains("href=\"content3.xhtml#en-1\""), "{c2}");
+        assert!(c3.contains("href=\"content2.xhtml#enref-1\""), "the endnote links back across files: {c3}");
+        assert!(z.by_name("OEBPS/content4.xhtml").is_err());
+    }
+
     /// Note links stay working across chapter files: endnotes end the book, in the last file.
     #[test]
     fn note_links_point_at_the_chapter_file_of_their_target() {
@@ -1822,7 +1888,9 @@ mod tests {
             chars: CharAttrs::default(),
             shortcut: String::new(),
         });
-        d.styles_mut().export_tags.insert("p:Chapter".into(), designcraft_doc::ExportTag { tag: "h1".into(), class: String::new() });
+        d.styles_mut()
+            .export_tags
+            .insert("p:Chapter".into(), designcraft_doc::ExportTag { tag: "h1".into(), class: String::new(), ..Default::default() });
         let (_, sid) = d
             .add_text_frame(SpreadRef::Doc(0), Rect::new(36.0, 36.0, 300.0, 400.0), lid, "One\nFirst text\nTwo\nSecond text", ParaFormat::default())
             .unwrap();
@@ -2034,9 +2102,10 @@ mod tests {
         d.title = "Field Notes & <Edition>".into();
         let lid = d.default_layer();
         let (_, sid) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(36.0, 36.0, 300.0, 100.0), lid, "A&B <C> \"D\"", ParaFormat::default()).unwrap();
-        d.styles_mut()
-            .export_tags
-            .insert(format!("p:{}", story::BASIC_PARAGRAPH), designcraft_doc::ExportTag { tag: "h2".into(), class: "Primary \"Copy\"".into() });
+        d.styles_mut().export_tags.insert(
+            format!("p:{}", story::BASIC_PARAGRAPH),
+            designcraft_doc::ExportTag { tag: "h2".into(), class: "Primary \"Copy\"".into(), ..Default::default() },
+        );
         if let Some(basic) = d.styles_mut().paragraph.iter_mut().find(|s| s.name == story::BASIC_PARAGRAPH) {
             basic.chars.font_family = Some("Quoted \"Serif\" <Alt>".into());
         }
@@ -2170,7 +2239,9 @@ mod tests {
                 chars: CharAttrs::default(),
                 shortcut: String::new(),
             });
-            d.styles_mut().export_tags.insert("p:Grouped".into(), designcraft_doc::ExportTag { tag: tag.into(), class: String::new() });
+            d.styles_mut()
+                .export_tags
+                .insert("p:Grouped".into(), designcraft_doc::ExportTag { tag: tag.into(), class: String::new(), ..Default::default() });
             let sid = d.stories.keys().copied().find(|sid| d.story(*sid).is_some_and(|st| !st.notes.is_empty())).unwrap();
             for p in &mut d.story_mut(sid).unwrap().paras {
                 p.style = "Grouped".into();

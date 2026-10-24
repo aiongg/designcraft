@@ -113,6 +113,9 @@ pub struct ExportTag {
     pub tag: String,
     /// CSS class (empty = from the style name).
     pub class: String,
+    /// Split Document (EPUB only): an EPUB chapter file starts before each paragraph of the style.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub split: bool,
 }
 
 impl Styles {
@@ -125,6 +128,11 @@ impl Styles {
     /// Export tagging of a paragraph (`character` false) or character style.
     pub fn export_tag(&self, name: &str, character: bool) -> Option<&ExportTag> {
         self.export_tags.get(&format!("{}:{name}", if character { "c" } else { "p" }))
+    }
+
+    /// Whether any paragraph style splits the EPUB (Export Tagging › Split Document).
+    pub fn any_epub_split(&self) -> bool {
+        self.export_tags.iter().any(|(k, t)| t.split && k.starts_with("p:"))
     }
 }
 

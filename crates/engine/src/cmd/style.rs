@@ -249,7 +249,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Export Tagging",
             [],
             None,
-            "{style, character?: bool, tag?: p|h1…h6|blockquote|pre|li|… (span|em|strong|code|sup|sub… for characters; \"\" = automatic), class?} → the tagging",
+            "{style, character?: bool, tag?: p|h1…h6|blockquote|pre|li|… (span|em|strong|code|sup|sub… for characters; \"\" = automatic), class?, split?: bool (paragraphs: Split Document, EPUB only)} → the tagging",
             has_doc,
             |s, p| {
                 let name = str_param(p, "style").ok_or_else(|| bad("style.exportTag", "`style` required"))?.to_string();
@@ -260,6 +260,10 @@ pub fn specs() -> Vec<CommandSpec> {
                 }
                 let key = format!("{}:{name}", if character { "c" } else { "p" });
                 let (tag, class) = (str_param(p, "tag").map(str::to_string), str_param(p, "class").map(str::to_string));
+                let split = p.get("split").and_then(Value::as_bool);
+                if character && split == Some(true) {
+                    return Err(bad("style.exportTag", "`split` is for paragraph styles"));
+                }
                 s.edit(|d, _| {
                     let st = d.styles_mut();
                     let e = st.export_tags.entry(key.clone()).or_default();
@@ -269,8 +273,11 @@ pub fn specs() -> Vec<CommandSpec> {
                     if let Some(c) = class.clone() {
                         e.class = c;
                     }
+                    if let Some(v) = split {
+                        e.split = v;
+                    }
                     let out = serde_json::to_value(&*e).unwrap_or_default();
-                    if e.tag.is_empty() && e.class.is_empty() {
+                    if *e == designcraft_doc::ExportTag::default() {
                         st.export_tags.remove(&key);
                     }
                     Ok(out)
@@ -2810,6 +2817,13 @@ mod export_tag_tests {
         s.execute("style.exportTag", &json!({"style": "Chapter Title", "tag": "h1", "class": "chapter"})).unwrap();
         s.execute("style.exportTag", &json!({"style": "Key Term", "character": true, "tag": "strong"})).unwrap();
         assert!(s.execute("style.exportTag", &json!({"style": "Nope"})).is_err());
+        // Split Document is for paragraph styles; it alone keeps the tagging.
+        assert!(s.execute("style.exportTag", &json!({"style": "Key Term", "character": true, "split": true})).is_err());
+        s.execute("style.paragraph.create", &json!({"name": "Part"})).unwrap();
+        assert_eq!(s.execute("style.exportTag", &json!({"style": "Part", "split": true})).unwrap()["split"], true);
+        assert!(s.doc().unwrap().doc.styles.any_epub_split());
+        s.execute("style.exportTag", &json!({"style": "Part", "split": false})).unwrap();
+        assert!(s.doc().unwrap().doc.styles.export_tag("Part", false).is_none(), "an untouched tagging goes");
         let r = s.execute("frame.create", &json!({"rect": [72, 72, 400, 300], "content": "text", "text": "Origins\nA word"})).unwrap();
         let sid = r["story"].as_u64().unwrap();
         s.execute("text.select", &json!({"story": sid, "anchor": 0, "focus": 0})).unwrap();

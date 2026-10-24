@@ -3835,7 +3835,7 @@ fn confirm_paragraph_style_options(app: &mut DesignApp, d: &mut Dialog) -> Resul
     if d.fields.contains_key("x.tag") {
         let tag = d.s("x.tag");
         let tag = if tag == "[Automatic]" { String::new() } else { tag };
-        app.run("style.exportTag", json!({"style": style, "tag": tag, "class": d.s("x.class")}))?;
+        app.run("style.exportTag", json!({"style": style, "tag": tag, "class": d.s("x.class"), "split": d.b("x.split")}))?;
     }
     Ok(r)
 }
@@ -3986,6 +3986,7 @@ fn paragraph_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
                 if !d.fields.contains_key("x.tag") {
                     d.fields.insert("x.tag".into(), json!(if et.tag.is_empty() { "[Automatic]" } else { et.tag.as_str() }));
                     d.fields.insert("x.class".into(), json!(et.class));
+                    d.fields.insert("x.split".into(), json!(et.split));
                 }
                 ui.horizontal(|ui| {
                     crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Tag:"));
@@ -4005,6 +4006,7 @@ fn paragraph_style_options(app: &mut DesignApp, ui: &mut egui::Ui, d: &mut Dialo
                     crate::rtl::label(ui, crate::i18n::tr(&app.ui.language, "Class:"));
                     text_field(ui, d, "x.class", 160.0);
                 });
+                check(ui, d, "x.split", crate::i18n::tr(&app.ui.language, "Split Document (EPUB only)"));
             }
             "nested" => drop_caps_and_nested_styles(&app.ui.language, ui, d, &pv, &cnames),
             "grep" => grep_styles(&app.ui.language, ui, d, &pv, &cnames),
