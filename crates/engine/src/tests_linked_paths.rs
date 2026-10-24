@@ -160,5 +160,18 @@ fn relink_folder_takes_the_chosen_folder_as_one_folder() {
     let roundabout = real.join("..").join("real");
     let out = s.execute("links.relinkFolder", &json!({"dir": roundabout.to_string_lossy(), "missingOnly": false})).unwrap();
     assert_eq!(out["relinked"], 1, "{out}");
+
+    // Through a symlink, `alias/..` is the link target's parent, not the folder holding `alias`.
+    let inner = dir.join("inner");
+    std::fs::create_dir_all(inner.join("sub")).unwrap();
+    std::os::unix::fs::symlink(inner.join("sub"), dir.join("alias")).unwrap();
+    let beside_alias = dir.join("x.png");
+    std::fs::write(&beside_alias, png()).unwrap();
+    let mut s = document_with_links(&dir.join("doc.designcraft"), &["x.png"]);
+    let (out, seen) = crate::io::touched(|| {
+        s.execute("links.relinkFolder", &json!({"dir": dir.join("alias").join("..").to_string_lossy(), "missingOnly": false})).unwrap()
+    });
+    assert_eq!(out["relinked"], 0, "{out}");
+    assert!(!seen.contains(&beside_alias), "{seen:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
