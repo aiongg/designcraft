@@ -7391,6 +7391,25 @@ fn parent_page_frames_know_which_side_of_the_spine_they_are_on() {
     assert!(!frame_specs(&d, right_story)[0].left_page);
 }
 
+#[test]
+fn a_grouped_frame_takes_the_side_of_the_page_its_group_moves_it_to() {
+    let mut d = Document::new(&NewDocument { pages: 3, ..Default::default() });
+    let lid = d.default_layer();
+    let (l, r) = (d.spreads[1].pages[0].clone(), d.spreads[1].pages[1].clone());
+    let rect = Rect::new(l.x + 36.0, 36.0, l.x + l.width - 36.0, 300.0);
+    let (fid, sid) = d.add_text_frame(SpreadRef::Doc(1), rect, lid, "Text", ParaFormat::default()).unwrap();
+    // The frame's own coordinates are on the left page; its group's transform puts it on the right one.
+    let mut g = designcraft_doc::Item::new(ItemId(d.alloc()), lid, designcraft_doc::Shape::Group, designcraft_geom::PathData::default());
+    g.xf = designcraft_geom::Affine::translate((r.x - l.x, 0.0));
+    let sp = Arc::make_mut(&mut d.spreads[1]);
+    let at = sp.items.iter().position(|it| it.id == fid).unwrap();
+    g.content = designcraft_doc::Content::Group { items: vec![sp.items.remove(at)] };
+    sp.items.push(Arc::new(g));
+    let spec = &frame_specs(&d, sid)[0];
+    assert!(spec.right_page && !spec.left_page);
+    assert_eq!(spec.page, Some(2));
+}
+
 /// A right-to-left paragraph's first-line indent belongs at its start side, the right. Applied on
 /// the left it moved the first line the wrong way — out of the frame for the hanging indent a
 /// numbered list uses (right indent 10 mm, first line −10 mm), while the wrapped lines sat where

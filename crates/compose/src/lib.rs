@@ -665,7 +665,10 @@ pub fn frame_specs(doc: &Document, sid: StoryId) -> Vec<FrameSpec> {
         let loc = doc.find(fid);
         let Some(item) = loc.as_ref().and_then(|l| doc.item_at(l)).or_else(|| doc.anchored_item(fid)) else { continue };
         let Some(tf) = item.text_frame() else { continue };
-        let xf = loc.as_ref().map(|l| doc.parent_xf(l)).unwrap_or(designcraft_geom::Affine::IDENTITY) * item.xf;
+        let parent = loc.as_ref().map(|l| doc.parent_xf(l)).unwrap_or(designcraft_geom::Affine::IDENTITY);
+        let xf = parent * item.xf;
+        // Where the frame is on the spread (a group's transform included), to find its page.
+        let center_x = parent.transform_rect_bbox(item.bounds()).center().x;
         let inv = xf.inverse();
         let mut exclusions = Vec::new();
         let spread_ref = loc.as_ref().map(|l| l.spread);
@@ -691,15 +694,14 @@ pub fn frame_specs(doc: &Document, sid: StoryId) -> Vec<FrameSpec> {
         }
         let (page_name, page, side) = match (spread_ref, spread) {
             (Some(designcraft_doc::SpreadRef::Doc(si)), Some(sp)) => {
-                let c = item.bounds().center();
-                let pi = sp.page_at_x(c.x).unwrap_or(0);
+                let pi = sp.page_at_x(center_x).unwrap_or(0);
                 let abs = doc.first_page_of_spread(si) + pi;
                 (Some(doc.page_name(abs)), Some(abs), sp.pages.get(pi).map(|p| p.side))
             }
             (Some(designcraft_doc::SpreadRef::Parent(_)), Some(sp)) => {
                 let prefix = sp.parent.as_ref().map(|p| p.prefix.clone()).unwrap_or_else(|| "A".into());
                 // The side of the parent page under the frame, so a folio there aligns to the spine of its own page.
-                let under = sp.page_at_x(item.bounds().center().x).and_then(|pi| sp.pages.get(pi));
+                let under = sp.page_at_x(center_x).and_then(|pi| sp.pages.get(pi));
                 (Some(prefix), None, under.map(|p| p.side))
             }
             _ => (None, None, None),
@@ -710,7 +712,7 @@ pub fn frame_specs(doc: &Document, sid: StoryId) -> Vec<FrameSpec> {
         // The page under the frame and its margins, in inner space (bounding boxes).
         let page_rect = match (spread_ref, spread) {
             (_, Some(sp)) => sp
-                .page_at_x(item.bounds().center().x)
+                .page_at_x(center_x)
                 .and_then(|pi| sp.pages.get(pi))
                 .map(|pg| (inv.transform_rect_bbox(pg.bounds()), inv.transform_rect_bbox(pg.margin_rect()))),
             _ => None,
