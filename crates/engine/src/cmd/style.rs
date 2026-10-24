@@ -2928,7 +2928,9 @@ mod export_tag_tests {
         }
         // An entry left under a name no style has doesn't attach to a style renamed onto it.
         s.edit(|d, _| {
-            d.styles_mut().export_tags.insert("p:Title".into(), designcraft_doc::ExportTag { tag: "h6".into(), class: "stale".into() });
+            d.styles_mut()
+                .export_tags
+                .insert("p:Title".into(), designcraft_doc::ExportTag { tag: "h6".into(), class: "stale".into(), ..Default::default() });
             Ok(())
         })
         .unwrap();
