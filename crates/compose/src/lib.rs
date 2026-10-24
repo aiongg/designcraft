@@ -713,9 +713,23 @@ pub fn frame_specs(doc: &Document, sid: StoryId) -> Vec<FrameSpec> {
         let under = spread.and_then(|sp| sp.page_at_x(center_x).and_then(|pi| sp.pages.get(pi)));
         let page_rect = under.map(|pg| (inv.transform_rect_bbox(pg.bounds()), inv.transform_rect_bbox(pg.margin_rect())));
         let g = &doc.settings.baseline_grid;
-        let (start, inc) = tf.options.baseline_grid.map_or((under.map_or(g.start, |pg| g.origin(pg)), g.increment), |f| (f.start, f.increment));
         // Grid lines are at spread y = start + n·inc (page tops are y = 0); map into inner space (translation only).
         let ty = xf.translation().y;
+        let (start, inc) = match tf.options.baseline_grid {
+            None => (under.map_or(g.start, |pg| g.origin(pg)), g.increment),
+            Some(f) => {
+                use designcraft_doc::FrameGridRelative as R;
+                // The frame's own edges are in inner space; `ty` takes them to spread y as it takes
+                // the grid back, so a frame-relative grid keeps its place in a turned frame.
+                let from = match f.relative_to {
+                    R::TopOfPage => 0.0,
+                    R::TopMargin => under.map_or(0.0, |pg| pg.margins.top),
+                    R::TopOfFrame => ty + item.inner_bounds().y0,
+                    R::TopInset => ty + item.text_area().y0,
+                };
+                (from + f.start, f.increment)
+            }
+        };
         let grid = (inc > 0.0 && inc.is_finite() && start.is_finite()).then_some((start - ty, inc));
         // Type on a path: one line as long as the path (from the start offset).
         let (area, opts) = match &tf.options.path {
