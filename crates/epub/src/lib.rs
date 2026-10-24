@@ -1740,12 +1740,12 @@ mod tests {
         let nl = EpubOptions { language: "nl".into(), ..Default::default() };
         let nav = read(&d, &nl, "OEBPS/nav.xhtml");
         let link = |f: &str, t: &str, l: &str| format!("<a href=\"{f}#{t}\">{l}</a>");
-        // Each h1 starts a chapter file (#768).
+        // Split Document is off: every heading is in the one content file.
         let want = format!(
             "<h1>Inhoud</h1><ol><li>{}<ol><li>{}</li></ol></li><li>{}</li></ol>",
             link("content.xhtml", "s0-p0", "One"),
             link("content.xhtml", "s0-p2", "One point one"),
-            link("content2.xhtml", "s0-p4", "Two")
+            link("content.xhtml", "s0-p4", "Two")
         );
         assert!(nav.contains(&want), "{nav}");
         assert!(!nav.contains("Text after the figure"), "{nav}");
