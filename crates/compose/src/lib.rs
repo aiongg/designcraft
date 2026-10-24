@@ -1083,7 +1083,7 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
             let cols_here = &cols[cur.fi];
             let col = span_rect(cols_here, cols_here[cur.col.min(cols_here.len() - 1)], pp.span_columns);
             let col = SplitCfg::of(&pp).map_or(col, |c| c.sub_rect(col, 0));
-            let spacing = spacing_for(&pp, base_chars.size);
+            let spacing = spacing_for(&pp, base_chars.size, story);
             let mut lines: Vec<(std::ops::Range<usize>, String)> = Vec::new();
             for _ in 0..3 {
                 // The same drop cap, spacing, hyphenation and breaker as the layout below.
@@ -1236,7 +1236,7 @@ fn compose_with_db(doc: &Document, story: &Story, frames: &[FrameSpec], opts: &C
         mojikumi::apply(&mut glyphs, &doc.styles, &pp.mojikumi);
         let hyph_after = hyphenation_points(&story.text, &glyphs, &pp, &hyph_exceptions, &foreign_ranges(doc, story, prange.clone(), &base_chars));
         let base_size = base_chars.size;
-        let spacing = spacing_for(&pp, base_size);
+        let spacing = spacing_for(&pp, base_size, story);
         // An empty paragraph takes its height from its paragraph mark's character format.
         let mark_chars = if glyphs.is_empty() {
             std::borrow::Cow::Owned(doc.styles.resolve_char(&base_chars, story.char_format_of(prange.start)))
@@ -2170,8 +2170,22 @@ pub fn column_rule_rects(columns: &[Rect], lines: &[Line], opts: &TextFrameOptio
     out
 }
 
+/// Optical margin alignment for a paragraph of `story`: (on, the size the hang is set for).
+/// Ignore Optical Margin turns it off; the story's setting, when on, applies to every other
+/// paragraph; otherwise the paragraph's own switch hangs at each glyph's own size.
+fn optical_for(pp: &ParaProps, story: &Story) -> (bool, Option<f64>) {
+    if pp.ignore_optical_margin {
+        return (false, None);
+    }
+    match story.optical_margin.hang_size() {
+        Some(size) => (true, Some(size)),
+        None => (pp.optical_margin, None),
+    }
+}
+
 /// Breaker parameters from the paragraph's settings.
-fn spacing_for(pp: &ParaProps, base_size: f64) -> Spacing {
+fn spacing_for(pp: &ParaProps, base_size: f64, story: &Story) -> Spacing {
+    let (optical, optical_size) = optical_for(pp, story);
     Spacing {
         justify: pp.align.is_justified(),
         word_min: pp.word_space_min,
@@ -2189,7 +2203,8 @@ fn spacing_for(pp: &ParaProps, base_size: f64) -> Spacing {
         // The zone is the Single-line Composer's (unjustified text only), as in InDesign: the
         // Paragraph Composer weighs every break of the paragraph instead.
         hyph_zone: if pp.align.is_justified() || !pp.composer.single_line() { 0.0 } else { pp.hyph_zone },
-        optical: pp.optical_margin,
+        optical,
+        optical_size,
         korean_char_breaks: pp.korean_char_breaks,
         kinsoku_priority: match pp.kinsoku_type.as_str() {
             "KinsokuPushInFirst" => 1,
@@ -3313,8 +3328,8 @@ fn layout_line(
     if (sp.optical || pp.kinsoku_hang != designcraft_doc::cjk::KinsokuHang::None) && !has_tab {
         let first = line.iter().find(|g| g.adv > 0.0 && !g.is_space());
         let lastg = line.iter().rev().find(|g| g.adv > 0.0 && !g.is_space());
-        let hl = if sp.optical { first.map_or(0.0, |g| breaker::hang(g.ch).0 * g.adv) } else { 0.0 };
-        let optical_right = if sp.optical { lastg.map_or(0.0, |g| breaker::hang(g.ch).1 * g.adv) } else { 0.0 };
+        let hl = first.map_or(0.0, |g| breaker::hang_left(g, sp));
+        let optical_right = lastg.map_or(0.0, |g| breaker::hang_right(g, sp));
         let cjk_right = lastg.map_or(0.0, |g| g.cjk_hang);
         let cjk_right = if pp.kinsoku_hang == designcraft_doc::cjk::KinsokuHang::Regular {
             cjk_right.min((line.iter().map(|g| g.adv).sum::<f64>() - measure).max(0.0))

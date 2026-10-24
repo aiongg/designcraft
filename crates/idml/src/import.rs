@@ -1841,6 +1841,7 @@ impl<'r> Importer<'r> {
         a.single_word_justify = e.prop("SingleWordJustification").and_then(|v| names::align_in(v.trim()));
         a.keep_with_next = u("KeepWithNext");
         a.keep_lines_together = e.boolean("KeepLinesTogether");
+        a.ignore_optical_margin = e.boolean("IgnoreEdgeAlignment");
         a.keep_all_lines = e.boolean("KeepAllLinesTogether");
         a.keep_first = u("KeepFirstLines");
         a.keep_last = u("KeepLastLines");
@@ -2116,6 +2117,14 @@ impl<'r> Importer<'r> {
             let format = self.xref_format_names.get(&fmt).cloned().unwrap_or_else(|| "Full Paragraph & Page Number".into());
             xref_list.push(Arc::new(designcraft_doc::CrossRef { target: 0, format }));
         }
+        let pref = e.find("StoryPreference");
+        let optical_margin = designcraft_doc::OpticalMargin {
+            on: pref.and_then(|p| p.boolean("OpticalMarginAlignment")).unwrap_or(false),
+            size: pref
+                .and_then(|p| p.num("OpticalMarginSize"))
+                .and_then(designcraft_doc::OpticalMargin::clamp_size)
+                .unwrap_or(designcraft_doc::OpticalMargin::DEFAULT_SIZE),
+        };
         let mut st = Story {
             id,
             text,
@@ -2128,6 +2137,7 @@ impl<'r> Importer<'r> {
                 designcraft_doc::TextDirection::LeftToRight
             },
             vertical: e.find("StoryPreference").and_then(|p| p.get("StoryOrientation")) == Some("Vertical"),
+            optical_margin,
             rev: 0,
             tables,
             notes,
