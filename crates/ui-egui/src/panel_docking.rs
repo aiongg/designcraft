@@ -182,7 +182,7 @@ pub(crate) fn default_layout(ui: &crate::UiState) -> Layout<String> {
             // The layout is rebuilt every frame, so each window keeps an id of its panel's (a
             // native window lives as long as its id).
             let window = default_window_id(&id);
-            floating.push(Floating { id: window, ..Floating::single(vec![id], 0, [at[0], at[1], 280.0, 360.0]) });
+            floating.push(Floating::single(vec![id], 0, [at[0], at[1], 280.0, 360.0]).with_id(window));
         }
     }
     let mut columns = Vec::new();
