@@ -9961,6 +9961,34 @@ mod tests {
     /// File › Export EPUB… opens EPUB Export Options from the document's setting; OK stores a
     /// changed Split Document as one undo step, and an unchanged one adds none.
     #[test]
+    fn epub_export_passes_its_options_to_the_engine() {
+        use std::io::Read;
+        use std::sync::{Arc, Mutex};
+        let mut app = test_app();
+        app.session.execute("style.paragraph.create", &json!({"name": "Chapter"})).unwrap();
+        let r = app.session.execute("frame.create", &json!({"rect": [36, 36, 300, 300], "content": "text", "text": "One\nTwo"})).unwrap();
+        let sid = r["story"].as_u64().unwrap();
+        for anchor in [0, 4] {
+            app.session.execute("text.select", &json!({"story": sid, "anchor": anchor, "focus": anchor})).unwrap();
+            app.session.execute("style.paragraph.apply", &json!({"name": "Chapter"})).unwrap();
+        }
+        let written: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = written.clone();
+        app.services.write = Some(Box::new(move |_: &str, bytes: &[u8]| {
+            *sink.lock().unwrap() = bytes.to_vec();
+            Ok(())
+        }));
+        crate::menus::export_epub(&mut app, &json!({"path": "book.epub", "split": {"style": "Chapter"}})).unwrap();
+        let bytes = written.lock().unwrap().clone();
+        let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        let mut opf = String::new();
+        z.by_name("OEBPS/content.opf").unwrap().read_to_string(&mut opf).unwrap();
+        assert!(opf.contains("properties=\"cover-image\""), "the first page is the cover: {opf}");
+        assert!(z.by_name("OEBPS/content2.xhtml").is_ok(), "the split override reaches the export");
+        assert_eq!(app.session.active().unwrap().doc.settings.epub_split, designcraft_doc::EpubSplit::Off, "an override is not stored");
+    }
+
+    #[test]
     fn epub_export_options_store_split_document() {
         use designcraft_doc::EpubSplit;
         let mut app = test_app();

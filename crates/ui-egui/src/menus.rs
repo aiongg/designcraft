@@ -2134,7 +2134,11 @@ fn export_bytes(app: &mut DesignApp, p: &Value, ext: &str, cmd: &str) -> Result<
         }
     };
     let Some(path) = path else { return Ok(Value::Null) };
-    let mut params = json!({});
+    // The caller's options go to the engine command; the path is ours.
+    let mut params = match p {
+        Value::Object(o) => Value::Object(o.iter().filter(|(k, _)| k.as_str() != "path").map(|(k, v)| (k.clone(), v.clone())).collect()),
+        _ => json!({}),
+    };
     if cmd == "file.exportText" {
         let txt = path.to_ascii_lowercase().ends_with(".txt");
         params["format"] = json!(if txt { "txt" } else { "rtf" });
