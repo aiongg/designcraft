@@ -871,7 +871,7 @@ dependencies = [
 [[package]]
 name = "craft-window"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs?rev=8177bad411b577f3204deb0a0e074516d76a0b93#8177bad411b577f3204deb0a0e074516d76a0b93"
+source = "git+https://github.com/storytold/craft-libs?rev=ea4c823abb46fa9d21361604ed1c6d21c54e9ca8#ea4c823abb46fa9d21361604ed1c6d21c54e9ca8"
 dependencies = [
  "egui",
  "objc2 0.6.4",
