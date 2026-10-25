@@ -204,7 +204,7 @@ pub fn app_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
                     egui::pos2(full.min.x - f32::from(left), full.min.y),
                     egui::pos2(full.max.x + 10.0, full.min.y + MAC_APP_BAR),
                 );
-                crate::title_bar::empty_area(ui, band);
+                craft_window::title_bar::empty_area(ui, band);
             }
             let mut menus_end = full.min.x;
             let mut tools_start = full.max.x;
@@ -2088,7 +2088,7 @@ mod tests {
         let mut movable_at = |at: egui::Pos2| {
             h.hover_at(at);
             h.run_steps(2);
-            crate::title_bar::window_movable(&h.ctx)
+            craft_window::title_bar::window_movable(&h.ctx)
         };
         for at in [pos2(bar.center().x, mid), pos2(bar.min.x + MAC_CONTENT_LEFT - 4.0, bar.min.y + 4.0), pos2(bar.center().x, 500.0)] {
             assert!(movable_at(at), "empty title bar or the page at {at:?}");

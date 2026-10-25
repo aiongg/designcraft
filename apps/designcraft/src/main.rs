@@ -20,8 +20,6 @@ mod gpu;
 mod gpu_limits;
 mod logging;
 #[cfg(target_os = "macos")]
-mod mac_window;
-#[cfg(target_os = "macos")]
 mod native_menu;
 mod profile;
 
@@ -91,7 +89,7 @@ impl eframe::App for App {
             discard_marked_text();
         }
         #[cfg(target_os = "macos")]
-        mac_window::sync_movable(ui.ctx(), &mut self.movable);
+        craft_window::title_bar::sync_movable(ui.ctx(), &mut self.movable);
     }
     fn on_exit(&mut self) {
         // A normal exit before the third frame is not a crash.
