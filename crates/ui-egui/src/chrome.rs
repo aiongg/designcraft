@@ -204,7 +204,7 @@ pub fn app_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
                     egui::pos2(full.min.x - f32::from(left), full.min.y),
                     egui::pos2(full.max.x + 10.0, full.min.y + MAC_APP_BAR),
                 );
-                craft_window::title_bar::empty_area(ui, band);
+                let _ = craft_window::title_bar::empty_area(ui, band);
             }
             let mut menus_end = full.min.x;
             let mut tools_start = full.max.x;
