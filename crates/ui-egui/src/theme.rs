@@ -311,7 +311,7 @@ fn font_stack_with(lang: &str, system: SystemFonts, craft: &[CraftFace]) -> Stac
 /// stack when their index is ready.
 pub fn install_fonts(ctx: &egui::Context, lang: &str) {
     font_stack(lang, SystemFonts::AfterCraft).install(ctx);
-    direction::apply(ctx, direction::resolve(language_tag(lang), direction::Setting::Language));
+    direction::apply(ctx, if crate::i18n::is_rtl(lang) { direction::Direction::Rtl } else { direction::Direction::Ltr });
 }
 
 pub fn semibold(size: f32) -> FontId {

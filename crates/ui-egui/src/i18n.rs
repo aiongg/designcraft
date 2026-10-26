@@ -4712,9 +4712,13 @@ const TABLE: &[(&str, [&str; 5])] = &[
     ),
 ];
 
-/// Interface direction; independent of document binding and paragraph direction.
+/// Whether the interface runs right to left for the interface language `lang`: from the language's
+/// script, unless `CRAFT_UI_DIRECTION` forces a direction. The same direction
+/// [`crate::theme::install_fonts`] applies to egui's own chrome. Independent of document binding
+/// and paragraph direction.
 pub fn is_rtl(lang: &str) -> bool {
-    lang == "ar"
+    use craft_ui::direction;
+    direction::resolve(if lang.is_empty() { "en" } else { lang }, direction::Setting::Language) == direction::Direction::Rtl
 }
 
 /// A Japanese, Chinese or Korean interface language (`zh-tw` included): CJK features are shown by
