@@ -1806,6 +1806,11 @@ fn run_ui_inner(app: &mut DesignApp, id: &str, p: &Value) -> Option<Result<Value
                 json!({"active": sets.active_name(builtins), "sets": sets.names(builtins), "builtIn": builtins.iter().map(|(n, _)| *n).collect::<Vec<_>>()}),
             )
         }
+        // The open Keyboard Shortcuts dialog edits the keys itself, and its Cancel puts back the
+        // ones it started with, which would undo a change made here.
+        "window.setShortcut" | "window.resetShortcuts" | "window.importShortcuts" if app.shortcut_dialog.is_some() => {
+            Err("close the Keyboard Shortcuts dialog first".into())
+        }
         "window.setShortcut" => {
             let Some(id) = p.get("id").and_then(Value::as_str) else { return Some(Err("missing id".into())) };
             let mut cmd = crate::keys::command_ref(id, p.get("params").unwrap_or(&Value::Null));
@@ -3228,6 +3233,15 @@ pub fn paste_chord_command(app: &DesignApp, modifiers: egui::Modifiers) -> Optio
     let platform = app.keymap.platform();
     let held = craft_keymap::Mods::from_egui(&modifiers, platform);
     let pressed = craft_keymap::Chord::new(held, craft_keymap::Key::V);
+    // A shortcut the user set is the menu bar's key equivalent once the bar carries it.
+    let on_bar = app
+        .native_shortcuts
+        .get(id)
+        .and_then(|sc| craft_keymap::Binding::parse(sc).ok())
+        .is_some_and(|b| !b.trigger.double && b.trigger.chord.effective(platform) == pressed);
+    if app.native_menu && on_bar {
+        return None;
+    }
     let bound =
         app.keymap.bindings(&craft_keymap::CommandRef::new(id)).iter().any(|b| !b.trigger.double && b.trigger.chord.effective(platform) == pressed);
     bound.then_some(id)
@@ -3804,6 +3818,28 @@ mod tests {
     /// with the dialog.
     fn effective_shortcuts(app: &DesignApp) -> Vec<(String, String)> {
         app.keymap.catalog().iter().filter_map(|b| crate::keys::shortcut(&app.keymap, &b.command).map(|s| (b.command.key(), s))).collect()
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn shortcut_edits_wait_for_the_dialog_and_the_menu_bar_owns_its_paste_chord() {
+        let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        crate::shortcuts_dialog::open(&mut app, None);
+        for (id, p) in [
+            ("window.setShortcut", json!({"id": "app.palette", "shortcut": "F2"})),
+            ("window.resetShortcuts", json!({})),
+            ("window.importShortcuts", json!({"text": ""})),
+        ] {
+            assert!(run_ui(&mut app, id, &p).unwrap().is_err(), "{id} while the dialog is open");
+        }
+        crate::shortcuts_dialog::close(&mut app, false).unwrap();
+        // A chord of the user's: the default one is the bar's from the start.
+        run_ui(&mut app, "window.setShortcut", &json!({"id": "edit.pasteInPlace", "shortcut": "Cmd+Alt+V", "steal": true})).unwrap().unwrap();
+        let held = egui::Modifiers::COMMAND | egui::Modifiers::ALT;
+        app.native_menu = true;
+        assert_eq!(paste_chord_command(&app, held), Some("edit.pasteInPlace"), "before the bar carries it");
+        app.native_shortcuts.insert("edit.pasteInPlace".into(), "Cmd+Alt+V".into());
+        assert_eq!(paste_chord_command(&app, held), None, "the bar's key equivalent runs it, once");
     }
 
     #[test]
