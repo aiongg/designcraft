@@ -74,7 +74,7 @@ pub fn label(ui: &mut egui::Ui, text: impl Into<WidgetText>) -> egui::Response {
 /// Isolate a user-provided name when embedding it in LTR chrome/metadata.
 /// A Latin product name or suffix must not change the name's internal reading order.
 pub fn isolate(text: &str) -> String {
-    if text.chars().any(designcraft_fonts::is_rtl) { format!("\u{2068}{text}\u{2069}") } else { text.to_owned() }
+    if text.chars().any(designcraft_fonts::is_rtl) { craft_i18n::isolate(text) } else { text.to_owned() }
 }
 
 pub fn plain(ctx: &egui::Context, text: &str, font: FontId, color: Color32) -> Arc<Galley> {
