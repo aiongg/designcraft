@@ -1912,8 +1912,9 @@ mod page_list_tests {
         }
         // The two forms now agree byte for byte, and the pages come out in the document's order
         // whichever order the list names them in (which is how the export already behaved).
+        // A fixed creation time: exports a second apart would differ in their dates.
         let mut file = |pages: Value| {
-            let r = s.execute("file.exportPdf", &json!({"pages": pages})).unwrap();
+            let r = s.execute("file.exportPdf", &json!({"pages": pages, "created": 0})).unwrap();
             r["base64"].as_str().unwrap_or_default().to_string()
         };
         assert_eq!(file(json!([4, 1])), file(json!("4,1")), "the array and the string agree");
