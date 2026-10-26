@@ -123,6 +123,8 @@ pub struct Preview {
     #[cfg(not(target_arch = "wasm32"))]
     worker_started: bool,
     frame: u64,
+    /// The frame that last separated a sheet on the UI thread.
+    separated_in: Option<u64>,
     /// The spread and the point in it under the pointer, for the panel's readout.
     pub pointer: Option<(usize, Point)>,
     /// How long the last separation took, in milliseconds.
@@ -191,7 +193,13 @@ impl Preview {
                 return;
             }
         }
-        let _ = ctx;
+        // On the UI thread (the web build) one sheet per frame, so input and drawing keep up;
+        // the next frame asks for the rest.
+        if self.separated_in == Some(self.frame) {
+            ctx.request_repaint();
+            return;
+        }
+        self.separated_in = Some(self.frame);
         let done = separate(job);
         self.last_ms = done.ms;
         self.insert(done.key, done.sheet.map(Arc::new));
@@ -390,6 +398,27 @@ mod tests {
         p.queued(key(3, 288.0));
         p.queued(key(4, 72.0));
         assert_eq!(p.pending.iter().map(|k| (k.spread, k.dpi)).collect::<Vec<_>>(), [(3, 288.0), (4, 72.0)]);
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn the_ui_thread_separates_one_sheet_per_frame() {
+        let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.session.execute("file.new", &json!({"pages": 4, "facing": false})).unwrap();
+        let ctx = egui::Context::default();
+        let jobs = |app: &crate::DesignApp| [0, 1].map(|si| super::key(app, si, 36.0).unwrap().1);
+        // No worker thread, as on the web.
+        app.canvas.separations.worker_started = true;
+        app.canvas.separations.frame = 1;
+        for job in jobs(&app) {
+            app.canvas.separations.request(&ctx, job);
+        }
+        assert_eq!(app.canvas.separations.entries.len(), 1);
+        app.canvas.separations.frame = 2;
+        for job in jobs(&app) {
+            app.canvas.separations.request(&ctx, job);
+        }
+        assert_eq!(app.canvas.separations.entries.len(), 2, "the next frame separates the other");
     }
 
     #[test]
