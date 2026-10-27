@@ -55,8 +55,7 @@ impl FontDb {
             listing_made: Mutex::new(()),
             scanned: Mutex::new(HashMap::new()),
             installed: super::catalog_faces::FaceCache::new(),
-            register_bundled: false,
-            bundled_registered: std::sync::OnceLock::new(),
+            app_catalog: false,
             sys: Mutex::new(SysFallback { enabled: true, ..Default::default() }),
             #[cfg(all(test, target_os = "linux"))]
             fallback_snapshot_hook: Mutex::new(None),
@@ -114,20 +113,21 @@ impl FontDb {
         DB.get_or_init(|| {
             #[cfg(not(target_arch = "wasm32"))]
             {
-                use craft_font_catalog::app::{self, AppFonts};
-                use craft_font_catalog::{Catalog, FontEnv, office_font_dirs};
-                // Office's fonts (Calibri, Cambria, …) are read in place from the first Office app
-                // installed: every app holds the same set. Not its cloud fonts, whose folder is in
-                // Office's group container, which macOS asks the user before another app reads.
-                let office = office_font_dirs(&FontEnv::from_process()).into_iter().filter(|d| d.ends_with("DFonts")).find(|d| d.is_dir());
-                // The bundled faces join the catalog with its first listing (`register_bundled`):
-                // adding them here would scan the installed fonts on the caller's thread.
+                use craft_font_catalog::Catalog;
+                use craft_font_catalog::app::{self, AppFonts, Office};
+                // Office's fonts (Calibri, Cambria, …) are read in place from the Office apps. Not
+                // its cloud fonts, whose folder is in Office's group container, which macOS asks
+                // the user before another app reads.
                 let started = app::configure(AppFonts {
-                    dirs: office.into_iter().collect(),
+                    office: Office::Bundled,
+                    bundled: Self::document_font_files().map(Arc::from).collect(),
                     on_change: Some(Arc::new(|_: &Catalog| FontDb::global().changed_in_background())),
                     ..AppFonts::default()
                 });
-                FontDb { register_bundled: true, ..FontDb::with_catalog(Arc::clone(started.catalog)) }
+                for (_, e) in &started.bundled_errors {
+                    log::warn!("a bundled font isn't in the font catalog: {e}");
+                }
+                FontDb { app_catalog: true, ..FontDb::with_catalog(Arc::clone(started.catalog)) }
             }
             #[cfg(target_arch = "wasm32")]
             FontDb::bundled_only()

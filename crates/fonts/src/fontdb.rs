@@ -112,11 +112,9 @@ pub struct FontDb {
     /// The faces made from installed font files, by file and face index.
     #[cfg(not(target_arch = "wasm32"))]
     installed: catalog_faces::FaceCache<Vec<Arc<FontFace>>>,
-    /// Add the bundled faces to the catalog before its first listing ([`FontDb::global`]).
+    /// The catalog is the app module's ([`FontDb::global`]): Reload Fonts rescans through it.
     #[cfg(not(target_arch = "wasm32"))]
-    register_bundled: bool,
-    #[cfg(not(target_arch = "wasm32"))]
-    bundled_registered: std::sync::OnceLock<()>,
+    app_catalog: bool,
     /// System fallback state: enabled, and characters no system font covers.
     #[cfg(not(target_arch = "wasm32"))]
     sys: Mutex<SysFallback>,

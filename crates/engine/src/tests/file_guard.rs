@@ -36,7 +36,7 @@ const ALLOWED: &[(&str, &str)] = &[
     ),
     (
         "fonts/src/fontdb/catalog_faces.rs",
-        "stamps (and, for a replaced file, reads again) only font files the font catalog listed from the platform's fixed font folders, or that `load_document_fonts` added after the caller's `allow` check passed them",
+        "reads the length and modification time of only the font files the font catalog listed from the platform's fixed font folders, or that `load_document_fonts` added after the caller's `allow` check passed them",
     ),
     (
         "mcp/src/tools.rs",

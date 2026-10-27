@@ -313,7 +313,11 @@ impl FontDb {
     /// then take what it finds ([`FontDb::refresh`]). Nothing to do on wasm.
     pub fn reload_fonts(&self) -> ReloadedFonts {
         #[cfg(not(target_arch = "wasm32"))]
-        self.catalog.rescan();
+        if self.app_catalog {
+            craft_font_catalog::app::rescan_now();
+        } else {
+            self.catalog.rescan();
+        }
         self.refresh()
     }
 
@@ -347,9 +351,6 @@ impl FontDb {
     /// files new or changed since the last listing. Bundled faces are left out: they are loaded.
     #[cfg(not(target_arch = "wasm32"))]
     fn make_listing(&self) -> Listing {
-        if self.register_bundled {
-            self.bundled_registered.get_or_init(|| self.register_bundled_faces());
-        }
         if !self.catalog.is_ready() {
             // The first scan, so that the generation read next is the one the faces have.
             let _ = self.catalog.faces();
@@ -391,18 +392,6 @@ impl FontDb {
         *scanned = kept;
         log::debug!("listed {} installed font faces", entries.len());
         (generation, entries.into())
-    }
-
-    /// The faces every database starts with, also in the catalog, so that its lookups by name
-    /// find them as DesignCraft does.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn register_bundled_faces(&self) {
-        let limits = craft_font_catalog::Limits::default();
-        for data in Self::document_font_files() {
-            if let Err(e) = self.catalog.add_bytes(data.to_vec(), Source::Bundled, &limits) {
-                log::warn!("a bundled font isn't in the font catalog: {e}");
-            }
-        }
     }
 
     /// Load the installed `family`'s faces. Returns whether any face was added.

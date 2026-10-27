@@ -5,15 +5,11 @@
 //! Nothing here knows the app's face type `F`, so any app on `craft-font-catalog` can use it.
 
 use std::collections::{HashMap, HashSet};
-use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::SystemTime;
 
 use craft_font_catalog::{Catalog, FaceInfo, FontData, FontFileError};
-
-/// The largest font file read again here (the catalog's own limit for a load).
-const MAX_FILE: u64 = 512 << 20;
 
 /// Which face of which font data a cached face was made from.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -45,9 +41,6 @@ struct State<F> {
     /// The catalog generation the cached faces were last checked at.
     generation: Option<u64>,
     faces: HashMap<FaceKey, Cached<F>>,
-    /// Files whose faces were let go because the file changed: the data the catalog had for them
-    /// (it hands a file's data out again while anything holds it), and the data read since.
-    stale: HashMap<PathBuf, (Weak<[u8]>, Option<Weak<[u8]>>)>,
 }
 
 /// The app's faces (`F`) made from a [`Catalog`]'s fonts, by font file and face index.
@@ -57,7 +50,7 @@ pub struct FaceCache<F> {
 
 impl<F> Default for FaceCache<F> {
     fn default() -> Self {
-        Self { state: Mutex::new(State { generation: None, faces: HashMap::new(), stale: HashMap::new() }) }
+        Self { state: Mutex::new(State { generation: None, faces: HashMap::new() }) }
     }
 }
 
@@ -87,7 +80,8 @@ impl<F> FaceCache<F> {
             return Ok(Arc::clone(&c.face));
         }
         let stamp = info.path.as_deref().and_then(stamp);
-        let data = self.load(catalog, info)?;
+        // The catalog reads a file replaced since it last read it again.
+        let data = catalog.load(info)?;
         let key = match &info.path {
             Some(path) => FaceKey::File(path.clone(), info.index),
             None => FaceKey::Added(Arc::as_ptr(&data.bytes).cast::<u8>() as usize, info.index),
@@ -99,32 +93,6 @@ impl<F> FaceCache<F> {
         let mut state = self.lock();
         let cached = state.faces.entry(key).or_insert(Cached { face, info: info.clone(), bytes: data.bytes, stamp });
         Ok(Arc::clone(&cached.face))
-    }
-
-    /// `info`'s data from `catalog`, or read from its file again when the catalog hands out the
-    /// data of a file that changed since.
-    fn load(&self, catalog: &Catalog, info: &FaceInfo) -> Result<FontData, FontFileError> {
-        let data = catalog.load(info)?;
-        let Some(path) = &info.path else { return Ok(data) };
-        let fresh = {
-            let state = self.lock();
-            let Some((old, fresh)) = state.stale.get(path) else { return Ok(data) };
-            if !old.upgrade().is_some_and(|old| Arc::ptr_eq(&old, &data.bytes)) {
-                return Ok(data);
-            }
-            fresh.as_ref().and_then(Weak::upgrade)
-        };
-        let bytes = match fresh {
-            Some(bytes) => bytes,
-            None => {
-                let bytes: Arc<[u8]> = read_file(path)?.into();
-                if let Some(entry) = self.lock().stale.get_mut(path) {
-                    entry.1 = Some(Arc::downgrade(&bytes));
-                }
-                bytes
-            }
-        };
-        Ok(FontData { bytes, index: data.index })
     }
 
     /// Let go of the faces whose file changed or left `catalog`, or whose added data was removed
@@ -146,14 +114,10 @@ impl<F> FaceCache<F> {
             };
             if keep {
                 state.faces.insert(key, c);
-                continue;
+            } else {
+                gone.push((key, c.face));
             }
-            if let FaceKey::File(path, _) = &key {
-                state.stale.insert(path.clone(), (Arc::downgrade(&c.bytes), None));
-            }
-            gone.push((key, c.face));
         }
-        state.stale.retain(|_, (old, _)| old.strong_count() > 0);
         gone
     }
 
@@ -170,25 +134,9 @@ impl<F> FaceCache<F> {
         let mut gone = Vec::new();
         for key in changed {
             if let Some(c) = state.faces.remove(&key) {
-                state.stale.insert(path.to_path_buf(), (Arc::downgrade(&c.bytes), None));
                 gone.push((key, c.face));
             }
         }
-        state.stale.retain(|_, (old, _)| old.strong_count() > 0);
         gone
     }
-}
-
-fn read_file(path: &Path) -> Result<Vec<u8>, FontFileError> {
-    let file = std::fs::File::open(path)?;
-    let meta = file.metadata()?;
-    if !meta.is_file() {
-        return Err(FontFileError::NotAFont);
-    }
-    if meta.len() > MAX_FILE {
-        return Err(FontFileError::TooLarge { size: meta.len(), max: MAX_FILE });
-    }
-    let mut data = Vec::new();
-    file.take(MAX_FILE).read_to_end(&mut data)?;
-    Ok(data)
 }
