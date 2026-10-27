@@ -1143,6 +1143,22 @@ fn clicking_an_iconic_column_icon_opens_its_flyout() {
     assert!(h.state().ui.docking_flyout.is_none());
 }
 
+/// Auto-Collapse Iconic Panels is off by default, also for preferences saved while it was on by
+/// default: working on the canvas leaves an open flyout open.
+#[test]
+fn a_canvas_click_leaves_an_open_flyout_open() {
+    let mut h = harness(app(), vec2(1280.0, 800.0));
+    assert!(!h.state().ui.dock_auto_collapse);
+    let icon = hits(&h).into_iter().find(|(hit, _)| *hit == craft_ui::docking::Hit::Icon("swatches".into())).expect("the Swatches icon").1;
+    click(&mut h, icon.center(), PointerButton::Primary);
+    assert_eq!(h.state().ui.docking_flyout.as_deref(), Some("swatches"));
+    click(&mut h, egui::pos2(400.0, 400.0), PointerButton::Primary);
+    assert_eq!(h.state().ui.docking_flyout.as_deref(), Some("swatches"), "the flyout stays open");
+    assert!(showing(h.state(), "swatches"));
+    let saved = crate::UiState::from_preferences_json(br#"{"dockAutoCollapse": true}"#).unwrap();
+    assert!(!saved.dock_auto_collapse, "the older key is not read");
+}
+
 /// Iconic columns paint DesignCraft's own panel icons, in the colour craft-ui passes; a panel
 /// without an icon paints nothing.
 #[test]

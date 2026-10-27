@@ -2472,6 +2472,20 @@ fn preferences_first_setting_switches_interface_language() {
     assert_eq!(app.ui.language, "it");
 }
 
+/// Preferences › Interface › Panels holds Auto-Collapse Iconic Panels, the same setting as the
+/// iconic column's menu.
+#[test]
+fn preferences_set_auto_collapse_iconic_panels() {
+    let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+    app.run("app.preferences", json!({})).unwrap();
+    assert_eq!(app.ui.dialog.as_ref().unwrap().fields["autoCollapseIconicPanels"], json!(false));
+    app.ui.dialog.as_mut().unwrap().fields.insert("autoCollapseIconicPanels".into(), json!(true));
+    confirm(&mut app).unwrap();
+    assert!(app.ui.dock_auto_collapse);
+    app.run("app.preferences", json!({})).unwrap();
+    assert_eq!(app.ui.dialog.as_ref().unwrap().fields["autoCollapseIconicPanels"], json!(true));
+}
+
 #[test]
 fn preferences_sidebar_scroll_keeps_selected_options_visible() {
     let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());

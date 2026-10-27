@@ -284,7 +284,10 @@ pub struct UiState {
     /// opened it.
     #[serde(skip)]
     pub docking_flyout: Option<String>,
-    /// Auto-Collapse Iconic Panels: a flyout closes on Escape or a click outside it.
+    /// Auto-Collapse Iconic Panels: a flyout closes on Escape or a click outside it. Off by
+    /// default. Saved as `autoCollapseIconicPanels`: `dockAutoCollapse` in older preference files
+    /// holds a default of on, so it is not read.
+    #[serde(rename = "autoCollapseIconicPanels")]
     pub dock_auto_collapse: bool,
     /// Whether the default layout's outer column is expanded (false: collapsed to icons).
     pub dock_expanded: bool,
@@ -428,7 +431,7 @@ impl Default for UiState {
             docking_raise: None,
             docking_opened: None,
             docking_flyout: None,
-            dock_auto_collapse: true,
+            dock_auto_collapse: false,
             docking_focused: None,
             dock_expanded: true,
             icon_groups: None,

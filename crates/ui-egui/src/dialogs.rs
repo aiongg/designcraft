@@ -1970,6 +1970,9 @@ fn preferences(app: &crate::DesignApp, ui: &mut egui::Ui, d: &mut Dialog, max_he
                             d.fields.insert("uiScale".into(), json!(v));
                         }
                     });
+                    ui.add_space(8.0);
+                    crate::rtl::label(ui, egui::RichText::new(crate::i18n::tr(&app.ui.language, "Panels")).font(semibold(12.0)));
+                    check(ui, d, "autoCollapseIconicPanels", crate::i18n::tr(&app.ui.language, "Auto-Collapse Iconic Panels"));
                 }
                 "grids" => {
                     crate::rtl::label(ui, egui::RichText::new(crate::i18n::tr(&app.ui.language, "Baseline Grid")).font(semibold(12.0)));
@@ -3635,6 +3638,9 @@ pub fn confirm(app: &mut DesignApp) -> Result<Value, String> {
             app.run("window.richBlack", json!({"on": d.b("richBlack")}))?;
             if let Some(v) = d.n("uiScale") {
                 app.run("window.uiScale", json!({"scale": v / 100.0}))?;
+            }
+            if let Some(on) = d.fields.get("autoCollapseIconicPanels").and_then(Value::as_bool) {
+                app.ui.dock_auto_collapse = on;
             }
             if d.fields.contains_key("snap.alignEdges") {
                 let mut snap = json!({
