@@ -50,5 +50,9 @@ hayro-interpret = { version = "0.7.0", default-features = false, features = ["em
 hayro-cmap = "0.1"
 kurbo = { workspace = true }
 
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+# Fonts installed while a test runs (`cmd::fonts` tests).
+craft-font-catalog = { workspace = true }
+
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3"

@@ -1,12 +1,13 @@
 //! Type › Find/Replace Font: the fonts a document uses (missing ones flagged) and replacing one
 //! font with another everywhere — local formatting and style definitions. Type › Reload Fonts:
-//! the fonts installed, edited or removed since they were read.
+//! the fonts installed, edited or removed since they were read, and composing again the documents
+//! they change.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use designcraft_doc::{CharAttrs, Document, Story};
-use designcraft_fonts::FontSource;
+use designcraft_fonts::{FontDb, FontSource, ReloadedFonts};
 use serde_json::{Value, json};
 
 use super::{CommandSpec, always, bad, cmd, has_doc, str_param};
@@ -31,7 +32,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Reload Fonts",
             ["Type"],
             None,
-            "{} — scans the font folders again and reads again the installed font files changed or removed since they were read, then recomposes the open documents → {cataloged, changed: [path]}",
+            "{} — scans the font folders again and reads again the installed font files changed or removed since they were read, then recomposes the open documents that were missing a font now found or used one changed or removed → {cataloged, changed: [path], recomposed}",
             always,
             reload
         ),
@@ -39,15 +40,63 @@ pub fn specs() -> Vec<CommandSpec> {
 }
 
 /// Fonts installed, edited or removed while the app runs (#328, #547): the font database reads
-/// them again, then every open document is composed again with what is installed now.
+/// them again, then the open documents they change are composed again (see [`refresh`]).
 fn reload(s: &mut Session, _: &Value) -> Result<Value> {
-    let reloaded = designcraft_fonts::FontDb::global().reload_fonts();
-    // A new cache: render jobs still holding the old one can't bring back the old fonts' layout.
-    s.cache = Arc::new(designcraft_compose::Cache::new());
-    for st in &mut s.docs {
-        st.bump_revision();
+    let (reloaded, recomposed) = refresh(s, FontDb::reload_fonts);
+    Ok(json!({"cataloged": reloaded.cataloged, "changed": reloaded.changed, "recomposed": recomposed}))
+}
+
+/// What a document's text asks of the fonts: the family and style pairs that don't resolve
+/// exactly (a missing family, or a style the family lacks), and the families its text is set in
+/// (lowercase).
+struct FontNeeds {
+    inexact: Vec<(String, String)>,
+    resolved: BTreeSet<String>,
+}
+
+fn font_needs(d: &Document) -> FontNeeds {
+    let db = FontDb::global().scoped(d.font_scope);
+    let mut used = FontTally::new();
+    for_each_story(d, &mut |st| tally_story(d, st, &mut used));
+    let mut needs = FontNeeds { inexact: Vec::new(), resolved: BTreeSet::new() };
+    for (family, style) in used.into_keys() {
+        needs.resolved.insert(db.face(&family, &style).family.to_lowercase());
+        if !db.has_family(&family) || !db.has_style(&family, &style) {
+            needs.inexact.push((family, style));
+        }
     }
-    Ok(json!({"cataloged": reloaded.cataloged, "changed": reloaded.changed}))
+    needs
+}
+
+/// Let `apply` change the font database ([`FontDb::refresh`], [`FontDb::reload_fonts`]), then
+/// compose again each open document that was missing a family or style that now resolves
+/// exactly, or whose text is set in a family removed or changed (a style installed or removed, a
+/// font file replaced). Other documents keep their composition and revision, unless the catalog
+/// can't say which families changed. Returns what `apply` did and how many documents are composed
+/// again.
+pub(crate) fn refresh(s: &mut Session, apply: impl FnOnce(&FontDb) -> ReloadedFonts) -> (ReloadedFonts, usize) {
+    let before: Vec<FontNeeds> = s.docs.iter().map(|st| font_needs(&st.doc)).collect();
+    let reloaded = apply(FontDb::global());
+    let lost: BTreeSet<String> = reloaded.families.iter().map(|f| f.to_lowercase()).collect();
+    let mut stale = Vec::new();
+    for (i, (st, needs)) in s.docs.iter().zip(&before).enumerate() {
+        let db = FontDb::global().scoped(st.doc.font_scope);
+        let found = needs.inexact.iter().any(|(family, style)| db.has_family(family) && db.has_style(family, style));
+        if reloaded.full || found || !needs.resolved.is_disjoint(&lost) {
+            stale.push(i);
+        }
+    }
+    if !stale.is_empty() {
+        // A new cache: render jobs still holding the old one can't bring back the old fonts'
+        // layout. Documents not composed again compose from it as before.
+        s.cache = Arc::new(designcraft_compose::Cache::new());
+        for &i in &stale {
+            if let Some(st) = s.docs.get_mut(i) {
+                st.bump_revision();
+            }
+        }
+    }
+    (reloaded, stale.len())
 }
 
 /// Every story's text, including table cells and footnotes.
@@ -260,20 +309,69 @@ fn replace(s: &mut Session, p: &Value) -> Result<Value> {
 mod tests {
     use super::*;
 
+    /// Serializes the tests that move the process-wide font database on: each compares what its
+    /// session's documents resolve before and after.
+    static FONT_DB: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
-    fn reload_fonts_recomposes_open_documents_without_editing_them() {
+    fn reloading_fonts_leaves_documents_they_dont_change_alone() {
+        let _db = FONT_DB.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut s = Session::new();
         let r = s.execute("font.reload", &json!({})).unwrap();
-        assert!(r["cataloged"].is_u64() && r["changed"].is_array(), "{r}");
+        assert!(r["cataloged"].is_u64() && r["changed"].is_array() && r["recomposed"] == 0, "{r}");
         s.execute("file.new", &json!({})).unwrap();
         s.execute("frame.create", &json!({"rect": [72, 72, 400, 300], "content": "text", "text": "Some text here."})).unwrap();
         let (revision, undo) = (s.doc().unwrap().revision, s.doc().unwrap().history.undo.len());
         let cache = Arc::clone(&s.cache);
-        s.execute("font.reload", &json!({})).unwrap();
-        assert!(!Arc::ptr_eq(&cache, &s.cache), "the layout composed with the old fonts is let go");
+        assert_eq!(s.execute("font.reload", &json!({})).unwrap()["recomposed"], 0);
+        assert!(Arc::ptr_eq(&cache, &s.cache), "the composition is kept");
         let st = s.doc().unwrap();
-        assert_ne!(st.revision, revision, "the canvas draws the document again");
+        assert_eq!(st.revision, revision);
         assert_eq!(st.history.undo.len(), undo, "reloading fonts isn't an edit");
+    }
+
+    /// The launcher installs a font while DesignCraft runs: once the font database takes the
+    /// catalog's change, the document that was missing the family is composed again with it, and
+    /// a document that was missing nothing isn't touched.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_font_installed_after_start_recomposes_the_documents_missing_it() {
+        let _db = FONT_DB.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let family = "DC Test Installed After Start";
+        let db = FontDb::global();
+        assert!(!db.has_family(family));
+        let mut s = Session::new();
+        s.execute("file.new", &json!({})).unwrap();
+        s.execute("frame.create", &json!({"rect": [0, 0, 200, 200], "content": "text", "text": "Missing until installed"})).unwrap();
+        let d = Arc::make_mut(&mut s.doc_mut().unwrap().doc);
+        let sid = *d.stories.keys().next().unwrap();
+        for para in &mut d.story_mut(sid).unwrap().paras {
+            para.chars.font_family = Some(family.into());
+            para.chars.font_style = Some("Regular".into());
+        }
+        s.execute("file.new", &json!({})).unwrap();
+        s.execute("frame.create", &json!({"rect": [0, 0, 200, 200], "content": "text", "text": "Bundled font"})).unwrap();
+        let d = Arc::make_mut(&mut s.doc_mut().unwrap().doc);
+        let sid = *d.stories.keys().next().unwrap();
+        for para in &mut d.story_mut(sid).unwrap().paras {
+            para.chars.font_family = Some(designcraft_fonts::FALLBACK_FAMILY.into());
+            para.chars.font_style = Some("Regular".into());
+        }
+        let revisions: Vec<u64> = s.docs.iter().map(|st| st.revision).collect();
+        assert_eq!(s.refresh_fonts(), 0, "nothing changed yet");
+
+        let font = designcraft_fonts::testing::font_with(family, &['M', 'i', 's']).unwrap();
+        craft_font_catalog::Catalog::global().add_bytes(font, craft_font_catalog::Source::User, &craft_font_catalog::Limits::default()).unwrap();
+        assert!(db.fonts_changed());
+        assert!(!db.has_family(family), "lookups see the catalog as it was until the database takes the change");
+        assert_eq!(s.refresh_fonts(), 1);
+        assert_eq!(db.face(family, "Regular").family, family);
+        assert_ne!(s.docs[0].revision, revisions[0], "the document missing the family is composed again");
+        assert_eq!(s.docs[1].revision, revisions[1], "the other document isn't");
+        s.set_active(0);
+        let used = s.execute("font.list", &json!({})).unwrap();
+        assert_eq!(used[0]["family"], family);
+        assert_eq!(used[0]["matchStatus"], "exact", "{used}");
     }
 
     #[test]

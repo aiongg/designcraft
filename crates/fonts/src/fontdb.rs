@@ -1,5 +1,5 @@
-//! Font database: bundled OFL fonts, user fonts, the installed system fonts (cataloged the first
-//! time a lookup needs them, native only), outline cache.
+//! Font database: bundled OFL fonts, user fonts, the installed fonts (from the font catalog,
+//! listed the first time a lookup needs them, native only), outline cache.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -86,23 +86,32 @@ pub struct FontDb {
     /// Variable font instances (`Style {wght:650}`), made on first use, by base face and style.
     instances: RwLock<HashMap<(u32, String), Arc<FontFace>>>,
     outlines: Mutex<HashMap<(u32, u32), Arc<BezPath>>>,
+    /// The installed fonts: the platform's, the font store's and the app folders'.
     #[cfg(not(target_arch = "wasm32"))]
-    catalog: RwLock<Vec<CatalogEntry>>,
-    /// Each installed font file read into the shared fonts, with its (length, modification time)
-    /// when it was read: [`FontDb::reload_fonts`] reads again the files that changed since.
+    catalog: Arc<craft_font_catalog::Catalog>,
+    /// The catalog's faces as lookups see them, with the catalog generation they were listed at.
+    /// Only [`FontDb::refresh`] moves it on, so a document's text is composed against one set of
+    /// installed fonts, and the engine can compare what resolved before and after.
     #[cfg(not(target_arch = "wasm32"))]
-    installed_files: Mutex<HashMap<std::path::PathBuf, FileStamp>>,
-    /// The folders the system font scan reads (the platform's font folders for [`FontDb::global`]).
-    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-    font_dirs: Vec<std::path::PathBuf>,
-    /// Lists the font files outside `font_dirs` that the system font scan reads too, asked again by
-    /// each scan ([`platform_font_files`] for [`FontDb::global`]).
-    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-    font_files: fn() -> Vec<std::path::PathBuf>,
-    /// Set once the font folders have been scanned. Lookups by family name wait for the first
-    /// scan, so what they find doesn't depend on what ran before them.
+    listing: RwLock<Option<Listing>>,
+    /// The next listing, made ahead off the UI thread ([`FontDb::window_activated`]).
     #[cfg(not(target_arch = "wasm32"))]
-    cataloged: std::sync::OnceLock<()>,
+    pending: Mutex<Option<Listing>>,
+    /// Held while a listing is made, so two threads don't both read the new font files.
+    #[cfg(not(target_arch = "wasm32"))]
+    listing_made: Mutex<()>,
+    /// What the listing reads of each installed font file beyond the catalog's names (font menu
+    /// group, native and WWS names), by path, with the file's length and modification time.
+    #[cfg(not(target_arch = "wasm32"))]
+    scanned: Mutex<HashMap<std::path::PathBuf, (FileStamp, Arc<[ScannedFace]>)>>,
+    /// The faces made from installed font files, by file and face index.
+    #[cfg(not(target_arch = "wasm32"))]
+    installed: catalog_faces::FaceCache<Vec<Arc<FontFace>>>,
+    /// Add the bundled faces to the catalog before its first listing ([`FontDb::global`]).
+    #[cfg(not(target_arch = "wasm32"))]
+    register_bundled: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    bundled_registered: std::sync::OnceLock<()>,
     /// System fallback state: enabled, and characters no system font covers.
     #[cfg(not(target_arch = "wasm32"))]
     sys: Mutex<SysFallback>,
@@ -111,12 +120,8 @@ pub struct FontDb {
     fallback_snapshot_hook: Mutex<Option<FallbackSnapshotHook>>,
 }
 
-/// The font files outside the font folders that the platform has available, which
-/// [`FontDb::global`]'s scan reads too: on macOS, those CoreText's font manager lists, such as the
-/// fonts font services and font managers register from their own folders. None elsewhere.
-#[cfg(target_os = "macos")]
-use crate::mac_fonts::available_font_files as platform_font_files;
-
+#[cfg(not(target_arch = "wasm32"))]
+mod catalog_faces;
 mod db;
 mod face;
 mod fallback;
@@ -143,10 +148,8 @@ use outline::FlipPen;
 pub use scoped::ScopedFonts;
 #[cfg(all(not(target_arch = "wasm32"), test))]
 use system::file_face_names;
-#[cfg(all(test, not(any(target_os = "macos", windows))))]
-use system::unix_font_dirs;
 #[cfg(not(target_arch = "wasm32"))]
-use system::{CatalogEntry, FileStamp};
+use system::{FileStamp, Listing, ScannedFace};
 pub use system::{ReloadedFonts, system_font_dirs};
 
 impl OutlinePen for FlipPen {

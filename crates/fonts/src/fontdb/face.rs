@@ -32,6 +32,9 @@ pub(super) static BUNDLED: &[&[u8]] = &[
 pub(super) enum FontBytes {
     Static(&'static [u8]),
     Owned(Arc<Vec<u8>>),
+    /// A font file's data as the font catalog loaded it.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    Shared(Arc<[u8]>),
 }
 
 /// Where a face's font came from.
@@ -132,6 +135,7 @@ impl FontFace {
         match &self.bytes {
             FontBytes::Static(b) => b,
             FontBytes::Owned(v) => v.as_slice(),
+            FontBytes::Shared(b) => b,
         }
     }
 
@@ -324,27 +328,24 @@ pub(super) fn enumerate_faces(data: &[u8]) -> Vec<Found> {
         Ok(FileRef::Collection(c)) => c.len().min(MAX_FACES),
         Err(_) => 0,
     };
-    let mut out = Vec::new();
-    for i in 0..count {
-        let Ok(f) = skrifa::FontRef::from_index(data, i) else { continue };
-        let Some((family, style)) = face_names(&f) else { continue };
-        let axes = f.axes();
-        let mut named = Vec::new();
-        for ni in f.named_instances().iter() {
-            let Some(style) = name(&f, &[ni.subfamily_name_id()]) else { continue };
-            if named.iter().any(|(_, s, _): &(u32, String, _)| s.eq_ignore_ascii_case(&style)) {
-                continue;
-            }
-            let coords: Vec<([u8; 4], f32)> = axes.iter().zip(ni.user_coords()).map(|(a, v)| (a.tag().to_be_bytes(), v)).collect();
-            named.push((i, style, coords));
+    (0..count).flat_map(|i| faces_at(data, i)).collect()
+}
+
+/// The faces of face `i` of `data` (see [`enumerate_faces`]).
+pub(super) fn faces_at(data: &[u8], i: u32) -> Vec<Found> {
+    let Ok(f) = skrifa::FontRef::from_index(data, i) else { return Vec::new() };
+    let Some((family, style)) = face_names(&f) else { return Vec::new() };
+    let axes = f.axes();
+    let mut named = Vec::new();
+    for ni in f.named_instances().iter() {
+        let Some(style) = name(&f, &[ni.subfamily_name_id()]) else { continue };
+        if named.iter().any(|(_, s, _): &(u32, String, _)| s.eq_ignore_ascii_case(&style)) {
+            continue;
         }
-        if named.is_empty() {
-            out.push((i, family, style, Vec::new()));
-        } else {
-            out.extend(named.into_iter().map(|(i, s, c)| (i, family.clone(), s, c)));
-        }
+        let coords: Vec<([u8; 4], f32)> = axes.iter().zip(ni.user_coords()).map(|(a, v)| (a.tag().to_be_bytes(), v)).collect();
+        named.push((i, style, coords));
     }
-    out
+    if named.is_empty() { vec![(i, family, style, Vec::new())] } else { named.into_iter().map(|(i, s, c)| (i, family.clone(), s, c)).collect() }
 }
 
 /// The compiled-in Source Sans 3 Regular, for a database that somehow has no faces at all.
@@ -372,6 +373,7 @@ pub(super) fn make_face(
     let data: &[u8] = match &bytes {
         FontBytes::Static(b) => b,
         FontBytes::Owned(v) => v.as_slice(),
+        FontBytes::Shared(b) => b,
     };
     let f = skrifa::FontRef::from_index(data, index).ok()?;
     let settings: Vec<(skrifa::Tag, f32)> = coords.iter().map(|(t, v)| (skrifa::Tag::new(t), *v)).collect();

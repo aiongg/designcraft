@@ -22,7 +22,7 @@ pub(crate) mod find;
 pub use edit::copied_objects_text;
 pub use find::same_find_domain;
 pub(crate) mod flex;
-mod fonts;
+pub(crate) mod fonts;
 pub(crate) mod guides;
 mod index;
 mod inspect;

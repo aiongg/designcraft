@@ -20,9 +20,26 @@ impl DesignApp {
         }
     }
 
+    /// Fonts installed or removed while DesignCraft was in the background (the launcher's Fonts
+    /// tab, the system's font manager): activating the window looks for them on a worker thread,
+    /// and once they are listed the documents missing one of them are composed again.
+    fn follow_installed_fonts(&mut self, ctx: &egui::Context) {
+        let active = ctx.input(|i| i.viewport().focused.unwrap_or(false));
+        if active && !self.window_active {
+            designcraft_fonts::FontDb::window_activated();
+        }
+        self.window_active = active;
+        if designcraft_fonts::FontDb::global().change_listed() {
+            self.session.refresh_fonts();
+            // The font menus list the families now installed too.
+            ctx.request_repaint();
+        }
+    }
+
     /// Work whose identity is a consumed queue item, revision or deadline.
     pub(super) fn logic_tick(&mut self, ctx: &egui::Context) {
         self.update_screenshot_epoch(ctx);
+        self.follow_installed_fonts(ctx);
         self.drain_control(ctx);
         updates_ui::tick(self, ctx);
         if self.fonts_ready && !self.host_order_pending() {
@@ -53,6 +70,8 @@ impl DesignApp {
         }
         if self.egui_ctx.is_none() {
             self.egui_ctx = Some(ctx.clone());
+            let wake = ctx.clone();
+            designcraft_fonts::FontDb::set_change_waker(move || wake.request_repaint());
         }
         crate::keys::note_platform(ctx);
         self.sync_keymap();

@@ -77,6 +77,7 @@ impl DesignApp {
             styled: false,
             fonts_lang: String::new(),
             fonts_system: false,
+            window_active: false,
             restyle: false,
             fonts_ready: false,
             os_documents: Vec::new(),

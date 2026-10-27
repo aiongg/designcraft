@@ -509,6 +509,16 @@ impl Session {
         st.doc = stash;
         st.bump_revision();
     }
+    /// Take the fonts installed or removed since the font database last looked (a rescan on
+    /// window activation, [`designcraft_fonts::FontDb::window_activated`], found them): each open
+    /// document that was missing a font one of them supplies, or used one changed or removed, is
+    /// composed again. Returns how many were; 0 when nothing changed.
+    pub fn refresh_fonts(&mut self) -> usize {
+        if !designcraft_fonts::FontDb::global().fonts_changed() {
+            return 0;
+        }
+        cmd::fonts::refresh(self, designcraft_fonts::FontDb::refresh).1
+    }
     pub fn close_document(&mut self, i: usize) {
         if self.active == Some(i) {
             self.stop_data_preview();

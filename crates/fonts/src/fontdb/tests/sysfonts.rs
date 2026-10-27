@@ -6,64 +6,6 @@ use crate::fontdb::*;
 
 const FAMILY: &str = "Sysfont Sans3";
 
-#[cfg(not(any(target_os = "macos", windows)))]
-mod user_font_dirs {
-    use super::*;
-
-    #[test]
-    fn user_font_dirs_when_xdg_is_absolute() {
-        let home = Path::new("/home/font-user");
-        let xdg = Path::new("/custom/data");
-        let dirs = unix_font_dirs(Some(home), Some(xdg));
-        assert_eq!(dirs, ["/usr/share/fonts", "/usr/local/share/fonts", "/home/font-user/.fonts", "/custom/data/fonts"].map(PathBuf::from));
-    }
-
-    #[test]
-    fn user_font_dirs_when_xdg_is_unset() {
-        let home = Path::new("/home/font-user");
-        let dirs = unix_font_dirs(Some(home), None);
-        assert_eq!(
-            dirs,
-            ["/usr/share/fonts", "/usr/local/share/fonts", "/home/font-user/.fonts", "/home/font-user/.local/share/fonts"].map(PathBuf::from)
-        );
-    }
-
-    #[test]
-    fn user_font_dirs_when_xdg_is_relative() {
-        let home = Path::new("/home/font-user");
-        let xdg = Path::new("relative/data");
-        let dirs = unix_font_dirs(Some(home), Some(xdg));
-        assert_eq!(
-            dirs,
-            ["/usr/share/fonts", "/usr/local/share/fonts", "/home/font-user/.fonts", "/home/font-user/.local/share/fonts"].map(PathBuf::from)
-        );
-    }
-
-    #[test]
-    fn user_font_dirs_when_xdg_is_empty() {
-        let home = Path::new("/home/font-user");
-        let xdg = Path::new("");
-        let dirs = unix_font_dirs(Some(home), Some(xdg));
-        assert_eq!(
-            dirs,
-            ["/usr/share/fonts", "/usr/local/share/fonts", "/home/font-user/.fonts", "/home/font-user/.local/share/fonts"].map(PathBuf::from)
-        );
-    }
-
-    #[test]
-    fn user_font_dirs_when_home_is_unset_and_xdg_is_absolute() {
-        let xdg = Path::new("/custom/data");
-        let dirs = unix_font_dirs(None, Some(xdg));
-        assert_eq!(dirs, ["/usr/share/fonts", "/usr/local/share/fonts", "/custom/data/fonts"].map(PathBuf::from));
-    }
-
-    #[test]
-    fn user_font_dirs_when_home_and_xdg_are_unset() {
-        let dirs = unix_font_dirs(None, None);
-        assert_eq!(dirs, ["/usr/share/fonts", "/usr/local/share/fonts"].map(PathBuf::from));
-    }
-}
-
 /// A bundled Source Sans 3 file renamed [`FAMILY`] (as long as the original name).
 fn renamed(file: &str) -> Vec<u8> {
     let mut data = std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/fonts").join(file)).unwrap();
@@ -207,7 +149,9 @@ fn fonts_the_platform_lists_outside_the_font_folders_are_cataloged_once() {
     let _ = std::fs::remove_dir_all(&service);
     std::fs::create_dir_all(service.join(".r")).unwrap();
     std::fs::write(service.join(".r/.12345"), renamed("SourceSans3-It.ttf")).unwrap();
-    let db = FontDb { font_files: service_files, ..FontDb::with_font_dirs(vec![dir]) };
+    let catalog = craft_font_catalog::Catalog::without_installed_fonts().with_lister(Arc::new(service_files));
+    catalog.set_app_dirs(vec![dir]);
+    let db = FontDb::with_catalog(Arc::new(catalog));
     assert_eq!(db.styles(FAMILY), ["Regular", "Bold", "Italic"]);
     assert_eq!(db.load_system_fonts(), 3, "the font folder's Regular listed again isn't cataloged twice");
     let italic = db.face(FAMILY, "Italic");
@@ -236,8 +180,9 @@ fn a_familys_kind_is_read_without_keeping_it_loaded() {
 #[test]
 fn the_scan_reads_names_without_loading_the_font() {
     let dir = font_dir("names");
-    let names: Vec<(String, String)> = file_face_names(&dir.join("Sysfont-Regular.ttf")).into_iter().map(|f| (f.family, f.style)).collect();
-    assert_eq!(names, [(FAMILY.to_string(), "Regular".to_string())]);
+    let names: Vec<(u32, bool)> =
+        file_face_names(&dir.join("Sysfont-Regular.ttf")).into_iter().map(|f| (f.index, f.aliases.iter().any(|a| a == FAMILY))).collect();
+    assert_eq!(names, [(0, true)]);
     assert!(file_face_names(&dir.join("damaged.ttf")).is_empty());
     assert!(file_face_names(&dir.join("readme.txt")).is_empty());
     assert!(file_face_names(&dir.join("missing.ttf")).is_empty());
@@ -257,8 +202,8 @@ fn faces_without_outlines_are_not_cataloged() {
     std::fs::write(dir.join("hvgl.ttf"), &hvgl).unwrap();
     std::fs::write(dir.join("mixed.ttc"), collection(&[hvgl, regular])).unwrap();
     assert!(file_face_names(&dir.join("hvgl.ttf")).is_empty());
-    let names: Vec<String> = file_face_names(&dir.join("mixed.ttc")).into_iter().map(|f| f.style).collect();
-    assert_eq!(names, ["Regular"]);
+    let faces: Vec<u32> = file_face_names(&dir.join("mixed.ttc")).into_iter().map(|f| f.index).collect();
+    assert_eq!(faces, [1], "the drawable face, by its number in the collection");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -327,6 +272,7 @@ fn a_rescan_does_not_cache_an_older_in_flight_glyph_miss() {
     use std::time::Duration;
 
     let dir = font_dir("rescan-in-flight-ttf");
+    let root = dir.clone();
     let db = Arc::new(FontDb::with_font_dirs(vec![dir.clone()]));
     // Optional craft-fonts must not supply the test glyph from an already loaded face.
     db.faces.write().unwrap().retain(|f| f.family == FALLBACK_FAMILY);
@@ -367,7 +313,7 @@ fn a_rescan_does_not_cache_an_older_in_flight_glyph_miss() {
     assert!(!db.is_loaded(family), "a rescan catalogs the font without loading it");
     // The old miss must not hide the new catalog entry; no second rescan is performed.
     assert_eq!(db.fallback_for(c, 0, None).unwrap().family, family);
-    std::fs::remove_dir_all(db.font_dirs.first().unwrap()).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]

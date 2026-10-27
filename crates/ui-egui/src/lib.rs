@@ -193,6 +193,8 @@ pub struct DesignApp {
     /// The installed CJK faces are among the UI fonts (false while the system fonts are still
     /// being cataloged: the fonts are installed again when they are).
     fonts_system: bool,
+    /// The window had the focus at the last tick: gaining it looks for fonts installed meanwhile.
+    window_active: bool,
     pub restyle: bool,
     fonts_ready: bool,
     /// Files the operating system asked to open (macOS Finder, Dock, Open With), opened once the
