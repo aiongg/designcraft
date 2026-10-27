@@ -366,8 +366,9 @@ fn bits(v: f64) -> [usize; 2] {
 }
 
 fn signature(doc: &Document, story: &Arc<Story>) -> (Vec<usize>, Vec<Arc<Item>>) {
-    // The document's font scope: another document's fonts of the same name set it differently.
-    // Sections name the pages under the frames (page-number and section markers).
+    // The document's font scope and how often its fonts changed: another document's fonts of the
+    // same name set it differently. Sections name the pages under the frames (page-number and
+    // section markers).
     let g = &doc.settings.baseline_grid;
     let mut sig = vec![
         Arc::as_ptr(story) as usize,
@@ -375,6 +376,7 @@ fn signature(doc: &Document, story: &Arc<Story>) -> (Vec<usize>, Vec<Arc<Item>>)
         Arc::as_ptr(&doc.styles) as usize,
         sections_hash(doc) as usize,
         doc.font_scope as usize,
+        if doc.font_scope == 0 { 0 } else { designcraft_fonts::FontDb::global().scope_generation(doc.font_scope) as usize },
         usize::from(g.relative_to == designcraft_doc::GridRelative::TopMargin),
     ];
     sig.extend([g.start, g.increment].into_iter().flat_map(bits));

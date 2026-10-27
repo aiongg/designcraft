@@ -45,7 +45,8 @@ impl FontDb {
         Self {
             faces: RwLock::new(Self::bundled_faces()),
             scopes: RwLock::new(HashMap::new()),
-            document_files: Mutex::new(HashMap::new()),
+            closed_scopes: Mutex::new(HashMap::new()),
+            documents: super::catalog_faces::FaceCache::new(),
             instances: RwLock::new(HashMap::new()),
             outlines: Mutex::new(HashMap::new()),
             catalog,
@@ -64,12 +65,7 @@ impl FontDb {
 
     #[cfg(target_arch = "wasm32")]
     fn bundled_only() -> Self {
-        Self {
-            faces: RwLock::new(Self::bundled_faces()),
-            scopes: RwLock::new(HashMap::new()),
-            instances: RwLock::new(HashMap::new()),
-            outlines: Mutex::new(HashMap::new()),
-        }
+        Self { faces: RwLock::new(Self::bundled_faces()), instances: RwLock::new(HashMap::new()), outlines: Mutex::new(HashMap::new()) }
     }
 
     /// The font files of the faces every database starts with, in order.
@@ -154,8 +150,57 @@ impl FontDb {
     /// What the document with font scope `scope` sees: its own fonts ahead of the shared ones.
     /// Scope 0 (a document without fonts of its own) or a closed scope sees the shared fonts.
     pub fn scoped(&self, scope: u32) -> ScopedFonts<'_> {
-        let own = if scope == 0 { None } else { self.scopes.read().unwrap_or_else(PoisonError::into_inner).get(&scope).cloned() };
-        ScopedFonts { db: self, own }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let own = if scope == 0 { None } else { self.scopes.read().unwrap_or_else(PoisonError::into_inner).get(&scope).cloned() };
+            ScopedFonts { db: self, own: own.as_ref().map(|s| Arc::clone(&s.faces)), scope: own.map(|s| s.catalog) }
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = scope;
+            ScopedFonts { db: self, own: None }
+        }
+    }
+
+    /// How often the fonts of document font scope `scope` changed: the scope's part of the
+    /// catalog's [`craft_font_catalog::Catalog::generation_in`], without the shared generation
+    /// ([`FontDb::refresh`] takes shared changes, and the engine composes again only the documents
+    /// they affect). Layout caches key on it, so one document's fonts loading or closing doesn't
+    /// invalidate another's. A closed scope keeps the value it had when it closed, so the layouts
+    /// composed in it stay cached for the jobs that still hold them. 0 for scope 0 and on wasm.
+    pub fn scope_generation(&self, scope: u32) -> u64 {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if scope == 0 {
+                return 0;
+            }
+            let open = self.scopes.read().unwrap_or_else(PoisonError::into_inner).get(&scope).map(|s| s.catalog);
+            match open {
+                Some(own) => self.own_generation(own),
+                None => self.closed_scopes.lock().unwrap_or_else(PoisonError::into_inner).get(&scope).copied().unwrap_or(0),
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = scope;
+            0
+        }
+    }
+
+    /// The catalog scope `own`'s part of its generation.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn own_generation(&self, own: craft_font_catalog::Scope) -> u64 {
+        // `generation_in` adds the shared generation, which a rescan may move on meanwhile.
+        for _ in 0..8 {
+            let shared = self.catalog.generation();
+            let all = self.catalog.generation_in(own);
+            if self.catalog.generation() == shared {
+                return all.saturating_sub(shared);
+            }
+        }
+        // Rescans kept moving it on: a key that also changes with the shared generation is still
+        // a key, it only lays out again more often.
+        self.catalog.generation_in(own)
     }
 
     /// The shared fonts' family names (see [`ScopedFonts::families`]).
@@ -216,10 +261,22 @@ impl FontDb {
         added
     }
 
-    /// Close a document's font scope: its fonts are no longer found (in it or anywhere). Their
-    /// files stay read, for the document opening again.
+    /// Close a document's font scope: its fonts are no longer found (in it or anywhere), and the
+    /// catalog's scope is removed. The faces made from its files stay, for the document opening
+    /// again. Nothing to do on wasm, which has no document fonts.
     pub fn close_scope(&self, scope: u32) {
-        self.scopes.write().unwrap_or_else(PoisonError::into_inner).remove(&scope);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let closed = self.scopes.write().unwrap_or_else(PoisonError::into_inner).remove(&scope);
+            if let Some(own) = closed {
+                // What the document composed with stays cached for the jobs that still hold it.
+                let generation = self.own_generation(own.catalog);
+                self.closed_scopes.lock().unwrap_or_else(PoisonError::into_inner).insert(scope, generation);
+                self.catalog.remove_scope(own.catalog);
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        let _ = scope;
     }
 
     /// The shared fonts' face for `family` + `style` (see [`ScopedFonts::face`]).

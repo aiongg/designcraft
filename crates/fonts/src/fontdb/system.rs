@@ -4,8 +4,7 @@ use super::catalog_faces::FaceKey;
 use super::db::NEXT_SCOPE;
 #[cfg(not(target_arch = "wasm32"))]
 use super::face::{
-    DocumentFonts, FontBytes, FontFace, FontSource, MAX_DOCUMENT_FONT_BYTES, MAX_DOCUMENT_FONT_FILES, MAX_DOCUMENT_FONTS_TOTAL, enumerate_faces,
-    faces_at, make_face,
+    DocumentFonts, FontBytes, FontFace, FontSource, MAX_DOCUMENT_FONT_BYTES, MAX_DOCUMENT_FONT_FILES, MAX_DOCUMENT_FONTS_TOTAL, faces_at, make_face,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use super::fallback::SYSTEM_FALLBACKS;
@@ -442,11 +441,11 @@ impl FontDb {
     }
 
     /// Load the font files (.ttf, .otf, .ttc, .otc; not in subfolders) of a document's `Document
-    /// Fonts` folder under a new scope, for that document alone: looked up through
+    /// Fonts` folder into a new scope of the catalog, for that document alone: looked up through
     /// [`FontDb::scoped`], they come before the shared faces of the same family and style, until
     /// [`FontDb::close_scope`]. A file loaded before and unchanged since (same length and
-    /// modification time) isn't read again: its faces are shared. The files are untrusted: past
-    /// [`MAX_DOCUMENT_FONT_FILES`] (in name order), files over [`MAX_DOCUMENT_FONT_BYTES`] or past
+    /// modification time) isn't loaded again: its faces are shared, and the catalog reads only its
+    /// tables. The files are untrusted: past [`MAX_DOCUMENT_FONT_FILES`] (in name order), files over [`MAX_DOCUMENT_FONT_BYTES`] or past
     /// [`MAX_DOCUMENT_FONTS_TOTAL`] in all, and files that aren't fonts are skipped with a note. A
     /// missing folder loads nothing (scope 0).
     ///
@@ -477,6 +476,7 @@ impl FontDb {
             }
         }
         files.sort();
+        let scope = self.catalog.new_scope();
         let mut total = 0u64;
         let mut own: Vec<Arc<FontFace>> = Vec::new();
         for (n, path) in files.iter().enumerate() {
@@ -486,20 +486,18 @@ impl FontDb {
             }
             let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
             // The listed length skips oversized files unread.
-            let meta = std::fs::metadata(path).ok();
-            let listed = meta.as_ref().map_or(0, std::fs::Metadata::len);
+            let listed = std::fs::metadata(path).map_or(0, |m| m.len());
             let faces = if listed > MAX_DOCUMENT_FONT_BYTES {
                 Err(too_large())
             } else if total.saturating_add(listed) > MAX_DOCUMENT_FONTS_TOTAL {
                 Err(over_total())
             } else {
-                let modified = meta.and_then(|m| m.modified().ok());
-                self.document_file(path, listed, modified, MAX_DOCUMENT_FONTS_TOTAL.saturating_sub(total))
+                self.document_file(scope, path)
             };
             match faces {
                 Err(r) => out.skipped.push(format!("{name}: {r}")),
-                Ok((faces, len)) => {
-                    total = total.saturating_add(len);
+                Ok(faces) => {
+                    total = total.saturating_add(listed);
                     // A family and style the folder already gave stays with its first file.
                     for f in faces {
                         if !own.iter().any(|o| o.family.eq_ignore_ascii_case(&f.family) && o.style.eq_ignore_ascii_case(&f.style)) {
@@ -512,56 +510,57 @@ impl FontDb {
         for s in &out.skipped {
             log::warn!("{}: {s}", folder.display());
         }
-        if !own.is_empty() {
+        if own.is_empty() {
+            self.catalog.remove_scope(scope);
+        } else {
             out.scope = NEXT_SCOPE.fetch_add(1, Ordering::Relaxed);
             out.faces = own.len();
-            self.scopes.write().unwrap_or_else(PoisonError::into_inner).insert(out.scope, own.into());
+            self.scopes.write().unwrap_or_else(PoisonError::into_inner).insert(out.scope, DocScope { catalog: scope, faces: own.into() });
         }
         out
     }
 
-    /// The faces of the document font file at `path` (`listed` bytes long, modified at
-    /// `modified`): those read before if it hasn't changed since, else read now, within `room`
-    /// bytes of the folder's total → (faces, bytes), or why the file is skipped.
+    /// Add the document font file at `path` to the catalog's `scope`, and make its faces: those
+    /// made before if the file hasn't changed since, else read now (documents open before keep
+    /// the faces they opened with) → the faces, or why the file is skipped.
     #[cfg(not(target_arch = "wasm32"))]
-    fn document_file(
-        &self,
-        path: &std::path::Path,
-        listed: u64,
-        modified: Option<std::time::SystemTime>,
-        room: u64,
-    ) -> Result<(Vec<Arc<FontFace>>, u64), String> {
-        use std::io::Read;
-        if let Some((len, m, faces)) = self.document_files.lock().unwrap_or_else(PoisonError::into_inner).get(path)
-            && (*len, *m) == (listed, modified)
-        {
-            return Ok((faces.clone(), listed));
+    fn document_file(&self, scope: craft_font_catalog::Scope, path: &std::path::Path) -> Result<Vec<Arc<FontFace>>, String> {
+        let limits = craft_font_catalog::Limits {
+            max_file_bytes: MAX_DOCUMENT_FONT_BYTES,
+            max_added_faces: MAX_ADDED_FACES,
+            ..craft_font_catalog::Limits::default()
+        };
+        self.documents.forget_changed(path);
+        let mut infos = self.catalog.add_file_in(scope, path, Source::Document, &limits).map_err(|e| document_font_error(&e))?;
+        // A variable font's named instances share their face's number: its faces are made at once.
+        infos.sort_by_key(|i| i.index);
+        infos.dedup_by_key(|i| i.index);
+        let source = FontSource::Document(path.to_path_buf());
+        let mut faces = Vec::new();
+        for info in &infos {
+            let made = self.documents.get_or_make(&self.catalog, info, |_, data| {
+                // The file may have grown since it was listed.
+                if data.bytes.len() as u64 > MAX_DOCUMENT_FONT_BYTES {
+                    return None;
+                }
+                let faces: Vec<Arc<FontFace>> = faces_at(&data.bytes, data.index)
+                    .into_iter()
+                    .filter_map(|(i, family, style, coords)| {
+                        make_face(FontBytes::Shared(Arc::clone(&data.bytes)), source.clone(), i, family, style, coords)
+                    })
+                    .map(Arc::new)
+                    .collect();
+                (!faces.is_empty()).then_some(faces)
+            });
+            match made {
+                Ok(made) => faces.extend(made.iter().cloned()),
+                Err(e) => log::debug!("{} {}: {e}", info.family, info.style),
+            }
         }
-        // One byte past the limit catches a file that grew since it was listed.
-        let mut data = Vec::new();
-        std::fs::File::open(path)
-            .and_then(|f| f.take(MAX_DOCUMENT_FONT_BYTES + 1).read_to_end(&mut data))
-            .map_err(|e| format!("can't be read ({e})"))?;
-        let len = data.len() as u64;
-        if len > MAX_DOCUMENT_FONT_BYTES {
-            return Err(too_large());
-        }
-        if listed.max(len) > room {
-            return Err(over_total());
-        }
-        let data = Arc::new(data);
-        let faces: Vec<Arc<FontFace>> = enumerate_faces(&data)
-            .into_iter()
-            .filter_map(|(i, family, style, coords)| {
-                make_face(FontBytes::Owned(data.clone()), FontSource::Document(path.to_path_buf()), i, family, style, coords)
-            })
-            .map(Arc::new)
-            .collect();
         if faces.is_empty() {
-            return Err("not a font DesignCraft can read".into());
+            return Err(document_font_error(&craft_font_catalog::FontFileError::NotAFont));
         }
-        self.document_files.lock().unwrap_or_else(PoisonError::into_inner).insert(path.to_path_buf(), (listed, modified, faces.clone()));
-        Ok((faces, len))
+        Ok(faces)
     }
 
     /// Load a system font covering `c` (preferred fallback families first, then any installed
@@ -683,6 +682,32 @@ impl ScopedFonts<'_> {
         }
         #[cfg(target_arch = "wasm32")]
         None
+    }
+}
+
+/// One open document's fonts: the catalog scope its `Document Fonts` folder was added to, and the
+/// faces made from it, in the folder's file order.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone)]
+pub(crate) struct DocScope {
+    pub(super) catalog: craft_font_catalog::Scope,
+    pub(super) faces: Arc<[Arc<FontFace>]>,
+}
+
+/// The most faces added to the catalog in all, every open document's fonts and the bundled ones
+/// included: [`MAX_DOCUMENT_FONT_FILES`] collections of 256 faces each, for a few documents.
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_ADDED_FACES: usize = 1 << 18;
+
+/// Why a document font file is skipped, as the note says it.
+#[cfg(not(target_arch = "wasm32"))]
+fn document_font_error(e: &craft_font_catalog::FontFileError) -> String {
+    use craft_font_catalog::FontFileError;
+    match e {
+        FontFileError::Io(e) => format!("can't be read ({e})"),
+        FontFileError::TooLarge { .. } => too_large(),
+        FontFileError::NotAFont | FontFileError::Gone => "not a font DesignCraft can read".into(),
+        FontFileError::TooManyFaces { max } => format!("more than {max} font faces are open"),
     }
 }
 

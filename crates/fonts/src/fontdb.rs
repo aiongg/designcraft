@@ -77,12 +77,17 @@ impl std::fmt::Debug for FontFace {
 /// each open document's own fonts under its scope (see [`FontDb::scoped`]).
 pub struct FontDb {
     faces: RwLock<Vec<Arc<FontFace>>>,
-    /// Each open document's fonts (its `Document Fonts` folder), by scope.
-    scopes: RwLock<HashMap<u32, Arc<[Arc<FontFace>]>>>,
-    /// The document font files read, by path: (length, modification time, faces). A document
-    /// opened again finds its unchanged files here instead of reading them again.
+    /// Each open document's fonts (its `Document Fonts` folder), by scope: a scope of the catalog
+    /// and the faces made from it.
     #[cfg(not(target_arch = "wasm32"))]
-    document_files: Mutex<HashMap<std::path::PathBuf, (u64, Option<std::time::SystemTime>, Vec<Arc<FontFace>>)>>,
+    scopes: RwLock<HashMap<u32, DocScope>>,
+    /// The [`FontDb::scope_generation`] of each closed scope, as it was when it closed.
+    #[cfg(not(target_arch = "wasm32"))]
+    closed_scopes: Mutex<HashMap<u32, u64>>,
+    /// The faces made from document font files, by file and face index. A document opened again
+    /// finds the faces of its unchanged files here instead of reading them again.
+    #[cfg(not(target_arch = "wasm32"))]
+    documents: catalog_faces::FaceCache<Vec<Arc<FontFace>>>,
     /// Variable font instances (`Style {wght:650}`), made on first use, by base face and style.
     instances: RwLock<HashMap<(u32, String), Arc<FontFace>>>,
     outlines: Mutex<HashMap<(u32, u32), Arc<BezPath>>>,
@@ -149,7 +154,7 @@ pub use scoped::ScopedFonts;
 #[cfg(all(not(target_arch = "wasm32"), test))]
 use system::file_face_names;
 #[cfg(not(target_arch = "wasm32"))]
-use system::{FileStamp, Listing, ScannedFace};
+use system::{DocScope, FileStamp, Listing, ScannedFace};
 pub use system::{ReloadedFonts, system_font_dirs};
 
 impl OutlinePen for FlipPen {

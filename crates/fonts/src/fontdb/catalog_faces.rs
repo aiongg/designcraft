@@ -156,6 +156,27 @@ impl<F> FaceCache<F> {
         state.stale.retain(|_, (old, _)| old.strong_count() > 0);
         gone
     }
+
+    /// Let go of the faces made from the font file at `path` if it changed (its length or
+    /// modification time) since they were made, and return them: the next
+    /// [`FaceCache::get_or_make`] reads the file as it is now. For faces [`FaceCache::refresh`]
+    /// can't vouch for: those of files added to a [`craft_font_catalog::Scope`], which the
+    /// catalog's shared listing doesn't hold.
+    pub fn forget_changed(&self, path: &Path) -> Vec<(FaceKey, Arc<F>)> {
+        let now = stamp(path);
+        let mut state = self.lock();
+        let changed: Vec<FaceKey> =
+            state.faces.iter().filter(|(k, c)| matches!(k, FaceKey::File(p, _) if p == path) && c.stamp != now).map(|(k, _)| k.clone()).collect();
+        let mut gone = Vec::new();
+        for key in changed {
+            if let Some(c) = state.faces.remove(&key) {
+                state.stale.insert(path.to_path_buf(), (Arc::downgrade(&c.bytes), None));
+                gone.push((key, c.face));
+            }
+        }
+        state.stale.retain(|_, (old, _)| old.strong_count() > 0);
+        gone
+    }
 }
 
 fn read_file(path: &Path) -> Result<Vec<u8>, FontFileError> {

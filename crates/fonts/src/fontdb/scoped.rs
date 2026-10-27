@@ -12,6 +12,9 @@ pub struct ScopedFonts<'a> {
     pub(super) db: &'a FontDb,
     /// The document's own faces, in the folder's file order (none without a scope).
     pub(super) own: Option<Arc<[Arc<FontFace>]>>,
+    /// The catalog scope they are in.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) scope: Option<craft_font_catalog::Scope>,
 }
 
 impl ScopedFonts<'_> {
@@ -274,6 +277,14 @@ impl ScopedFonts<'_> {
         let named = |ps: Option<&str>| ps.is_some_and(|ps| ps.eq_ignore_ascii_case(name));
         if let Some(f) = self.own().iter().chain(self.db.read_faces().iter()).find(|f| named(f.postscript_name())) {
             return Some((f.family.clone(), f.style.clone()));
+        }
+        // The catalog knows the document's faces by their named instances' PostScript names too.
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(scope) = self.scope
+            && let Some(info) = self.db.catalog.by_postscript_name_in(scope, name).filter(|i| i.source == craft_font_catalog::Source::Document)
+            && self.own().iter().any(|f| f.source.path() == info.path.as_deref() && f.index == info.index)
+        {
+            return Some((info.family, info.style));
         }
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(c) = self.db.read_catalog().iter().find(|c| named(c.postscript.as_deref())) {

@@ -1,6 +1,6 @@
-//! Document fonts: the fonts in a `Document Fonts` folder beside a document, loaded for that
-//! document alone (its scope) ahead of the installed fonts of the same name; damaged, oversized
-//! and surplus files are skipped.
+//! Document fonts: the fonts in a `Document Fonts` folder beside a document, loaded into a font
+//! catalog scope for that document alone, ahead of the installed fonts of the same name; damaged,
+//! oversized and surplus files are skipped.
 
 use std::path::{Path, PathBuf};
 
@@ -131,6 +131,43 @@ fn each_scope_sees_its_own_fonts_only() {
     assert!(in_b.fallback_for('\u{E123}', exclude, None).is_some_and(|f| f.family == FAMILY));
     let _ = std::fs::remove_dir_all(&a);
     let _ = std::fs::remove_dir_all(&b);
+}
+
+#[test]
+fn a_document_scope_wins_in_its_document_alone_until_it_closes() {
+    use craft_font_catalog::Source;
+    const FAMILY: &str = "DocFont Catalog Scope";
+    let root = temp_dir("catalog-scope");
+    let (system, a, b) = (root.join("system"), root.join("a"), root.join("b"));
+    for dir in [&system, &a, &b] {
+        std::fs::create_dir_all(dir).unwrap();
+    }
+    write_font(&system, "installed.ttf", FAMILY, &['i']);
+    write_font(&a, "a.ttf", FAMILY, &['a']);
+    write_font(&b, "b.ttf", "DocFont Catalog Other", &['b']);
+    let db = FontDb::with_font_dirs(vec![system]);
+    let (ra, rb) = (db.load_document_fonts(&a, &|_| Ok(())), db.load_document_fonts(&b, &|_| Ok(())));
+    assert!(ra.scope != 0 && rb.scope != 0 && ra.scope != rb.scope);
+
+    let in_a = db.scoped(ra.scope).face(FAMILY, "Regular");
+    assert!(in_a.covers('a') && matches!(in_a.source, FontSource::Document(_)), "A's own face wins over the installed one");
+    let in_b = db.scoped(rb.scope).face(FAMILY, "Regular");
+    assert!(in_b.covers('i') && matches!(in_b.source, FontSource::Installed(_)), "B sees the installed face, not A's");
+    // The catalog holds A's face in A's scope alone.
+    let scope_a = db.scopes.read().unwrap().get(&ra.scope).map(|s| s.catalog).unwrap();
+    assert_eq!(db.catalog.resolve_in(scope_a, FAMILY, "Regular").map(|(f, _)| f.source), Some(Source::Document));
+    assert_ne!(db.catalog.resolve(FAMILY, "Regular").map(|(f, _)| f.source), Some(Source::Document));
+    assert_eq!(db.scoped(ra.scope).postscript_face("DocFontCatalogScope-Regular"), Some((FAMILY.to_string(), "Regular".to_string())));
+
+    // Layout keys on each scope's own changes: closing A leaves B's alone.
+    let (ga, gb) = (db.scope_generation(ra.scope), db.scope_generation(rb.scope));
+    assert!(ga != 0 && gb != 0 && ga != gb, "{ga} {gb}");
+    db.close_scope(ra.scope);
+    assert_eq!(db.scope_generation(ra.scope), ga, "what A composed stays cached for jobs still holding it");
+    assert_eq!(db.scope_generation(rb.scope), gb);
+    assert!(db.scoped(ra.scope).face(FAMILY, "Regular").covers('i'), "a closed scope sees the shared fonts");
+    assert_ne!(db.catalog.resolve_in(scope_a, FAMILY, "Regular").map(|(f, _)| f.source), Some(Source::Document), "the catalog's scope is removed");
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test]
