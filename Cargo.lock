@@ -1020,7 +1020,7 @@ dependencies = [
 [[package]]
 name = "craft-dialogs"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs?rev=e5c2d2cdaee63dd1b3a4a5ce4ba56b72578368e6#e5c2d2cdaee63dd1b3a4a5ce4ba56b72578368e6"
+source = "git+https://github.com/aiongg/craft-libs?rev=8b16fc085e305a30f878ab00f8363ea24a134e23#8b16fc085e305a30f878ab00f8363ea24a134e23"
 dependencies = [
  "block2 0.6.2",
  "objc2 0.6.5",
