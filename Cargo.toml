@@ -101,6 +101,9 @@ egui_kittest = "0.37"
 # Monotonic clock on native and web (`Instant`); screenshot settlement must not use wall time.
 web-time = "1"
 rfd = "0.17"
+# Native file and message dialogs that never block the event loop (craft-libs).
+craft-dialogs = { git = "https://github.com/aiongg/craft-libs", rev = "7c99276b8cefdeb0dd905784f6bc7cfb83c4c53b" }
+raw-window-handle = "0.6"
 arboard = { version = "3.6", default-features = false }
 
 [workspace.lints.rust]

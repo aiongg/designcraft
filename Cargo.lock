@@ -1018,6 +1018,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-dialogs"
+version = "0.1.0"
+source = "git+https://github.com/aiongg/craft-libs?rev=7c99276b8cefdeb0dd905784f6bc7cfb83c4c53b#7c99276b8cefdeb0dd905784f6bc7cfb83c4c53b"
+dependencies = [
+ "block2 0.6.2",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "raw-window-handle",
+ "rfd",
+]
+
+[[package]]
 name = "craft-docpath"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=92d392cff132eaf53e13afff77f38b5c11b73aa0#92d392cff132eaf53e13afff77f38b5c11b73aa0"
@@ -1595,6 +1608,7 @@ dependencies = [
 name = "designcraft-ui-egui"
 version = "0.14.0"
 dependencies = [
+ "craft-dialogs",
  "craft-keymap",
  "craft-prepress",
  "craft-ui",
@@ -1612,6 +1626,7 @@ dependencies = [
  "egui",
  "egui_kittest",
  "log",
+ "raw-window-handle",
  "serde",
  "serde_json",
  "tempfile",
