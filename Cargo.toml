@@ -102,7 +102,7 @@ egui_kittest = "0.37"
 web-time = "1"
 rfd = "0.17"
 # Native file and message dialogs that never block the event loop (craft-libs).
-craft-dialogs = { git = "https://github.com/aiongg/craft-libs", rev = "401d84b2f243be7c61b6d0001905f4ff071677ed" }
+craft-dialogs = { git = "https://github.com/storytold/craft-libs", rev = "1a11a4897865f7410c40d25ca6e452ce399a1a2c" }
 raw-window-handle = "0.6"
 arboard = { version = "3.6", default-features = false }
 
