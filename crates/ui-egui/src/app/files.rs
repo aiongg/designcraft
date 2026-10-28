@@ -9,6 +9,7 @@ use crate::test_window;
 impl DesignApp {
     /// Ask the host for a file to open (`open`) or place (`place`). A native dialog answers on a
     /// later frame ([`Self::open_picked`]); in a browser the file arrives through the inbox.
+    #[track_caller]
     pub fn pick_and_open(&mut self, purpose: &str) -> Result<Value, String> {
         if let Some(open) = self.services.open_async.as_mut() {
             let request = ImportRequest { purpose: purpose.into(), target: self.session.active().map(|d| d.uid) };
@@ -41,6 +42,7 @@ impl DesignApp {
     /// Load Styles: ask the host for a document whose styles to load; `kind` is `paragraph`,
     /// `character` or empty for both. A native dialog's answer opens the dialog that chooses
     /// among the file's styles; in a browser they all load when the file arrives.
+    #[track_caller]
     pub fn pick_styles(&mut self, kind: &str) -> Result<Value, String> {
         designcraft_engine::cmd::has_doc(&self.session)?;
         if let Some(open) = self.services.open_async.as_mut() {

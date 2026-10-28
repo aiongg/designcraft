@@ -26,13 +26,38 @@ pub(crate) enum Bound {
     App,
 }
 
-/// A dialog's continuation: the document it was asked for and what its answer does.
+/// Which dialog was asked for, by whom and for which document. Asking again with all three the
+/// same (File › Open chosen twice) brings the open panel to the front instead of queueing a
+/// second one; anything else queues.
 #[cfg(not(target_arch = "wasm32"))]
-pub struct Asked {
+#[derive(Clone, PartialEq)]
+pub(crate) struct AskKey {
+    request: craft_dialogs::Request,
     /// The document active when the dialog was asked for, when the answer depends on it.
     doc: Option<u64>,
-    request: craft_dialogs::Request,
+    /// The code that asked (`#[track_caller]` through the asking helpers): Place, Place with
+    /// Options and Choose Image share one dialog but not what they do with its answer.
+    origin: &'static std::panic::Location<'static>,
+}
+
+/// A dialog's continuation: what it was asked for and what its answer does.
+#[cfg(not(target_arch = "wasm32"))]
+pub struct Asked {
+    key: AskKey,
+    /// The egui dialog open when it was asked for (Color Settings, Find): its answer may update or
+    /// replace that one, but waits while any other is open.
+    dialog: Option<String>,
     step: Step,
+}
+
+/// An answer waiting for the egui dialog opened since it was asked for to close, so it doesn't
+/// replace it (an unsaved-changes question, Preferences with unsaved edits).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) struct Held {
+    doc: Option<u64>,
+    dialog: Option<String>,
+    then: Then,
+    path: String,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -70,6 +95,7 @@ pub(crate) fn new_dialogs(ctx: std::sync::Arc<std::sync::OnceLock<egui::Context>
 impl DesignApp {
     /// Ask for a file to open for `purpose` (`open`, `place`, `relink`…: it sets the file types).
     /// `then` runs with its path on a later frame; Cancel runs nothing.
+    #[track_caller]
     pub(crate) fn ask_open(
         &mut self,
         purpose: &str,
@@ -95,6 +121,7 @@ impl DesignApp {
     /// Ask where to save `name`: beside the active document once it has been saved, else in the
     /// folder of the last file saved or exported (#1653). `then` runs with the path on a later
     /// frame; Cancel runs nothing. In a browser the name is the download's and `then` runs now.
+    #[track_caller]
     pub(crate) fn ask_save(
         &mut self,
         name: &str,
@@ -144,24 +171,27 @@ impl DesignApp {
         }
     }
 
-    /// Queues `dialog` unless the same one is already showing or waiting: choosing File › Open
-    /// again while its panel is up must not show a second one.
+    /// Queues `dialog` unless the same code already asked for the same one for the same document
+    /// and it is still showing or waiting: choosing File › Open again while its panel is up brings
+    /// that panel to the front instead of showing a second one.
     #[cfg(not(target_arch = "wasm32"))]
+    #[track_caller]
     fn ask_file(&mut self, dialog: craft_dialogs::FileDialog, bound: Bound, step: Step) {
-        let request = craft_dialogs::Request::File(dialog.clone());
-        if self.asked.contains(&request) {
+        let key =
+            AskKey { request: craft_dialogs::Request::File(dialog.clone()), doc: self.bound_doc(bound), origin: std::panic::Location::caller() };
+        if self.asked.contains(&key) {
             self.file_dialogs.raise();
             return;
         }
-        self.asked.push(request.clone());
-        let doc = self.bound_doc(bound);
-        self.file_dialogs.ask(dialog, Asked { doc, request, step });
+        self.asked.push(key.clone());
+        let dialog_open = self.ui.dialog.as_ref().map(|d| d.id.clone());
+        self.file_dialogs.ask(dialog, Asked { key, dialog: dialog_open, step });
     }
 
-    /// A dialog is showing or waiting to show, or its answer hasn't been handled yet.
+    /// A dialog is showing or waiting to show, or its answer hasn't run yet.
     pub(crate) fn file_dialogs_pending(&self) -> bool {
         #[cfg(not(target_arch = "wasm32"))]
-        return !self.asked.is_empty();
+        return !self.asked.is_empty() || !self.held_answers.is_empty();
         #[cfg(target_arch = "wasm32")]
         false
     }
@@ -181,32 +211,37 @@ impl DesignApp {
         self.file_dialogs.show_pending(parent);
     }
 
-    /// Runs the continuations of the dialogs that have answered.
+    /// Runs the continuations of the dialogs that have answered, and of answers held until the
+    /// egui dialog in their way has closed.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn handle_file_dialog_answers(&mut self) {
         use craft_dialogs::{Answer, MessageResult};
+        for held in std::mem::take(&mut self.held_answers) {
+            self.continue_in(held);
+        }
         for (asked, answer) in self.file_dialogs.take_answers() {
-            let Asked { doc, request, step } = asked;
-            if let Some(i) = self.asked.iter().position(|r| *r == request) {
+            let Asked { key, dialog, step } = asked;
+            if let Some(i) = self.asked.iter().position(|k| *k == key) {
                 self.asked.remove(i);
             }
+            let doc = key.doc;
             match (step, answer) {
                 (_, Answer::Unavailable(why)) => self.status_error(DIALOG_UNAVAILABLE, why),
                 (Step::Open(then), Answer::Paths(paths)) => {
                     if let Some(path) = paths.into_iter().next() {
-                        self.continue_in(doc, then, path.to_string_lossy().to_string());
+                        self.continue_in(Held { doc, dialog, then, path: path.to_string_lossy().to_string() });
                     }
                 }
                 (Step::Save { ext, then }, Answer::Paths(paths)) => {
                     let Some(picked) = paths.into_iter().next() else { continue };
                     let path = picked_save_path(picked.clone(), ext.as_deref());
                     if path != picked && path.exists() {
-                        self.ask_replace(doc, path, then);
+                        self.ask_replace(key, dialog, path, then);
                     } else {
-                        self.saved_to(doc, path.to_string_lossy().to_string(), then);
+                        self.saved_to(Held { doc, dialog, then, path: path.to_string_lossy().to_string() });
                     }
                 }
-                (Step::Replace { path, then }, Answer::Message(MessageResult::Yes)) => self.saved_to(doc, path, then),
+                (Step::Replace { path, then }, Answer::Message(MessageResult::Yes)) => self.saved_to(Held { doc, dialog, then, path }),
                 // Cancel, or No to replacing the file: nothing happens.
                 _ => {}
             }
@@ -216,7 +251,7 @@ impl DesignApp {
     /// The extension added to the name typed names another file than the one the dialog checked,
     /// so replacing an existing one asks again.
     #[cfg(not(target_arch = "wasm32"))]
-    fn ask_replace(&mut self, doc: Option<u64>, path: std::path::PathBuf, then: Then) {
+    fn ask_replace(&mut self, key: AskKey, dialog: Option<String>, path: std::path::PathBuf, then: Then) {
         let lang = &self.ui.language;
         let file = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
         let message = craft_dialogs::Message {
@@ -225,25 +260,31 @@ impl DesignApp {
             description: crate::i18n::tr(lang, "“{file}” already exists. Do you want to replace it?").replace("{file}", &file),
             buttons: craft_dialogs::MessageButtons::YesNo,
         };
-        let request = craft_dialogs::Request::Message(message.clone());
-        self.asked.push(request.clone());
+        let key = AskKey { request: craft_dialogs::Request::Message(message.clone()), ..key };
+        self.asked.push(key.clone());
         let path = path.to_string_lossy().to_string();
-        self.file_dialogs.ask_message(message, Asked { doc, request, step: Step::Replace { path, then } });
+        self.file_dialogs.ask_message(message, Asked { key, dialog, step: Step::Replace { path, then } });
     }
 
     /// A save path chosen: its folder is where the next save dialog starts.
     #[cfg(not(target_arch = "wasm32"))]
-    fn saved_to(&mut self, doc: Option<u64>, path: String, then: Then) {
-        if let Some(folder) = folder_of(&path) {
+    fn saved_to(&mut self, answer: Held) {
+        if let Some(folder) = folder_of(&answer.path) {
             self.ui.last_save_folder = Some(folder.to_string_lossy().to_string());
         }
-        self.continue_in(doc, then, path);
+        self.continue_in(answer);
     }
 
-    /// Runs `then` in the document the dialog was asked for, made active again if the user moved
-    /// to another meanwhile; nothing runs once it has closed.
+    /// Runs the answer's continuation in the document the dialog was asked for, made active again
+    /// if the user moved to another meanwhile; nothing runs once it has closed. While an egui
+    /// dialog opened since the asking is up, the answer waits for it to close.
     #[cfg(not(target_arch = "wasm32"))]
-    fn continue_in(&mut self, doc: Option<u64>, then: Then, path: String) {
+    fn continue_in(&mut self, answer: Held) {
+        if self.ui.dialog.as_ref().is_some_and(|d| Some(&d.id) != answer.dialog.as_ref()) {
+            self.held_answers.push(answer);
+            return;
+        }
+        let Held { doc, then, path, .. } = answer;
         if let Some(uid) = doc {
             let Some(index) = self.session.documents().iter().position(|d| d.uid == uid) else {
                 self.status(crate::i18n::tr(&self.ui.language, "Cancelled: the document the dialog was for has closed"));
@@ -496,6 +537,48 @@ mod tests {
         let gone = folder.join(format!("designcraft-gone-{}", std::process::id())).join("Brochure.pdf");
         assert_eq!(save_dialog_start(&gone.to_string_lossy()), (None, "Brochure.pdf".to_string()), "a folder deleted since: the system's own");
         assert_eq!(save_dialog_start("Untitled 1.2 Folder"), (None, "Untitled 1.2 Folder".to_string()), "a bare name: the system's own");
+    }
+
+    /// Place, Graphic Cell and Choose Image share the Place dialog, but each keeps its own
+    /// request, as does Place asked for another document; Place asked again for the same one
+    /// doesn't queue a second dialog.
+    #[test]
+    fn different_askers_and_documents_queue_their_own_dialogs() {
+        let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.answer_dialogs(answer_with(None));
+        app.run("file.new", serde_json::json!({})).unwrap();
+        app.run("app.placeDialog", serde_json::json!({})).unwrap();
+        app.run("app.graphicCell", serde_json::json!({})).unwrap();
+        assert_eq!(app.file_dialogs.queued(), 2);
+        app.run("file.new", serde_json::json!({})).unwrap();
+        app.run("app.placeDialog", serde_json::json!({})).unwrap();
+        assert_eq!(app.file_dialogs.queued(), 3);
+        app.run("app.placeDialog", serde_json::json!({})).unwrap();
+        assert_eq!(app.file_dialogs.queued(), 3);
+    }
+
+    /// An answer that arrives while an egui dialog opened since is up (Preferences, an
+    /// unsaved-changes question) waits for it to close instead of replacing it.
+    #[test]
+    fn an_answer_waits_for_a_dialog_opened_after_the_asking() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("Held.designcraft");
+        let mut source = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        source.run("file.new", serde_json::json!({})).unwrap();
+        source.run("file.saveAs", serde_json::json!({"path": path.to_string_lossy()})).unwrap();
+
+        let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.answer_dialogs(answer_with(Some(path.to_string_lossy().to_string())));
+        app.run("app.openDialog", serde_json::json!({})).unwrap();
+        app.ui.dialog = Some(crate::dialogs::Dialog::new("preferences", serde_json::json!({})));
+        app.settle_dialogs();
+        assert!(app.session.documents().is_empty(), "the answer waits");
+        assert_eq!(app.ui.dialog.as_ref().map(|d| d.id.as_str()), Some("preferences"));
+        assert!(app.file_dialogs_pending(), "Quit still sees the answer coming");
+        app.ui.dialog = None;
+        app.handle_file_dialog_answers();
+        assert_eq!(app.session.documents().len(), 1);
+        assert!(!app.file_dialogs_pending());
     }
 
     /// File › Open without a path asks and returns at once; the document opens on a later frame,

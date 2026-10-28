@@ -126,7 +126,10 @@ pub struct DesignApp {
     pub(crate) file_dialogs: app::file_dialogs::Dialogs,
     /// The dialogs asked for and not yet answered, in order: the same one isn't asked twice.
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) asked: Vec<craft_dialogs::Request>,
+    pub(crate) asked: Vec<app::file_dialogs::AskKey>,
+    /// Dialog answers waiting for an egui dialog to close.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) held_answers: Vec<app::file_dialogs::Held>,
     /// The context the dialogs' wake-up repaints, once the first frame has run.
     #[cfg(not(target_arch = "wasm32"))]
     dialog_wake: std::sync::Arc<std::sync::OnceLock<egui::Context>>,

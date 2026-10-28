@@ -44,6 +44,8 @@ impl DesignApp {
             #[cfg(not(target_arch = "wasm32"))]
             asked: Vec::new(),
             #[cfg(not(target_arch = "wasm32"))]
+            held_answers: Vec::new(),
+            #[cfg(not(target_arch = "wasm32"))]
             dialog_wake,
             session,
             ui: UiState::default(),

@@ -457,6 +457,37 @@ fn quitting_save_failure_after_discard_keeps_documents_and_can_retry() {
     assert_eq!(dialog_uid(&app), Some(app.session.documents()[0].uid));
 }
 
+/// Quit › Save on a document never saved, then Cancel in the save dialog: Quit stops and the
+/// document stays open with its changes.
+#[test]
+fn quit_save_cancelled_in_the_save_dialog_stops_quitting() {
+    let ctx = egui::Context::default();
+    let mut app = app_with_unsaved_document();
+    app.answer_dialogs(crate::app::file_dialogs::testing::answer_with(None));
+    quit_frame(&mut app, &ctx, true);
+    dialogs::confirm(&mut app).unwrap(); // Save
+    assert!(!quit_frame(&mut app, &ctx, false).contains(&egui::ViewportCommand::Close), "Quit waits for the save dialog");
+    assert!(app.quitting.is_some());
+    app.settle_dialogs();
+    assert!(!quit_frame(&mut app, &ctx, false).contains(&egui::ViewportCommand::Close));
+    assert!(app.quitting.is_none(), "Quit stopped");
+    assert_eq!(app.session.documents().len(), 1);
+    assert!(app.session.documents()[0].is_dirty());
+}
+
+/// Close › Save on a document never saved, then Cancel in the save dialog: the document stays
+/// open with its changes.
+#[test]
+fn close_save_cancelled_in_the_save_dialog_keeps_the_document_open() {
+    let mut app = app_with_unsaved_document();
+    app.answer_dialogs(crate::app::file_dialogs::testing::answer_with(None));
+    crate::menus::close_document(&mut app, Some(0));
+    dialogs::confirm(&mut app).unwrap(); // Save
+    app.settle_dialogs();
+    assert_eq!(app.session.documents().len(), 1);
+    assert!(app.session.documents()[0].is_dirty());
+}
+
 #[test]
 fn quitting_save_then_later_cancel_keeps_saved_document_open() {
     let ctx = egui::Context::default();

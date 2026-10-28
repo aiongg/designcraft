@@ -286,6 +286,7 @@ pub fn tags(app: &mut DesignApp, ui: &mut egui::Ui) {
 
 /// Asks for a file for `purpose`, then runs the command `command(path)` names; a failure shows
 /// in the status line as `feature`'s.
+#[track_caller]
 fn ask_then_run(app: &mut DesignApp, purpose: &str, feature: &'static str, command: impl FnOnce(String) -> (&'static str, Value) + 'static) {
     let asked = app.ask_open(purpose, Bound::Document, move |app, path| {
         let (id, params) = command(path);

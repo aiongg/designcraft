@@ -19,12 +19,14 @@ fn toggle_tabs_panel(app: &mut DesignApp) {
 
 /// Asks for a file to open for `purpose`, then runs the UI command `id` again with `p` and the
 /// chosen file under `key`.
+#[track_caller]
 fn rerun_with_path(app: &mut DesignApp, purpose: &str, id: &str, p: &Value, key: &'static str) -> Result<Value, String> {
     let (id, p) = (id.to_string(), p.clone());
     app.ask_open(purpose, Bound::Document, move |app, path| run_ui(app, &id, &with_path(&p, key, path)).unwrap_or(Ok(Value::Null)))
 }
 
 /// File › Save As: asks where, saves there, then runs `after`.
+#[track_caller]
 fn save_as_dialog(app: &mut DesignApp, after: impl FnOnce(&mut DesignApp) -> Result<Value, String> + 'static) -> Result<Value, String> {
     let name = app.session.active().map(|d| format!("{}.designcraft", d.doc.title)).unwrap_or_default();
     app.ask_save(&name, Bound::Document, move |app, path| {
@@ -35,6 +37,7 @@ fn save_as_dialog(app: &mut DesignApp, after: impl FnOnce(&mut DesignApp) -> Res
 
 /// Save the active document (a download in a browser; Save As for one never saved), then run
 /// `after` once it is written. A save dialog answers on a later frame; Cancel runs nothing.
+#[track_caller]
 pub(crate) fn save_then(app: &mut DesignApp, after: impl FnOnce(&mut DesignApp) -> Result<Value, String> + 'static) -> Result<Value, String> {
     if app.services.download.is_some() {
         download_document(app)?;

@@ -12,6 +12,7 @@ pub(super) fn download_document(app: &mut DesignApp) -> Result<Value, String> {
 }
 
 /// Asks where to save `name`, then runs `export` with `p` and the chosen path.
+#[track_caller]
 fn ask_then_export(
     app: &mut DesignApp,
     name: &str,
