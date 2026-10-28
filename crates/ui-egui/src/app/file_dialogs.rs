@@ -150,6 +150,7 @@ impl DesignApp {
     fn ask_file(&mut self, dialog: craft_dialogs::FileDialog, bound: Bound, step: Step) {
         let request = craft_dialogs::Request::File(dialog.clone());
         if self.asked.contains(&request) {
+            self.file_dialogs.raise();
             return;
         }
         self.asked.push(request.clone());
